@@ -121,7 +121,7 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
         let iy = fy.floor() as i32;
         let sx = fx - ix as f64; // fractional x
         let sy = fy - iy as f64; // fractional y
-        // Distribute weight to 4 corners
+                                 // Distribute weight to 4 corners
         for (dx, wx) in [(0i32, 1.0 - sx), (1, sx)] {
             for (dy, wy) in [(0i32, 1.0 - sy), (1, sy)] {
                 let gx = ix + dx;
@@ -145,14 +145,9 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
                 for dy in -radius_y..=radius_y {
                     let nx = bx as i32 + dx;
                     let ny = by as i32 + dy;
-                    if nx >= 0
-                        && (nx as usize) < grid_size
-                        && ny >= 0
-                        && (ny as usize) < grid_size
+                    if nx >= 0 && (nx as usize) < grid_size && ny >= 0 && (ny as usize) < grid_size
                     {
-                        let w = (-(dx * dx) as f64 / sigma2_x
-                            - (dy * dy) as f64 / sigma2_y)
-                            .exp();
+                        let w = (-(dx * dx) as f64 / sigma2_x - (dy * dy) as f64 / sigma2_y).exp();
                         smoothed[nx as usize][ny as usize] += c * w;
                     }
                 }
@@ -333,15 +328,11 @@ where
 
     // ── points (data order, matching R's plot() behavior) ─────────────
     // R draws points in data order with pch=20 cex=0.25 → tiny filled dots.
-     // R's pch=20 with cex=0.25 draws tiny filled circles.
+    // R's pch=20 with cex=0.25 draws tiny filled circles.
     // Circle radius 1 at our scale gives the closest match.
     for i in 0..xd.len() {
         let c = density_color(densities[i]);
-        chart.draw_series(std::iter::once(Circle::new(
-            (xd[i], yd[i]),
-            1,
-            c.filled(),
-        )))?;
+        chart.draw_series(std::iter::once(Circle::new((xd[i], yd[i]), 1, c.filled())))?;
     }
 
     // ── fit curve: R uses col='black', lwd=2, lty=3 (dotted) ──────────
@@ -973,7 +964,7 @@ mod tests {
         assert_eq!((c0.0, c0.1, c0.2), (0, 255, 255)); // cyan
         let c1 = density_color(1.0);
         assert_eq!((c1.0, c1.1, c1.2), (255, 0, 0)); // red
-        // Mid-point should be green
+                                                     // Mid-point should be green
         let c_mid = density_color(0.5);
         assert_eq!((c_mid.0, c_mid.1, c_mid.2), (0, 255, 0)); // green
     }

@@ -554,39 +554,46 @@ pub fn count_reads(
             //
             // If only one mate has gene hits (the other overlaps nothing),
             // we use that mate's gene set directly.
-            let combined_genes: Vec<String> = if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
-                Vec::new()
-            } else if mate_info.gene_hits.is_empty() {
-                gene_hits
-            } else if gene_hits.is_empty() {
-                mate_info.gene_hits
-            } else {
-                // Both mates have gene hits - use INTERSECTION
-                let set_a: std::collections::HashSet<&String> = mate_info.gene_hits.iter().collect();
-                let intersection: Vec<String> = gene_hits
-                    .iter()
-                    .filter(|g| set_a.contains(g))
-                    .cloned()
-                    .collect();
-                if intersection.is_empty() {
-                    // Mates disagree on gene assignment - treat as ambiguous
-                    // by returning the union (which will have len > 1)
-                    let mut union = mate_info.gene_hits;
-                    union.extend(gene_hits);
-                    union.sort_unstable();
-                    union.dedup();
-                    union
+            let combined_genes: Vec<String> =
+                if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
+                    Vec::new()
+                } else if mate_info.gene_hits.is_empty() {
+                    gene_hits
+                } else if gene_hits.is_empty() {
+                    mate_info.gene_hits
                 } else {
-                    intersection
-                }
-            };
+                    // Both mates have gene hits - use INTERSECTION
+                    let set_a: std::collections::HashSet<&String> =
+                        mate_info.gene_hits.iter().collect();
+                    let intersection: Vec<String> = gene_hits
+                        .iter()
+                        .filter(|g| set_a.contains(g))
+                        .cloned()
+                        .collect();
+                    if intersection.is_empty() {
+                        // Mates disagree on gene assignment - treat as ambiguous
+                        // by returning the union (which will have len > 1)
+                        let mut union = mate_info.gene_hits;
+                        union.extend(gene_hits);
+                        union.sort_unstable();
+                        union.dedup();
+                        union
+                    } else {
+                        intersection
+                    }
+                };
 
             // Assign to gene if unambiguous (exactly one gene from combined overlaps)
             if combined_genes.is_empty() {
                 stat_no_features += 1;
             } else if combined_genes.len() > 1 {
                 stat_ambiguous += 1;
-            } else if assign_fragment_to_gene(&combined_genes, &mut gene_counts, frag_is_dup, frag_is_multi) {
+            } else if assign_fragment_to_gene(
+                &combined_genes,
+                &mut gene_counts,
+                frag_is_dup,
+                frag_is_multi,
+            ) {
                 stat_assigned += 1;
             }
         } else {
@@ -620,7 +627,12 @@ pub fn count_reads(
             stat_no_features += 1;
         } else if mate_info.gene_hits.len() > 1 {
             stat_ambiguous += 1;
-        } else if assign_fragment_to_gene(&mate_info.gene_hits, &mut gene_counts, mate_info.is_dup, mate_info.is_multi) {
+        } else if assign_fragment_to_gene(
+            &mate_info.gene_hits,
+            &mut gene_counts,
+            mate_info.is_dup,
+            mate_info.is_multi,
+        ) {
             stat_assigned += 1;
         }
     }
