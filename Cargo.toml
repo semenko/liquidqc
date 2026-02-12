@@ -23,6 +23,7 @@ rust-htslib = { version = "0.47", features = ["static"] }
 # Plotting
 plotters = "0.3"
 plotters-backend = "0.3"
+plotters-svg = "0.3"
 
 # General utilities
 anyhow = "1"

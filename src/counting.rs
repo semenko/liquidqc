@@ -31,8 +31,10 @@ const BAM_FPAIRED: u16 = 0x1;
 /// Flag indicating it is the first read in a pair (0x40).
 const BAM_FREAD1: u16 = 0x40;
 /// Flag indicating the read is mapped in a proper pair (0x2).
+#[allow(dead_code)]
 const BAM_FPROPER_PAIR: u16 = 0x2;
 /// Flag indicating the mate is unmapped (0x8).
+#[allow(dead_code)]
 const BAM_FMUNMAP: u16 = 0x8;
 /// Flag indicating the read is reverse-complemented (0x10).
 const BAM_FREVERSE: u16 = 0x10;
@@ -48,6 +50,39 @@ pub struct GeneCounts {
     pub all_unique: u64,
     /// Count without multimappers, without duplicates (dups excluded)
     pub nodup_unique: u64,
+}
+
+impl GeneCounts {
+    /// Increment the appropriate counters for a fragment assigned to this gene.
+    fn count_fragment(&mut self, is_dup: bool, is_multi: bool) {
+        self.all_multi += 1;
+        if !is_dup {
+            self.nodup_multi += 1;
+        }
+        if !is_multi {
+            self.all_unique += 1;
+            if !is_dup {
+                self.nodup_unique += 1;
+            }
+        }
+    }
+}
+
+/// Assign a fragment to a gene if exactly one gene was hit.
+/// Returns true if the fragment was assigned to a gene.
+fn assign_fragment_to_gene(
+    gene_hits: &[String],
+    gene_counts: &mut IndexMap<String, GeneCounts>,
+    is_dup: bool,
+    is_multi: bool,
+) -> bool {
+    if gene_hits.len() == 1 {
+        if let Some(counts) = gene_counts.get_mut(gene_hits[0].as_str()) {
+            counts.count_fragment(is_dup, is_multi);
+            return true;
+        }
+    }
+    false
 }
 
 /// Result of the counting step, including per-gene counts and total mapped reads.
@@ -194,11 +229,66 @@ fn strand_matches(
     }
 }
 
+/// Extract aligned (match) blocks from a CIGAR string.
+///
+/// Walks the CIGAR operations and returns genomic intervals for each
+/// M/=/X operation. N (intron skip) and D (deletion) operations advance
+/// the reference position without producing an aligned block.
+/// This ensures spliced reads don't falsely overlap with genes in introns.
+fn cigar_to_aligned_blocks(
+    start: u64,
+    cigar: &rust_htslib::bam::record::CigarStringView,
+) -> Vec<(u64, u64)> {
+    use rust_htslib::bam::record::Cigar;
+    let mut blocks = Vec::new();
+    let mut ref_pos = start;
+
+    for op in cigar.iter() {
+        match op {
+            // Alignment match (M), sequence match (=), sequence mismatch (X):
+            // These consume both reference and query bases. They represent
+            // actual aligned segments.
+            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
+                let len = *len as u64;
+                blocks.push((ref_pos, ref_pos + len));
+                ref_pos += len;
+            }
+            // Reference skip (N): intron in RNA-seq. Advances reference only.
+            // Deletion (D): deletion from reference. Advances reference only.
+            Cigar::RefSkip(len) | Cigar::Del(len) => {
+                ref_pos += *len as u64;
+            }
+            // Insertion (I), soft clip (S), hard clip (H), padding (P):
+            // These do not advance the reference position.
+            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {}
+        }
+    }
+
+    blocks
+}
+
+/// Metadata collected per read for paired-end mate buffering.
+/// When counting paired-end fragments, we need to see both mates to
+/// properly determine gene overlap (featureCounts checks both mates
+/// independently). This struct stores the information we need from each mate.
+struct MateInfo {
+    /// Gene IDs this mate overlaps (after strand filtering, deduplicated)
+    gene_hits: Vec<String>,
+    /// Whether this read is a PCR/optical duplicate
+    is_dup: bool,
+    /// Whether this read is a multimapper (NH > 1)
+    is_multi: bool,
+}
+
 /// Count reads from a BAM file and assign them to genes.
 ///
 /// Performs four simultaneous counting modes matching dupRadar's approach:
 /// - With/without multimappers
 /// - With/without PCR duplicates
+///
+/// For paired-end data, this function buffers mates by read name and combines
+/// their gene overlaps to match featureCounts' fragment-level counting behavior.
+/// A fragment is assigned to a gene if either mate overlaps that gene's exons.
 ///
 /// # Arguments
 /// * `bam_path` - Path to the duplicate-marked BAM file
@@ -244,12 +334,17 @@ pub fn count_reads(
     let mut total_mapped: u64 = 0;
     let mut total_dup: u64 = 0;
     let mut total_multi: u64 = 0;
+    let mut total_fragments: u64 = 0;
 
     // Totals for N calculation (mapped reads per mode)
     let mut n_multi_dup: u64 = 0;
     let mut n_multi_nodup: u64 = 0;
     let mut n_unique_dup: u64 = 0;
     let mut n_unique_nodup: u64 = 0;
+
+    // For paired-end: buffer mates by read name to combine their overlaps.
+    // Key is read_name; when the second mate arrives we combine gene hits.
+    let mut mate_buffer: HashMap<Vec<u8>, MateInfo> = HashMap::new();
 
     // Iterate over all records
     let mut record = bam::Record::new();
@@ -278,24 +373,9 @@ pub fn count_reads(
             continue;
         }
 
-        // For paired-end data, apply additional filters
-        if paired {
-            // Must be paired
-            if flags & BAM_FPAIRED == 0 {
-                continue;
-            }
-            // Must be properly paired
-            if flags & BAM_FPROPER_PAIR == 0 {
-                continue;
-            }
-            // Mate must be mapped
-            if flags & BAM_FMUNMAP != 0 {
-                continue;
-            }
-            // Only count the first in pair to avoid double-counting
-            if flags & BAM_FREAD1 == 0 {
-                continue;
-            }
+        // For paired-end data, must actually be a paired read
+        if paired && flags & BAM_FPAIRED == 0 {
+            continue;
         }
 
         total_mapped += 1;
@@ -305,8 +385,7 @@ pub fn count_reads(
             total_dup += 1;
         }
 
-        // Determine if the read is a multimapper
-        // NH tag stores the number of reported alignments
+        // Determine if the read is a multimapper (NH tag)
         let is_multi = match record.aux(b"NH") {
             Ok(rust_htslib::bam::record::Aux::U8(nh)) => nh > 1,
             Ok(rust_htslib::bam::record::Aux::U16(nh)) => nh > 1,
@@ -314,7 +393,7 @@ pub fn count_reads(
             Ok(rust_htslib::bam::record::Aux::I8(nh)) => nh > 1,
             Ok(rust_htslib::bam::record::Aux::I16(nh)) => nh > 1,
             Ok(rust_htslib::bam::record::Aux::I32(nh)) => nh > 1,
-            _ => false, // No NH tag = assume unique
+            _ => false,
         };
         if is_multi {
             total_multi += 1;
@@ -323,26 +402,6 @@ pub fn count_reads(
         let is_reverse = flags & BAM_FREVERSE != 0;
         let is_read1 = flags & BAM_FREAD1 != 0;
 
-        // Update total mapped reads per mode.
-        //
-        // IMPORTANT: N (total mapped reads for RPKM) must match featureCounts behavior.
-        // In featureCounts, N = sum(all stats) - Unassigned_Unmapped.
-        // This means N counts ALL mapped reads regardless of whether they're multimappers
-        // or assigned to a feature. The multimapper/duplicate dimensions only affect
-        // which reads are *counted toward genes*, not the N denominator.
-        //
-        // Therefore:
-        // - n_multi_dup = n_unique_dup = all mapped reads (incl dups)
-        // - n_multi_nodup = n_unique_nodup = all mapped non-dup reads
-        //
-        // The "multi" vs "unique" distinction only applies to gene assignment below.
-        n_multi_dup += 1;
-        n_unique_dup += 1;
-        if !is_dup {
-            n_multi_nodup += 1;
-            n_unique_nodup += 1;
-        }
-
         // Get the chromosome name
         let tid = record.tid();
         if tid < 0 || tid as usize >= tid_to_name.len() {
@@ -350,65 +409,116 @@ pub fn count_reads(
         }
         let chrom = &tid_to_name[tid as usize];
 
-        // Get read alignment position (0-based)
-        let read_start = record.pos() as u64;
-        let read_end = record.cigar().end_pos() as u64;
+        // Find gene overlaps using CIGAR-aware aligned blocks
+        let gene_hits = if let Some(chrom_idx) = index.get(chrom) {
+            // Extract aligned blocks from CIGAR (M/=/X operations only).
+            // This avoids false overlaps with genes in introns of spliced reads.
+            let aligned_blocks =
+                cigar_to_aligned_blocks(record.pos() as u64, &record.cigar());
 
-        // Look up overlapping genes
-        let chrom_idx = match index.get(chrom) {
-            Some(idx) => idx,
-            None => continue, // Chromosome not in annotation
+            let mut overlaps = Vec::new();
+            for (block_start, block_end) in &aligned_blocks {
+                overlaps.extend(chrom_idx.query(*block_start, *block_end));
+            }
+
+            // Filter by strand and deduplicate gene IDs
+            let mut genes_hit: Vec<String> = overlaps
+                .iter()
+                .filter(|iv| {
+                    strand_matches(is_reverse, is_read1, paired, iv.strand, stranded)
+                })
+                .map(|iv| iv.gene_id.clone())
+                .collect();
+            genes_hit.sort_unstable();
+            genes_hit.dedup();
+            genes_hit
+        } else {
+            // Chromosome not in annotation
+            Vec::new()
         };
 
-        let overlaps = chrom_idx.query(read_start, read_end);
-
-        if overlaps.is_empty() {
-            continue;
-        }
-
-        // Deduplicate gene hits (a read may overlap multiple exons of the same gene)
-        let mut assigned_genes: Vec<&str> = overlaps
-            .iter()
-            .filter(|iv| strand_matches(is_reverse, is_read1, paired, iv.strand, stranded))
-            .map(|iv| iv.gene_id.as_str())
-            .collect();
-        assigned_genes.sort_unstable();
-        assigned_genes.dedup();
-
-        // featureCounts default: if a read overlaps multiple genes, it is ambiguous
-        // and NOT assigned (unless countMultiMappingReads is set differently).
-        // However, for the multimapper dimension, featureCounts still counts
-        // ambiguous reads to each gene when countMultiMappingReads=TRUE.
-        //
-        // For simplicity and matching featureCounts defaults:
-        // - If the read maps to exactly one gene: assign it
-        // - If the read maps to multiple genes: skip (ambiguous)
-        if assigned_genes.len() != 1 {
-            continue;
-        }
-
-        let gene_id = assigned_genes[0];
-
-        if let Some(counts) = gene_counts.get_mut(gene_id) {
-            // Mode 1: Include multimappers (all reads assigned to gene)
-            counts.all_multi += 1;
+        // --- Single-end counting: assign directly ---
+        if !paired {
+            // Update N totals
+            n_multi_dup += 1;
+            n_unique_dup += 1;
             if !is_dup {
-                counts.nodup_multi += 1;
+                n_multi_nodup += 1;
+                n_unique_nodup += 1;
+            }
+            total_fragments += 1;
+
+            // Assign to gene if unambiguous
+            assign_fragment_to_gene(&gene_hits, &mut gene_counts, is_dup, is_multi);
+            continue;
+        }
+
+        // --- Paired-end counting: buffer mates and combine ---
+        //
+        // featureCounts with isPairedEnd=TRUE and countReadPairs=TRUE assigns
+        // a fragment to a gene if EITHER mate overlaps that gene's exons.
+        // We buffer the first mate we see and combine overlaps when the second
+        // mate arrives. The duplicate flag from read1 is used for the fragment.
+        let read_name = record.qname().to_vec();
+
+        if let Some(mate_info) = mate_buffer.remove(&read_name) {
+            // We've seen the other mate - combine overlaps and assign
+            total_fragments += 1;
+
+            // For the fragment, use read1's dup/multi status (featureCounts
+            // considers a fragment as duplicate if read1 is flagged as duplicate)
+            let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
+            let frag_is_multi = if is_read1 { is_multi } else { mate_info.is_multi };
+
+            // Update N totals (once per fragment)
+            n_multi_dup += 1;
+            n_unique_dup += 1;
+            if !frag_is_dup {
+                n_multi_nodup += 1;
+                n_unique_nodup += 1;
             }
 
-            // Mode 2: Exclude multimappers (unique reads only)
-            if !is_multi {
-                counts.all_unique += 1;
-                if !is_dup {
-                    counts.nodup_unique += 1;
-                }
-            }
+            // Combine gene hits from both mates
+            let mut combined_genes = mate_info.gene_hits;
+            combined_genes.extend(gene_hits);
+            combined_genes.sort_unstable();
+            combined_genes.dedup();
+
+            // Assign to gene if unambiguous (exactly one gene from combined overlaps)
+            assign_fragment_to_gene(&combined_genes, &mut gene_counts, frag_is_dup, frag_is_multi);
+        } else {
+            // First mate seen - buffer it and wait for the other mate
+            mate_buffer.insert(
+                read_name,
+                MateInfo {
+                    gene_hits,
+                    is_dup,
+                    is_multi,
+                },
+            );
         }
     }
 
+    // Handle any unpaired mates left in the buffer (singletons).
+    // These are reads whose mate was filtered out (e.g., mate unmapped,
+    // mate on a different chromosome and filtered by featureCounts, etc.)
+    // featureCounts by default still counts these as fragments.
+    for (_name, mate_info) in mate_buffer.drain() {
+        total_fragments += 1;
+
+        n_multi_dup += 1;
+        n_unique_dup += 1;
+        if !mate_info.is_dup {
+            n_multi_nodup += 1;
+            n_unique_nodup += 1;
+        }
+
+        assign_fragment_to_gene(&mate_info.gene_hits, &mut gene_counts, mate_info.is_dup, mate_info.is_multi);
+    }
+
     info!(
-        "Read {} total reads, {} mapped, {} duplicates, {} multimappers",
-        total_reads, total_mapped, total_dup, total_multi
+        "Read {} total reads, {} mapped, {} fragments, {} duplicates, {} multimappers",
+        total_reads, total_mapped, total_fragments, total_dup, total_multi
     );
 
     Ok(CountResult {

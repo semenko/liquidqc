@@ -237,8 +237,11 @@ fn test_all_output_files_generated() {
         "test_dupMatrix.txt",
         "test_intercept_slope.txt",
         "test_duprateExpDens.png",
+        "test_duprateExpDens.svg",
         "test_duprateExpBoxplot.png",
+        "test_duprateExpBoxplot.svg",
         "test_expressionHist.png",
+        "test_expressionHist.svg",
         "test_dup_intercept_mqc.txt",
         "test_duprateExpDensCurve_mqc.txt",
     ];

@@ -429,6 +429,7 @@ dependencies = [
  "log",
  "plotters",
  "plotters-backend",
+ "plotters-svg",
  "rust-htslib",
 ]
 
