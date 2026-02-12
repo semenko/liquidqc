@@ -1,6 +1,6 @@
-# dupRust 🧬🦀
+# ![dupRust](dupRust_logo.png)
 
-A fast Rust reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
+> A fast Rust reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
 
 dupRust analyzes duplicate-marked BAM files to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original dupRadar R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
 
@@ -59,17 +59,50 @@ See the [benchmark README](benchmark/README.md) for full results and replication
 
 ## Installation
 
+### Pre-built binaries
+
+Download a pre-built binary for your platform from the [Releases](https://github.com/ewels/dupRust/releases) page:
+
+```bash
+# Linux (x86_64)
+curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-linux-x86_64.tar.gz \
+  | tar xz
+sudo mv duprust /usr/local/bin/
+
+# Linux (aarch64)
+curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-linux-aarch64.tar.gz \
+  | tar xz
+sudo mv duprust /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-macos-aarch64.tar.gz \
+  | tar xz
+sudo mv duprust /usr/local/bin/
+
+# macOS (Intel)
+curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-macos-x86_64.tar.gz \
+  | tar xz
+sudo mv duprust /usr/local/bin/
+```
+
+### Docker
+
+```bash
+docker run --rm -v "$PWD":/data ghcr.io/ewels/duprust:latest \
+  /data/sample.markdup.bam /data/genes.gtf --outdir /data/results
+```
+
+Available tags: `latest`, or a specific version (e.g., `0.1.0`).
+
 ### From source
+
+Requires Rust toolchain and C build dependencies (see [CONTRIBUTING.md](CONTRIBUTING.md#prerequisites)).
 
 ```bash
 cargo build --release
 ```
 
 The binary will be at `target/release/duprust`.
-
-### Pre-built binaries
-
-Check the [Releases](https://github.com/ewels/dupRust/releases) page for pre-built static binaries.
 
 ## Usage
 

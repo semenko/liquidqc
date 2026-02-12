@@ -168,3 +168,6 @@ All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cac
 - Float output formatting must match R's behavior (15 significant digits, "NA" for NaN, trailing-zero trimming).
 - The pipeline processes BAM files which can be very large — performance matters.
 - System dependencies needed for building: cmake, zlib, bz2, lzma, curl, ssl, clang (for `rust-htslib`).
+- **IMPORTANT:** When benchmarks are re-run, verify that all results referenced in both `benchmark/README.md`
+  and the top-level `README.md` are updated to reflect the new numbers (timings, percentages, etc.).
+  These documents must always accurately reflect the latest benchmark data.

@@ -1,4 +1,4 @@
-# dupRust Benchmarks
+# dupRust Benchmarks 🧬 🦀
 
 Comparison of [dupRadar](https://bioconductor.org/packages/dupRadar/) (R/Bioconductor) and dupRust on the same input data.
 
@@ -34,8 +34,6 @@ Rscript benchmark/small/run_dupRadar_R.R
 cargo run --release -- benchmark/small/test.bam benchmark/small/chr6.gtf -p -o benchmark/small/dupRust
 ```
 
----
-
 ## Large benchmark
 
 **GM12878 REP1** — a full-size RNA-seq BAM from the [nf-core/rnaseq](https://nf-co.re/rnaseq) pipeline, duplicate-marked with picard.
@@ -57,7 +55,8 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 | **Intercept** | 0.8245 | 0.8245 |
 | **Slope** | 1.6774 | 1.6774 |
 | **Genes total** | 63,086 | 63,086 |
-| **Genes with reads** | 24,719 | 23,597 |
+| **Genes with reads (unique)** | 23,597 | 23,597 |
+| **Genes with reads (multi)** | 24,719 | 24,720 |
 
 ### Count comparison
 
@@ -68,7 +67,7 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 | **allCountsMulti** | 16,089,488 | 16,023,820 | 95.6% |
 | **filteredCountsMulti** | 4,503,920 | 4,459,432 | 95.1% |
 
-Unique-mapper counts (**allCounts** and **filteredCounts**) match exactly across all 63,086 genes. Multi-mapper counts are within ~0.4% due to minor differences in secondary alignment handling.
+Unique-mapper counts (**allCounts** and **filteredCounts**) match exactly across all 63,086 genes. Multi-mapper total counts differ by ~0.4% and filtered multi-mapper counts by ~1.0%, due to minor differences in how secondary alignments are paired and assigned.
 
 Model fit parameters (**intercept** and **slope**) match to the displayed precision.
 
@@ -122,6 +121,6 @@ cargo build --release
 
 ### Known differences
 
-- **1,122 genes** have reads in dupRadar but not dupRust — these are on alternative contigs / patches not present in the BAM reference, or are mitochondrial genes (the BAM uses `MT` but the GTF uses `chrM`).
-- Multi-mapper count differences (~4%) stem from minor differences in how secondary alignments are paired and assigned.
-- Unique-mapper counts and model fit parameters match exactly.
+- Unique-mapper counts and model fit parameters match exactly across all 63,086 genes.
+- Multi-mapper count differences (~4–5% of genes affected) stem from minor differences in how secondary alignments are paired and assigned. Total multi-mapper counts differ by ~0.4% (allCountsMulti) and ~1.0% (filteredCountsMulti).
+- Genes with reads are nearly identical between tools: unique-mapper gene sets match exactly (23,597), and multi-mapper gene sets differ by only 1–2 genes.
