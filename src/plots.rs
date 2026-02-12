@@ -133,26 +133,51 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
         }
     }
 
-    // Anisotropic Gaussian smoothing (matching bkde2D with tau=3.4)
+    // Separable Gaussian smoothing (matching bkde2D with tau=3.4).
+    //
+    // A 2D Gaussian kernel is separable: G(dx,dy) = G_x(dx) * G_y(dy).
+    // This allows factoring the convolution into two 1D passes:
+    //   1. Smooth each column along the X axis (rows)
+    //   2. Smooth each row along the Y axis (columns)
+    // Complexity drops from O(N^2 * R_x * R_y) to O(N^2 * (R_x + R_y)).
+
+    // Pre-compute 1D kernel weights for X and Y directions
+    let kernel_x: Vec<f64> = (-radius_x..=radius_x)
+        .map(|dx| (-(dx * dx) as f64 / sigma2_x).exp())
+        .collect();
+    let kernel_y: Vec<f64> = (-radius_y..=radius_y)
+        .map(|dy| (-(dy * dy) as f64 / sigma2_y).exp())
+        .collect();
+
+    // Pass 1: Smooth along X direction (for each column y, convolve along x)
+    let mut temp = vec![vec![0.0f64; grid_size]; grid_size];
+    #[allow(clippy::needless_range_loop)] // bx/by used as integer coordinates for offset arithmetic
+    for by in 0..grid_size {
+        for bx in 0..grid_size {
+            let mut sum = 0.0;
+            for (ki, dx) in (-radius_x..=radius_x).enumerate() {
+                let nx = bx as i32 + dx;
+                if nx >= 0 && (nx as usize) < grid_size {
+                    sum += grid[nx as usize][by] * kernel_x[ki];
+                }
+            }
+            temp[bx][by] = sum;
+        }
+    }
+
+    // Pass 2: Smooth along Y direction (for each row x, convolve along y)
     let mut smoothed = vec![vec![0.0f64; grid_size]; grid_size];
     #[allow(clippy::needless_range_loop)] // bx/by used as integer coordinates for offset arithmetic
     for bx in 0..grid_size {
         for by in 0..grid_size {
-            if grid[bx][by] == 0.0 {
-                continue;
-            }
-            let c = grid[bx][by];
-            for dx in -radius_x..=radius_x {
-                for dy in -radius_y..=radius_y {
-                    let nx = bx as i32 + dx;
-                    let ny = by as i32 + dy;
-                    if nx >= 0 && (nx as usize) < grid_size && ny >= 0 && (ny as usize) < grid_size
-                    {
-                        let w = (-(dx * dx) as f64 / sigma2_x - (dy * dy) as f64 / sigma2_y).exp();
-                        smoothed[nx as usize][ny as usize] += c * w;
-                    }
+            let mut sum = 0.0;
+            for (ki, dy) in (-radius_y..=radius_y).enumerate() {
+                let ny = by as i32 + dy;
+                if ny >= 0 && (ny as usize) < grid_size {
+                    sum += temp[bx][ny as usize] * kernel_y[ki];
                 }
             }
+            smoothed[bx][by] = sum;
         }
     }
 
