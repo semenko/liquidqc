@@ -23,6 +23,7 @@ const BAM_FUNMAP: u16 = 0x4;
 /// Flag indicating the read failed quality checks (0x200).
 const BAM_FQCFAIL: u16 = 0x200;
 /// Flag indicating a secondary alignment (0x100).
+#[allow(dead_code)]
 const BAM_FSECONDARY: u16 = 0x100;
 /// Flag indicating a supplementary alignment (0x800).
 const BAM_FSUPPLEMENTARY: u16 = 0x800;

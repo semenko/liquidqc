@@ -135,6 +135,7 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
 
     // Anisotropic Gaussian smoothing (matching bkde2D with tau=3.4)
     let mut smoothed = vec![vec![0.0f64; grid_size]; grid_size];
+    #[allow(clippy::needless_range_loop)] // bx/by used as integer coordinates for offset arithmetic
     for bx in 0..grid_size {
         for by in 0..grid_size {
             if grid[bx][by] == 0.0 {
