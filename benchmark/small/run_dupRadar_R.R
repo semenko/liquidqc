@@ -2,9 +2,9 @@
 # Benchmark R dupRadar on the chr6 test BAM
 library(dupRadar)
 
-bam <- "benchmark/test.bam"
-gtf <- "benchmark/chr6.gtf"
-outdir <- "benchmark/r_output"
+bam <- "benchmark/small/test.bam"
+gtf <- "benchmark/small/chr6.gtf"
+outdir <- "benchmark/small/dupRadar"
 stranded <- 0   # unstranded
 paired <- TRUE
 threads <- 1

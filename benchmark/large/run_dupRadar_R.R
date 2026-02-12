@@ -2,7 +2,7 @@ library(dupRadar)
 
 bam <- "benchmark/large/GM12878_REP1.markdup.sorted.bam"
 gtf <- "benchmark/large/genes.gtf"
-outdir <- "benchmark/large/r_output"
+outdir <- "benchmark/large/dupRadar"
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 cat("Starting R dupRadar benchmark...\n")
