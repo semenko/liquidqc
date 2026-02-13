@@ -48,6 +48,31 @@ pub enum Commands {
     /// Calculates position-based and sequence-based read duplication
     /// histograms from a BAM/SAM/CRAM file.
     ReadDuplication(ReadDuplicationArgs),
+
+    /// Classify reads into genomic features (read_distribution.py equivalent).
+    ///
+    /// Classifies read tags into CDS exons, 5'/3' UTRs, introns, and
+    /// intergenic regions using a BED12 gene model. Output is identical
+    /// to RSeQC's read_distribution.py.
+    ReadDistribution(ReadDistributionArgs),
+
+    /// Annotate splice junctions (junction_annotation.py equivalent).
+    ///
+    /// Extracts splice junctions from BAM CIGAR strings and classifies them
+    /// as known (annotated), partial novel, or complete novel by comparing
+    /// against a BED12 gene model.
+    JunctionAnnotation(JunctionAnnotationArgs),
+
+    /// Splice junction saturation analysis (junction_saturation.py equivalent).
+    ///
+    /// Subsamples splice junctions at increasing percentages of total reads
+    /// and reports how many known / novel / total unique junctions are detected
+    /// at each level.
+    JunctionSaturation(JunctionSaturationArgs),
+    /// Compute inner distance (insert size) of paired-end reads using a gene
+    /// model (BED12). Reports fragment sizes as genomic or mRNA-level distances,
+    /// with histogram and R plot output.
+    InnerDistance(InnerDistanceArgs),
 }
 
 /// Arguments for the `rna` (dupRadar) subcommand.
@@ -167,6 +192,138 @@ pub struct ReadDuplicationArgs {
 
     /// Path to reference FASTA file (required for CRAM input)
     #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+}
+
+/// Arguments for the `read-distribution` subcommand.
+#[derive(Parser, Debug)]
+pub struct ReadDistributionArgs {
+    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
+
+    /// Path to a BED12 gene model file
+    #[arg(short, long, value_name = "BED")]
+    pub bed: String,
+
+    /// Output directory for results
+    #[arg(short, long, default_value = ".")]
+    pub outdir: String,
+
+    /// Path to reference FASTA file (required for CRAM input)
+    #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+}
+
+/// Arguments for the `junction-annotation` subcommand.
+#[derive(Parser, Debug)]
+pub struct JunctionAnnotationArgs {
+    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
+
+    /// Path to a BED12 gene model file
+    #[arg(short, long, value_name = "BED")]
+    pub bed: String,
+
+    /// Minimum intron size to include (default 50)
+    #[arg(short, long, default_value_t = 50)]
+    pub min_intron: u64,
+
+    /// MAPQ cutoff for filtering reads (default 30)
+    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
+    pub mapq_cut: u8,
+
+    /// Output directory for results
+    #[arg(short, long, default_value = ".")]
+    pub outdir: String,
+
+    /// Path to reference FASTA file (required for CRAM input)
+    #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+}
+
+/// Arguments for the `junction-saturation` subcommand.
+#[derive(Parser, Debug)]
+pub struct JunctionSaturationArgs {
+    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
+
+    /// Path to a BED12 gene model file
+    #[arg(short, long, value_name = "BED")]
+    pub bed: String,
+
+    /// Minimum intron size to include (default 50)
+    #[arg(short, long, default_value_t = 50)]
+    pub min_intron: u64,
+
+    /// Minimum number of supporting reads to count a known junction (default 1)
+    #[arg(short = 'v', long = "min-coverage", default_value_t = 1)]
+    pub min_coverage: u64,
+
+    /// Sampling start percentage (default 5)
+    #[arg(short = 'l', long = "percentile-floor", default_value_t = 5)]
+    pub percentile_floor: u64,
+
+    /// Sampling end percentage (default 100)
+    #[arg(short = 'u', long = "percentile-ceiling", default_value_t = 100)]
+    pub percentile_ceiling: u64,
+
+    /// Sampling step percentage (default 5)
+    #[arg(short = 's', long = "percentile-step", default_value_t = 5)]
+    pub percentile_step: u64,
+
+    /// MAPQ cutoff for filtering reads (default 30)
+    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
+    pub mapq_cut: u8,
+
+    /// Output directory for results
+    #[arg(short, long, default_value = ".")]
+    pub outdir: String,
+
+    /// Path to reference FASTA file (required for CRAM input)
+    #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+}
+
+/// Arguments for the `inner-distance` subcommand.
+#[derive(Parser, Debug)]
+pub struct InnerDistanceArgs {
+    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
+
+    /// Path to the reference gene model in BED12 format
+    #[arg(short = 'b', long = "bed", value_name = "BED")]
+    pub bed: String,
+
+    /// Maximum number of read pairs to sample
+    #[arg(short = 'k', long = "sample-size", default_value = "1000000")]
+    pub sample_size: u64,
+
+    /// Lower bound of inner distance for histogram
+    #[arg(short = 'l', long = "lower-bound", default_value = "-250")]
+    pub lower_bound: i64,
+
+    /// Upper bound of inner distance for histogram
+    #[arg(short = 'u', long = "upper-bound", default_value = "250")]
+    pub upper_bound: i64,
+
+    /// Step size (bin width) for histogram
+    #[arg(short = 's', long = "step", default_value = "5")]
+    pub step: i64,
+
+    /// Minimum mapping quality (MAPQ) threshold
+    #[arg(short = 'q', long = "mapq", default_value = "30")]
+    pub mapq_cut: u8,
+
+    /// Output directory
+    #[arg(short = 'o', long = "outdir", default_value = ".")]
+    pub outdir: String,
+
+    /// Reference genome FASTA file (unused, kept for CLI compatibility)
+    #[arg(short = 'r', long = "reference")]
     pub reference: Option<String>,
 }
 

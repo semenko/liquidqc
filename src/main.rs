@@ -15,7 +15,11 @@ mod featurecounts;
 mod fitting;
 mod gtf;
 mod infer_experiment;
+mod inner_distance;
+mod junction_annotation;
+mod junction_saturation;
 mod plots;
+mod read_distribution;
 mod read_duplication;
 
 use anyhow::{ensure, Context, Result};
@@ -39,6 +43,10 @@ fn main() -> Result<()> {
         cli::Commands::BamStat(args) => run_bam_stat(args),
         cli::Commands::InferExperiment(args) => run_infer_experiment(args),
         cli::Commands::ReadDuplication(args) => run_read_duplication(args),
+        cli::Commands::ReadDistribution(args) => run_read_distribution(args),
+        cli::Commands::JunctionAnnotation(args) => run_junction_annotation(args),
+        cli::Commands::JunctionSaturation(args) => run_junction_saturation(args),
+        cli::Commands::InnerDistance(args) => run_inner_distance(args),
     }
 }
 
@@ -812,6 +820,230 @@ fn run_read_duplication(args: cli::ReadDuplicationArgs) -> Result<()> {
             "[{}] read_duplication completed in {:.2}s",
             bam_stem,
             bam_start.elapsed().as_secs_f64()
+        );
+    }
+
+    if args.input.len() > 1 {
+        info!(
+            "All BAM files processed in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// read-distribution subcommand
+// ============================================================================
+
+/// Run read distribution analysis for one or more BAM files.
+fn run_read_distribution(args: cli::ReadDistributionArgs) -> Result<()> {
+    let start = Instant::now();
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+
+    for bam_path in &args.input {
+        let bam_start = Instant::now();
+        let bam_stem = Path::new(bam_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        info!("[{}] Running read_distribution analysis...", bam_stem);
+
+        let result = read_distribution::read_distribution(bam_path, &args.bed)?;
+
+        let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
+        read_distribution::write_read_distribution(&result, &output_path)?;
+
+        info!(
+            "[{}] Total {} reads, {} tags ({} assigned)",
+            bam_stem,
+            result.total_reads,
+            result.total_tags,
+            result.total_tags - result.unassigned_tags
+        );
+        info!(
+            "[{}] read_distribution completed in {:.2}s",
+            bam_stem,
+            bam_start.elapsed().as_secs_f64()
+        );
+    }
+
+    if args.input.len() > 1 {
+        info!(
+            "All BAM files processed in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// junction-annotation subcommand
+// ============================================================================
+
+/// Run junction annotation analysis for one or more BAM files.
+fn run_junction_annotation(args: cli::JunctionAnnotationArgs) -> Result<()> {
+    let start = Instant::now();
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+
+    for bam_path in &args.input {
+        let bam_start = Instant::now();
+        let bam_stem = Path::new(bam_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        info!("[{}] Running junction_annotation analysis...", bam_stem);
+
+        let results = junction_annotation::junction_annotation(
+            bam_path,
+            &args.bed,
+            args.min_intron,
+            args.mapq_cut,
+        )?;
+
+        // Write output files
+        let xls_path = outdir.join(format!("{}.junction.xls", bam_stem));
+        junction_annotation::write_junction_xls(&results, &xls_path)?;
+
+        let bed_path = outdir.join(format!("{}.junction.bed", bam_stem));
+        junction_annotation::write_junction_bed(&results, &bed_path)?;
+
+        let r_path = outdir.join(format!("{}.junction_plot.r", bam_stem));
+        let r_prefix = outdir.join(bam_stem).to_string_lossy().to_string();
+        junction_annotation::write_junction_plot_r(&results, &r_prefix, &r_path)?;
+
+        let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
+        junction_annotation::write_summary(&results, &summary_path)?;
+
+        // Print summary to stderr
+        junction_annotation::print_summary(&results);
+
+        info!(
+            "[{}] junction_annotation completed in {:.2}s",
+            bam_stem,
+            bam_start.elapsed().as_secs_f64()
+        );
+    }
+
+    if args.input.len() > 1 {
+        info!(
+            "All BAM files processed in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// junction-saturation subcommand
+// ============================================================================
+
+/// Run the junction_saturation analysis on one or more BAM files.
+fn run_junction_saturation(args: cli::JunctionSaturationArgs) -> Result<()> {
+    let start = Instant::now();
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+
+    for bam_path in &args.input {
+        let bam_start = Instant::now();
+        let bam_stem = Path::new(bam_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        info!("[{}] Running junction_saturation analysis...", bam_stem);
+
+        let results = junction_saturation::junction_saturation(
+            bam_path,
+            &args.bed,
+            args.min_intron,
+            args.mapq_cut,
+            args.min_coverage as u32,
+            args.percentile_floor as u32,
+            args.percentile_ceiling as u32,
+            args.percentile_step as u32,
+        )?;
+
+        // Write R script and summary
+        let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
+        junction_saturation::write_r_script(&results, &prefix)?;
+        let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
+        junction_saturation::write_summary(&results, &summary_path)?;
+
+        info!(
+            "[{}] junction_saturation completed in {:.2}s",
+            bam_stem,
+            bam_start.elapsed().as_secs_f64()
+        );
+    }
+
+    if args.input.len() > 1 {
+        info!(
+            "All BAM files processed in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
+
+    Ok(())
+}
+
+// ===================================================================
+// Inner Distance
+// ===================================================================
+
+/// Run the inner_distance subcommand.
+fn run_inner_distance(args: cli::InnerDistanceArgs) -> Result<()> {
+    let start = Instant::now();
+    let outdir = &args.outdir;
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", outdir))?;
+
+    for bam_path in &args.input {
+        let bam_start = Instant::now();
+        let bam_stem = Path::new(bam_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        let results = inner_distance::inner_distance(
+            bam_path,
+            &args.bed,
+            args.sample_size,
+            args.mapq_cut,
+            args.lower_bound,
+            args.upper_bound,
+            args.step,
+        )?;
+
+        // Write output files
+        let prefix = format!("{outdir}/{bam_stem}");
+        let detail_path = format!("{prefix}.inner_distance.txt");
+        inner_distance::write_detail_file(&results, &detail_path)?;
+
+        let freq_path = format!("{prefix}.inner_distance_freq.txt");
+        inner_distance::write_freq_file(&results, &freq_path)?;
+
+        let r_path = format!("{prefix}.inner_distance_plot.r");
+        inner_distance::write_r_script(&results, &prefix, &r_path, args.step)?;
+
+        let summary_path = format!("{prefix}.inner_distance_summary.txt");
+        inner_distance::write_summary(&results, &summary_path)?;
+
+        info!(
+            "[{}] inner_distance completed in {:.2}s — {} read pairs processed",
+            bam_stem,
+            bam_start.elapsed().as_secs_f64(),
+            results.total_pairs
         );
     }
 
