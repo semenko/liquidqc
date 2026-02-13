@@ -31,14 +31,21 @@ fn rustqc_binary() -> String {
 
 /// Helper: run rustqc rna on test data and return the output directory
 fn run_rustqc(outdir: &str) -> std::process::Output {
+    run_rustqc_with_input(outdir, "tests/data/test.bam")
+}
+
+/// Helper: run rustqc rna with a specified input file and return the output
+fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
     let binary = rustqc_binary();
     Command::new(&binary)
         .args([
             "rna",
-            "tests/data/test.bam",
+            input,
+            "--gtf",
             "tests/data/test.gtf",
             "--outdir",
             outdir,
+            "--skip-dup-check",
         ])
         .output()
         .expect("Failed to execute rustqc")
@@ -77,6 +84,34 @@ fn parse_intercept_slope(path: &str) -> (f64, f64) {
         }
     }
     (intercept, slope)
+}
+
+/// Helper: run rustqc rna on test data with multiple BAM files
+fn run_rustqc_multi(outdir: &str) -> std::process::Output {
+    let binary = rustqc_binary();
+
+    // Ensure output directory exists before copying files into it
+    fs::create_dir_all(outdir).expect("Failed to create output directory");
+
+    // Create a copy of test.bam with a different stem so outputs don't collide
+    let copy_bam = format!("{}/test_copy.bam", outdir);
+    let copy_bai = format!("{}/test_copy.bam.bai", outdir);
+    fs::copy("tests/data/test.bam", &copy_bam).expect("Failed to copy BAM");
+    fs::copy("tests/data/test.bam.bai", &copy_bai).expect("Failed to copy BAI");
+
+    Command::new(&binary)
+        .args([
+            "rna",
+            "tests/data/test.bam",
+            &copy_bam,
+            "--gtf",
+            "tests/data/test.gtf",
+            "--outdir",
+            outdir,
+            "--skip-dup-check",
+        ])
+        .output()
+        .expect("Failed to execute rustqc")
 }
 
 /// Compare two floating-point values with a relative tolerance
@@ -441,4 +476,149 @@ fn test_count_values_exact() {
 
     // Cleanup
     let _ = fs::remove_dir_all(outdir);
+}
+
+// ===================================================================
+// Multi-BAM tests
+// ===================================================================
+
+/// Multiple BAM files should each produce their own output files.
+#[test]
+fn test_multiple_bam_files() {
+    let outdir = "tests/output_multi_bam";
+    let output = run_rustqc_multi(outdir);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "rustqc failed with multiple BAMs:\n{}",
+        stderr
+    );
+
+    // Both BAM stems should have produced output files
+    let expected_files = [
+        "test_dupMatrix.txt",
+        "test_duprateExpDens.png",
+        "test_duprateExpBoxplot.png",
+        "test_expressionHist.png",
+        "test_copy_dupMatrix.txt",
+        "test_copy_duprateExpDens.png",
+        "test_copy_duprateExpBoxplot.png",
+        "test_copy_expressionHist.png",
+    ];
+
+    for filename in &expected_files {
+        let path = format!("{}/{}", outdir, filename);
+        assert!(
+            std::path::Path::new(&path).exists(),
+            "Expected output file missing: {}",
+            path
+        );
+    }
+
+    // Both dupMatrix files should match the R reference (same input data)
+    let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
+    for stem in &["test", "test_copy"] {
+        let rust_matrix = parse_dup_matrix(&format!("{}/{}_dupMatrix.txt", outdir, stem));
+        assert_eq!(
+            r_matrix.len(),
+            rust_matrix.len(),
+            "Row count mismatch for {} matrix",
+            stem
+        );
+    }
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// Passing the same BAM file twice should fail with a duplicate-stem error.
+#[test]
+fn test_duplicate_bam_stems_rejected() {
+    let bin = env!("CARGO_BIN_EXE_rustqc");
+    let output = Command::new(bin)
+        .args([
+            "rna",
+            "tests/data/test.bam",
+            "tests/data/test.bam",
+            "--gtf",
+            "tests/data/test.gtf",
+            "--outdir",
+            "tests/output_dup_stems",
+        ])
+        .output()
+        .expect("Failed to execute rustqc");
+
+    assert!(
+        !output.status.success(),
+        "rustqc should fail with duplicate BAM stems"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("duplicate") || stderr.contains("Duplicate"),
+        "Error message should mention duplicate stems, got:\n{}",
+        stderr
+    );
+
+    // Cleanup (may not exist if it failed early)
+    let _ = fs::remove_dir_all("tests/output_dup_stems");
+}
+
+#[test]
+fn test_sam_input_matches_bam() {
+    // SAM input should produce identical results to BAM input.
+    // SAM files have no index, so this exercises the single-threaded code path.
+    let outdir_bam = "tests/output_integration_sam_bam";
+    let outdir_sam = "tests/output_integration_sam_sam";
+    let _ = fs::remove_dir_all(outdir_bam);
+    let _ = fs::remove_dir_all(outdir_sam);
+    fs::create_dir_all(outdir_bam).unwrap();
+    fs::create_dir_all(outdir_sam).unwrap();
+
+    let output_bam = run_rustqc_with_input(outdir_bam, "tests/data/test.bam");
+    assert!(
+        output_bam.status.success(),
+        "rustqc with BAM input failed: {}",
+        String::from_utf8_lossy(&output_bam.stderr)
+    );
+
+    let output_sam = run_rustqc_with_input(outdir_sam, "tests/data/test.sam");
+    assert!(
+        output_sam.status.success(),
+        "rustqc with SAM input failed: {}",
+        String::from_utf8_lossy(&output_sam.stderr)
+    );
+
+    // Compare dup matrices — SAM and BAM should produce identical output
+    let bam_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir_bam));
+    let sam_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir_sam));
+
+    assert_eq!(
+        bam_matrix.len(),
+        sam_matrix.len(),
+        "Different number of genes: BAM={}, SAM={}",
+        bam_matrix.len(),
+        sam_matrix.len()
+    );
+
+    for (bam_row, sam_row) in bam_matrix.iter().zip(sam_matrix.iter()) {
+        assert_eq!(
+            bam_row.0, sam_row.0,
+            "Gene order mismatch: BAM={}, SAM={}",
+            bam_row.0, sam_row.0
+        );
+
+        for (col_idx, (bam_val, sam_val)) in bam_row.1.iter().zip(sam_row.1.iter()).enumerate() {
+            assert_eq!(
+                bam_val, sam_val,
+                "Value mismatch at col {} for gene {}: BAM='{}', SAM='{}'",
+                col_idx, bam_row.0, bam_val, sam_val
+            );
+        }
+    }
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir_bam);
+    let _ = fs::remove_dir_all(outdir_sam);
 }

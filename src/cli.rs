@@ -25,20 +25,21 @@ pub enum Commands {
     /// Analyzes PCR duplicate rates as a function of gene expression level
     /// in RNA-Seq datasets. A Rust reimplementation of the dupRadar R package.
     ///
-    /// Input BAM files must have duplicates marked (SAM flag 0x400) but NOT removed.
-    /// Use tools like Picard MarkDuplicates or samblaster to mark duplicates first.
+    /// Input alignment files (SAM/BAM/CRAM) must have duplicates marked (SAM flag 0x400)
+    /// but NOT removed. Use tools like Picard MarkDuplicates or samblaster to mark
+    /// duplicates first.
     Rna(RnaArgs),
 }
 
 /// Arguments for the `rna` (dupRadar) subcommand.
 #[derive(Parser, Debug)]
 pub struct RnaArgs {
-    /// Path to the duplicate-marked BAM file
-    #[arg(value_name = "BAM")]
-    pub bam: String,
+    /// Path(s) to duplicate-marked alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
 
     /// Path to the GTF gene annotation file
-    #[arg(value_name = "GTF")]
+    #[arg(short, long, value_name = "GTF")]
     pub gtf: String,
 
     /// Library strandedness: 0=unstranded, 1=forward, 2=reverse
@@ -68,6 +69,18 @@ pub struct RnaArgs {
     /// Set to empty string to disable biotype counting.
     #[arg(long, value_name = "ATTRIBUTE")]
     pub biotype_attribute: Option<String>,
+
+    /// Path to reference FASTA file (required for CRAM input)
+    #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+
+    /// Skip the check for duplicate-marking tools in the BAM header.
+    ///
+    /// By default, RustQC verifies that the BAM file has been processed by a
+    /// duplicate-marking tool (e.g. Picard MarkDuplicates, samblaster) before
+    /// running. Use this flag to bypass that check.
+    #[arg(long, default_value_t = false)]
+    pub skip_dup_check: bool,
 }
 
 /// Parse command-line arguments and return the Cli struct.
@@ -81,11 +94,11 @@ mod tests {
 
     #[test]
     fn test_rna_default_args() {
-        // Test that defaults are sensible
-        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "genes.gtf"]);
+        // Test that defaults are sensible with a single BAM
+        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.bam, "test.bam");
+                assert_eq!(args.input, vec!["test.bam"]);
                 assert_eq!(args.gtf, "genes.gtf");
                 assert_eq!(args.stranded, 0);
                 assert!(!args.paired);
@@ -97,11 +110,32 @@ mod tests {
     }
 
     #[test]
+    fn test_rna_multiple_bams() {
+        // Test that multiple BAM files are accepted
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "a.bam",
+            "b.bam",
+            "c.bam",
+            "--gtf",
+            "genes.gtf",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.input, vec!["a.bam", "b.bam", "c.bam"]);
+                assert_eq!(args.gtf, "genes.gtf");
+            }
+        }
+    }
+
+    #[test]
     fn test_rna_all_args() {
         let cli = Cli::parse_from([
             "rustqc",
             "rna",
             "test.bam",
+            "--gtf",
             "genes.gtf",
             "--stranded",
             "2",
@@ -110,6 +144,8 @@ mod tests {
             "4",
             "--outdir",
             "/tmp/out",
+            "--reference",
+            "genome.fa",
         ]);
         match cli.command {
             Commands::Rna(args) => {
@@ -117,6 +153,7 @@ mod tests {
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");
+                assert_eq!(args.reference, Some("genome.fa".to_string()));
             }
         }
     }

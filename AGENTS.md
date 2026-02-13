@@ -60,8 +60,9 @@ tests/
 Flat module structure — all modules declared in `main.rs`, no `lib.rs`.
 Inter-module access uses `crate::` paths (e.g., `use crate::gtf::Gene;`).
 
-The CLI uses clap subcommands: `rustqc rna <BAM> <GTF> [OPTIONS]`. Future QC
-modules will be added as additional subcommands.
+The CLI uses clap subcommands: `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]`.
+Multiple BAM files can be passed as positional arguments and are processed in
+parallel. Future QC modules will be added as additional subcommands.
 
 ## Code Style
 
@@ -165,6 +166,22 @@ All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cac
 | `log`          | Logging facade                   |
 | `env_logger`   | Log output backend               |
 | `indexmap`     | Insertion-order-preserving maps  |
+
+## Duplicate Marking Validation
+
+RustQC verifies that BAM files have been processed by a duplicate-marking tool before
+running the RNA duplication analysis. This is implemented in two layers:
+
+1. **Pre-flight `@PG` header check** (`counting::verify_duplicates_marked`): Parses the
+   BAM header text for `@PG` lines and checks the `ID:` and `PN:` fields against
+   `KNOWN_DUP_MARKERS` (Picard MarkDuplicates, samblaster, sambamba, biobambam, etc.).
+   Exits with `anyhow::bail!()` if no known tool is found.
+2. **Post-hoc zero-duplicates check**: After counting, if `total_dup == 0` with
+   `total_mapped > 0`, bails with an error — catches cases where the header is present
+   but duplicates weren't actually flagged.
+
+Both checks are skipped when `--skip-dup-check` is passed (stored as `RnaArgs.skip_dup_check`,
+forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
 
 ## Notes for Agents
 

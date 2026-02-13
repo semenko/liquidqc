@@ -33,7 +33,7 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 Rscript benchmark/small/run_dupRadar_R.R
 
 # RustQC (dupRadar + featureCounts outputs)
-cargo run --release -- rna benchmark/small/test.bam benchmark/small/chr6.gtf -p -o benchmark/small/RustQC
+cargo run --release -- rna benchmark/small/test.bam --gtf benchmark/small/chr6.gtf -p -o benchmark/small/RustQC
 ```
 
 The GTF for the small benchmark uses `gene_biotype` (Ensembl convention), so biotype counts are generated automatically.
@@ -105,8 +105,8 @@ Rscript benchmark/large/run_dupRadar_R.R
 
 #### 3. Run RustQC
 
-The BAM uses Ensembl chromosome names (`1`, `2`, ...) but the GENCODE GTF uses UCSC names (`chr1`, `chr2`, ...).
-A config file is used to add the `chr` prefix to BAM chromosome names:
+The alignment file uses Ensembl chromosome names (`1`, `2`, ...) but the GENCODE GTF uses UCSC names (`chr1`, `chr2`, ...).
+A config file is used to add the `chr` prefix to alignment chromosome names:
 
 ```yaml
 # benchmark/large/config.yaml
@@ -119,7 +119,7 @@ cargo build --release
 # Single-threaded
 ./target/release/rustqc rna \
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
-  benchmark/large/genes.gtf \
+  --gtf benchmark/large/genes.gtf \
   -p \
   -o benchmark/large/RustQC \
   -c benchmark/large/config.yaml \
@@ -128,7 +128,7 @@ cargo build --release
 # Multi-threaded (8 threads)
 ./target/release/rustqc rna \
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
-  benchmark/large/genes.gtf \
+  --gtf benchmark/large/genes.gtf \
   -p \
   -t 8 \
   -o benchmark/large/RustQC \
