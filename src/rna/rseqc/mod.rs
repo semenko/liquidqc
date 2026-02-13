@@ -3,6 +3,8 @@
 //! Standalone reimplementations of selected RSeQC Python quality control scripts
 //! for RNA-Seq data analysis.
 
+pub mod common;
+
 pub mod bam_stat;
 pub mod infer_experiment;
 pub mod inner_distance;

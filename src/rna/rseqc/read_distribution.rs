@@ -10,8 +10,11 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use log::{debug, info};
+use indexmap::IndexMap;
+use log::debug;
 use rust_htslib::bam::{self, Read as BamRead};
+
+use crate::gtf::Gene;
 
 // ===================================================================
 // Region types
@@ -117,8 +120,11 @@ impl ChromIntervals {
 }
 
 /// Per-chromosome region sets for all feature types.
+///
+/// This is the core data structure for read distribution analysis. It can be
+/// built from either a BED12 file or from GTF gene annotations.
 #[derive(Debug, Default)]
-struct RegionSets {
+pub struct RegionSets {
     cds_exon: HashMap<String, ChromIntervals>,
     utr_5: HashMap<String, ChromIntervals>,
     utr_3: HashMap<String, ChromIntervals>,
@@ -293,7 +299,7 @@ impl Bed12Record {
 // ===================================================================
 
 /// Build all region sets from a BED12 gene model file.
-fn build_regions(bed_path: &str) -> Result<RegionSets> {
+pub fn build_regions_from_bed(bed_path: &str) -> Result<RegionSets> {
     let content = std::fs::read_to_string(bed_path)
         .with_context(|| format!("Failed to read BED file: {}", bed_path))?;
 
@@ -410,6 +416,178 @@ fn build_regions(bed_path: &str) -> Result<RegionSets> {
     Ok(regions)
 }
 
+/// Build all region sets from GTF gene annotations.
+///
+/// Derives the same region types as [`build_regions_from_bed`] by using
+/// transcript-level exon and CDS information from the GTF:
+///
+/// - **CDS exons**: intersection of transcript exon blocks with CDS range
+/// - **5'/3' UTR**: exon portions outside CDS range (strand-aware)
+/// - **Introns**: gaps between consecutive exon blocks per transcript
+/// - **TSS/TES flanking**: upstream/downstream of transcript start/end (strand-aware)
+///
+/// Non-coding transcripts (no CDS) contribute only introns and TSS/TES regions,
+/// matching BED12 behavior where `cds_start == cds_end`.
+pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
+    let mut regions = RegionSets::default();
+
+    for gene in genes.values() {
+        for tx in &gene.transcripts {
+            let chrom = tx.chrom.to_uppercase();
+            let strand = tx.strand;
+
+            // Convert GTF 1-based inclusive exons to 0-based half-open
+            let exon_starts: Vec<u64> = tx.exons.iter().map(|&(s, _)| s - 1).collect();
+            let exon_ends: Vec<u64> = tx.exons.iter().map(|&(_, e)| e).collect(); // GTF end inclusive -> BED end exclusive = same value
+
+            // CDS range (0-based half-open), None for non-coding
+            let cds_range: Option<(u64, u64)> =
+                if let (Some(cds_s), Some(cds_e)) = (tx.cds_start, tx.cds_end) {
+                    Some((cds_s - 1, cds_e)) // GTF 1-based inclusive -> 0-based half-open
+                } else {
+                    None
+                };
+
+            // Transcript span (0-based half-open)
+            let tx_start = tx.start - 1; // GTF 1-based -> 0-based
+            let tx_end = tx.end; // GTF inclusive end -> exclusive end
+
+            // CDS exons: intersection of exon blocks with CDS range
+            if let Some((cds_start, cds_end)) = cds_range {
+                for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
+                    if ee <= cds_start || es >= cds_end {
+                        continue;
+                    }
+                    let s = es.max(cds_start);
+                    let e = ee.min(cds_end);
+                    if s < e {
+                        regions.cds_exon.entry(chrom.clone()).or_default().add(s, e);
+                    }
+                }
+
+                // 5' UTR: exon portions before CDS (strand-aware)
+                for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
+                    match strand {
+                        '+' => {
+                            if es < cds_start {
+                                let e = ee.min(cds_start);
+                                regions.utr_5.entry(chrom.clone()).or_default().add(es, e);
+                            }
+                        }
+                        '-' => {
+                            if ee > cds_end {
+                                let s = es.max(cds_end);
+                                regions.utr_5.entry(chrom.clone()).or_default().add(s, ee);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // 3' UTR: exon portions after CDS (strand-aware)
+                for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
+                    match strand {
+                        '+' => {
+                            if ee > cds_end {
+                                let s = es.max(cds_end);
+                                regions.utr_3.entry(chrom.clone()).or_default().add(s, ee);
+                            }
+                        }
+                        '-' => {
+                            if es < cds_start {
+                                let e = ee.min(cds_start);
+                                regions.utr_3.entry(chrom.clone()).or_default().add(es, e);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Non-coding transcripts: no CDS, no UTR — skip CDS/UTR regions
+            // (matches BED12 behavior where cds_start == cds_end)
+
+            // Introns: gaps between consecutive exon blocks
+            for i in 0..exon_starts.len().saturating_sub(1) {
+                let start = exon_ends[i];
+                let end = exon_starts[i + 1];
+                if start < end {
+                    regions
+                        .intron
+                        .entry(chrom.clone())
+                        .or_default()
+                        .add(start, end);
+                }
+            }
+
+            // TSS upstream regions (strand-aware)
+            for (size, map) in [
+                (1000u64, &mut regions.tss_up_1kb),
+                (5000, &mut regions.tss_up_5kb),
+                (10000, &mut regions.tss_up_10kb),
+            ] {
+                let (s, e) = match strand {
+                    '-' => (tx_end, tx_end + size),
+                    _ => (tx_start.saturating_sub(size), tx_start),
+                };
+                map.entry(chrom.clone()).or_default().add(s, e);
+            }
+
+            // TES downstream regions (strand-aware)
+            for (size, map) in [
+                (1000u64, &mut regions.tes_down_1kb),
+                (5000, &mut regions.tes_down_5kb),
+                (10000, &mut regions.tes_down_10kb),
+            ] {
+                let (s, e) = match strand {
+                    '-' => (tx_start.saturating_sub(size), tx_start),
+                    _ => (tx_end, tx_end + size),
+                };
+                map.entry(chrom.clone()).or_default().add(s, e);
+            }
+        }
+    }
+
+    // Merge all regions
+    for map in [
+        &mut regions.cds_exon,
+        &mut regions.utr_5,
+        &mut regions.utr_3,
+        &mut regions.intron,
+        &mut regions.tss_up_1kb,
+        &mut regions.tss_up_5kb,
+        &mut regions.tss_up_10kb,
+        &mut regions.tes_down_1kb,
+        &mut regions.tes_down_5kb,
+        &mut regions.tes_down_10kb,
+    ] {
+        for intervals in map.values_mut() {
+            intervals.merge();
+        }
+    }
+
+    // Priority-based subtraction to make regions mutually exclusive
+    subtract_regions(&mut regions.utr_5, &regions.cds_exon);
+    subtract_regions(&mut regions.utr_3, &regions.cds_exon);
+    subtract_regions(&mut regions.intron, &regions.cds_exon);
+    subtract_regions(&mut regions.intron, &regions.utr_5);
+    subtract_regions(&mut regions.intron, &regions.utr_3);
+    for intergenic in [
+        &mut regions.tss_up_1kb,
+        &mut regions.tss_up_5kb,
+        &mut regions.tss_up_10kb,
+        &mut regions.tes_down_1kb,
+        &mut regions.tes_down_5kb,
+        &mut regions.tes_down_10kb,
+    ] {
+        subtract_regions(intergenic, &regions.cds_exon);
+        subtract_regions(intergenic, &regions.utr_5);
+        subtract_regions(intergenic, &regions.utr_3);
+        subtract_regions(intergenic, &regions.intron);
+    }
+
+    regions
+}
+
 /// Subtract `sub` regions from `target` regions for all chromosomes.
 fn subtract_regions(
     target: &mut HashMap<String, ChromIntervals>,
@@ -488,16 +666,13 @@ pub struct ReadDistributionResult {
 ///
 /// # Arguments
 /// * `bam_path` - Path to the BAM/CRAM file
-/// * `bed_path` - Path to the BED12 reference gene model
+/// * `regions` - Pre-built region sets (from BED or GTF)
 /// * `reference` - Optional path to reference FASTA (required for CRAM)
 pub fn read_distribution(
     bam_path: &str,
-    bed_path: &str,
+    regions: &RegionSets,
     reference: Option<&str>,
 ) -> Result<ReadDistributionResult> {
-    info!("Building gene model from BED file: {}", bed_path);
-    let regions = build_regions(bed_path)?;
-
     // Compute total bases for each region
     let cds_bases = sum_bases(&regions.cds_exon);
     let utr5_bases = sum_bases(&regions.utr_5);

@@ -16,7 +16,7 @@ read_distribution, junction_annotation, junction_saturation, inner_distance).
 ### Synopsis
 
 ```
-rustqc rna <INPUT>... --gtf <GTF> [--bed <BED>] [OPTIONS]
+rustqc rna <INPUT>... (--gtf <GTF> | --bed <BED>) [OPTIONS]
 ```
 
 ### Positional arguments
@@ -31,32 +31,36 @@ producing its own set of output files. Threads are divided evenly among
 concurrent jobs.
 
 ```bash
-# Single file
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed
+# Single file with GTF (all analyses)
+rustqc rna sample.bam --gtf genes.gtf
+
+# Single file with BED (RSeQC tools only; dupRadar/featureCounts skipped)
+rustqc rna sample.bam --bed genes.bed
 
 # Multiple files
-rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf --bed genes.bed
+rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf
 ```
 
-### Required options
+### Annotation options
+
+Exactly one of `--gtf` or `--bed` must be provided. They are **mutually exclusive**.
 
 #### `--gtf <GTF>` / `-g <GTF>`
 
-Path to the GTF gene annotation file. Used to define gene models for read
-counting and expression-level calculation. The GTF must contain `exon` features
-with a `gene_id` attribute.
-
-### General options
+Path to a GTF gene annotation file. The GTF must contain `exon` features with a
+`gene_id` attribute. When a GTF is provided, **all analyses run**: dupRadar,
+featureCounts, and all 7 RSeQC tools. Transcript-level structure (exon blocks,
+CDS features) is extracted automatically and used by the RSeQC tools that
+previously required a separate BED file.
 
 #### `-b, --bed <BED>`
 
-Path to a BED12-format gene model file. Required for 5 of the 7 RSeQC tools
-(infer_experiment, read_distribution, junction_annotation, junction_saturation,
-inner_distance).
+Path to a BED12-format gene model file. When a BED file is provided **without**
+a GTF, only the 7 RSeQC tools run (plus bam_stat and read_duplication). dupRadar
+and featureCounts are skipped because BED files lack gene-level grouping and
+biotype information.
 
-If omitted, a warning is printed listing the tools that will be skipped. The
-2 tools that do not need a BED file (bam_stat, read_duplication) still run.
-Individual tools can also be disabled via the [configuration file](/usage/configuration/).
+Individual tools can be disabled via the [configuration file](/usage/configuration/).
 
 #### `-o, --outdir <DIR>`
 
@@ -170,35 +174,35 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 ### Examples
 
 ```bash
-# Basic paired-end analysis (all tools)
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p -o results/
-
-# Reverse-stranded library with 8 threads
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p -s 2 -t 8 -o results/
-
-# Without BED file (bam_stat + read_duplication only, others skipped)
+# Basic paired-end analysis with GTF (all tools)
 rustqc rna sample.bam --gtf genes.gtf -p -o results/
 
+# BED-only mode (RSeQC tools only; dupRadar/featureCounts skipped)
+rustqc rna sample.bam --bed genes.bed -p -o results/
+
+# Reverse-stranded library with 8 threads
+rustqc rna sample.bam --gtf genes.gtf -p -s 2 -t 8 -o results/
+
 # CRAM input with reference
-rustqc rna sample.cram --gtf genes.gtf --bed genes.bed -p -r genome.fa -o results/
+rustqc rna sample.cram --gtf genes.gtf -p -r genome.fa -o results/
 
 # GENCODE GTF with explicit biotype attribute
-rustqc rna sample.bam --gtf gencode.v46.gtf --bed genes.bed -p \
+rustqc rna sample.bam --gtf gencode.v46.gtf -p \
   --biotype-attribute gene_type -o results/
 
 # Custom junction saturation sampling range
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p \
+rustqc rna sample.bam --gtf genes.gtf -p \
   --junction-saturation-percentile-floor 10 \
   --junction-saturation-percentile-ceiling 100 \
   --junction-saturation-percentile-step 10 -o results/
 
 # Custom inner distance histogram bounds
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p \
+rustqc rna sample.bam --gtf genes.gtf -p \
   --inner-distance-lower-bound -500 --inner-distance-upper-bound 500 \
   --inner-distance-step 10 -o results/
 
 # Multiple BAM files with parallel processing
-rustqc rna *.bam --gtf genes.gtf --bed genes.bed -p -t 8 -o results/
+rustqc rna *.bam --gtf genes.gtf -p -t 8 -o results/
 ```
 
 ---

@@ -9,7 +9,7 @@ original Python implementation.
 
 All RSeQC tools run automatically as part of the `rustqc rna` command and use
 the input filename stem as a prefix for output files. For example,
-`rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -o results/` produces
+`rustqc rna sample.bam --gtf genes.gtf -o results/` produces
 RSeQC output files like `results/sample.bam_stat.txt`.
 
 ## bam_stat

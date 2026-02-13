@@ -9,6 +9,8 @@ advanced settings that go beyond what CLI flags offer. Pass the config file with
 
 ```bash
 rustqc rna sample.bam --gtf genes.gtf -p -c config.yaml -o results/
+# or with BED (RSeQC tools only)
+rustqc rna sample.bam --bed genes.bed -p -c config.yaml -o results/
 ```
 
 All sections and fields are optional. Missing fields use their default values.
@@ -175,8 +177,8 @@ printed and biotype counting is skipped.
 
 Each of the 7 RSeQC tools has an `enabled` toggle (default `true`) and
 tool-specific parameter overrides. Disabling a tool here prevents it from
-running even when the required BED file is provided. CLI flags take precedence
-over config file values for all parameters.
+running even when annotation is provided. CLI flags take precedence over
+config file values for all parameters.
 
 ### bam_stat
 
@@ -185,7 +187,7 @@ bam_stat:
   enabled: true    # Set to false to skip bam_stat
 ```
 
-No additional parameters. This tool does not require a BED file.
+No additional parameters. This tool does not require annotation.
 
 ### infer_experiment
 
@@ -195,7 +197,7 @@ infer_experiment:
   sample_size: 200000   # Number of reads to sample (default: 200000)
 ```
 
-Requires a BED file (`--bed`). The `sample_size` can also be set via
+Requires annotation (`--gtf` or `--bed`). The `sample_size` can also be set via
 `--infer-experiment-sample-size`.
 
 ### read_duplication
@@ -205,7 +207,7 @@ read_duplication:
   enabled: true    # Set to false to skip read_duplication
 ```
 
-No additional parameters. This tool does not require a BED file.
+No additional parameters. This tool does not require annotation.
 
 ### read_distribution
 
@@ -214,7 +216,7 @@ read_distribution:
   enabled: true    # Set to false to skip read_distribution
 ```
 
-No additional parameters. Requires a BED file (`--bed`).
+No additional parameters. Requires annotation (`--gtf` or `--bed`).
 
 ### junction_annotation
 
@@ -224,7 +226,7 @@ junction_annotation:
   min_intron: 50   # Minimum intron length in bases (default: 50)
 ```
 
-Requires a BED file (`--bed`). The `min_intron` can also be set via `--min-intron`.
+Requires annotation (`--gtf` or `--bed`). The `min_intron` can also be set via `--min-intron`.
 
 ### junction_saturation
 
@@ -238,7 +240,7 @@ junction_saturation:
   percentile_step: 5       # Sampling step size (default: 5)
 ```
 
-Requires a BED file (`--bed`). These parameters can also be set via CLI flags:
+Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
 `--min-intron`, `--junction-saturation-min-coverage`,
 `--junction-saturation-percentile-floor`, `--junction-saturation-percentile-ceiling`,
 `--junction-saturation-percentile-step`.
@@ -254,6 +256,6 @@ inner_distance:
   step: 5                # Histogram bin width (default: 5)
 ```
 
-Requires a BED file (`--bed`). These parameters can also be set via CLI flags:
+Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
 `--inner-distance-sample-size`, `--inner-distance-lower-bound`,
 `--inner-distance-upper-bound`, `--inner-distance-step`.

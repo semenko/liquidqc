@@ -478,36 +478,6 @@ impl Config {
             || dr.multiqc_intercept
             || dr.multiqc_curve
     }
-
-    /// Returns true if any RSeQC tool that requires a BED file is enabled.
-    pub fn any_bed_tool_enabled(&self) -> bool {
-        self.infer_experiment.enabled
-            || self.read_distribution.enabled
-            || self.junction_annotation.enabled
-            || self.junction_saturation.enabled
-            || self.inner_distance.enabled
-    }
-
-    /// Returns a list of enabled BED-requiring tool names (for warning messages).
-    pub fn enabled_bed_tools(&self) -> Vec<&'static str> {
-        let mut tools = Vec::new();
-        if self.infer_experiment.enabled {
-            tools.push("infer_experiment");
-        }
-        if self.read_distribution.enabled {
-            tools.push("read_distribution");
-        }
-        if self.junction_annotation.enabled {
-            tools.push("junction_annotation");
-        }
-        if self.junction_saturation.enabled {
-            tools.push("junction_saturation");
-        }
-        if self.inner_distance.enabled {
-            tools.push("inner_distance");
-        }
-        tools
-    }
 }
 
 #[cfg(test)]
@@ -626,7 +596,6 @@ inner_distance:
         assert!(!config.junction_annotation.enabled);
         assert!(!config.junction_saturation.enabled);
         assert!(!config.inner_distance.enabled);
-        assert!(!config.any_bed_tool_enabled());
     }
 
     #[test]
@@ -658,24 +627,5 @@ inner_distance:
         assert_eq!(config.inner_distance.lower_bound, Some(-500));
         assert_eq!(config.inner_distance.upper_bound, Some(500));
         assert_eq!(config.inner_distance.step, Some(10));
-    }
-
-    #[test]
-    fn test_enabled_bed_tools() {
-        let yaml = r#"
-infer_experiment:
-  enabled: false
-read_distribution:
-  enabled: true
-junction_annotation:
-  enabled: false
-"#;
-        let config: Config = serde_yml::from_str(yaml).unwrap();
-        let tools = config.enabled_bed_tools();
-        assert!(tools.contains(&"read_distribution"));
-        assert!(tools.contains(&"junction_saturation"));
-        assert!(tools.contains(&"inner_distance"));
-        assert!(!tools.contains(&"infer_experiment"));
-        assert!(!tools.contains(&"junction_annotation"));
     }
 }

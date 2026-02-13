@@ -4,111 +4,15 @@
 //! observations at increasing percentages of total reads and reports how many
 //! known / novel / total unique junctions are detected at each level.
 
+use super::common::{self, KnownJunctionSet};
 use anyhow::{Context, Result};
 use log::{debug, info};
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rust_htslib::bam::{self, Read as BamRead};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Write;
-
-// ============================= BED12 reference parsing =============================
-
-/// Parse BED12 file and extract known splice junction keys.
-///
-/// Returns a set of junction keys in the format `"CHROM:start-end"` where CHROM
-/// is uppercased and coordinates are 0-based.
-fn parse_reference_junctions(bed_path: &str) -> Result<HashSet<String>> {
-    let content =
-        std::fs::read_to_string(bed_path).with_context(|| format!("reading BED: {bed_path}"))?;
-
-    let mut known: HashSet<String> = HashSet::new();
-
-    for line in content.lines() {
-        if line.starts_with('#') || line.starts_with("track") || line.starts_with("browser") {
-            continue;
-        }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 12 {
-            continue;
-        }
-
-        let chrom = fields[0].to_uppercase();
-        let tx_start: u64 = fields[1].parse().context("parsing txStart")?;
-        let block_count: usize = fields[9].parse().context("parsing blockCount")?;
-
-        // Skip single-exon transcripts
-        if block_count <= 1 {
-            continue;
-        }
-
-        let block_sizes: Vec<u64> = fields[10]
-            .trim_end_matches(',')
-            .split(',')
-            .map(|s| s.parse::<u64>().unwrap_or(0))
-            .collect();
-        let block_starts: Vec<u64> = fields[11]
-            .trim_end_matches(',')
-            .split(',')
-            .map(|s| s.parse::<u64>().unwrap_or(0))
-            .collect();
-
-        if block_sizes.len() < block_count || block_starts.len() < block_count {
-            continue;
-        }
-
-        // Compute exon boundaries and extract introns
-        let exon_starts: Vec<u64> = block_starts.iter().map(|&bs| tx_start + bs).collect();
-        let exon_ends: Vec<u64> = exon_starts
-            .iter()
-            .zip(block_sizes.iter())
-            .map(|(&es, &bs)| es + bs)
-            .collect();
-
-        for i in 0..block_count - 1 {
-            let intron_start = exon_ends[i];
-            let intron_end = exon_starts[i + 1];
-            let key = format!("{chrom}:{intron_start}-{intron_end}");
-            known.insert(key);
-        }
-    }
-
-    info!("Loaded {} known splice junctions from BED", known.len());
-    Ok(known)
-}
-
-// ============================= CIGAR intron extraction =============================
-
-/// Extract intron (N-operation) blocks from a CIGAR string.
-///
-/// Returns a list of `(chrom, start, end)` tuples for each N operation.
-/// Matches RSeQC's `fetch_intron()` behavior: soft clips do NOT advance position.
-fn fetch_introns(
-    chrom: &str,
-    start: u64,
-    cigar: &[rust_htslib::bam::record::Cigar],
-) -> Vec<(String, u64, u64)> {
-    use rust_htslib::bam::record::Cigar::*;
-    let mut pos = start;
-    let mut introns = Vec::new();
-
-    for op in cigar {
-        match op {
-            Match(len) => pos += *len as u64,
-            Ins(_) => {}
-            Del(len) => pos += *len as u64,
-            RefSkip(len) => {
-                let end = pos + *len as u64;
-                introns.push((chrom.to_string(), pos, end));
-                pos = end;
-            }
-            SoftClip(_) => {} // RSeQC fetch_intron does NOT advance for S
-            _ => {}           // H, P, =, X — ignored
-        }
-    }
-    introns
-}
 
 // ============================= Saturation result =============================
 
@@ -131,7 +35,7 @@ pub struct SaturationResult {
 ///
 /// # Arguments
 /// * `bam_path` - Path to the input BAM file.
-/// * `bed_path` - Path to the reference gene model in BED12 format.
+/// * `known_junctions` - Pre-built set of known splice junctions (from BED or GTF).
 /// * `min_intron` - Minimum intron size to consider (default: 50).
 /// * `mapq_cut` - Minimum mapping quality (default: 30).
 /// * `min_coverage` - Minimum supporting reads for known junctions (default: 1).
@@ -144,7 +48,7 @@ pub struct SaturationResult {
 #[allow(clippy::too_many_arguments)]
 pub fn junction_saturation(
     bam_path: &str,
-    bed_path: &str,
+    known_junctions: &KnownJunctionSet,
     min_intron: u64,
     mapq_cut: u8,
     min_coverage: u32,
@@ -153,11 +57,9 @@ pub fn junction_saturation(
     sample_step: u32,
     reference: Option<&str>,
 ) -> Result<SaturationResult> {
-    // Parse reference junctions from BED12
-    let known_junctions = parse_reference_junctions(bed_path)?;
-
     // Build set of reference chromosomes (uppercased)
-    let ref_chroms: HashSet<String> = known_junctions
+    let ref_chroms: std::collections::HashSet<String> = known_junctions
+        .junctions
         .iter()
         .map(|k| k.split(':').next().unwrap().to_string())
         .collect();
@@ -233,13 +135,13 @@ pub fn junction_saturation(
 
         let start = record.pos() as u64;
         let cigar = record.cigar();
-        let introns = fetch_introns(chrom, start, cigar.as_ref());
+        let introns = common::fetch_introns(start, cigar.as_ref());
 
-        for (chr, istart, iend) in introns {
+        for (istart, iend) in introns {
             if iend - istart < min_intron {
                 continue;
             }
-            let key = format!("{chr}:{istart}-{iend}");
+            let key = format!("{chrom}:{istart}-{iend}");
             all_observations.push(key);
         }
     }
@@ -288,7 +190,7 @@ pub fn junction_saturation(
         let mut novel_count = 0usize;
 
         for (junction, &count) in &unique_junctions {
-            if known_junctions.contains(junction) {
+            if known_junctions.junctions.contains(junction) {
                 if count >= min_coverage {
                     known_count += 1;
                 }
@@ -403,63 +305,6 @@ pub fn write_summary(result: &SaturationResult, path: &str) -> Result<()> {
 
 // ============================= Tests =============================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_reference_junctions() {
-        // Create a minimal BED12 with two exons (one intron)
-        let tmp = std::env::temp_dir().join("test_junc_sat_ref.bed");
-        std::fs::write(
-            &tmp,
-            "chr1\t100\t500\tgene1\t0\t+\t100\t500\t0\t2\t50,50\t0,350\n",
-        )
-        .unwrap();
-
-        let junctions = parse_reference_junctions(tmp.to_str().unwrap()).unwrap();
-        // Exon1: [100,150), Exon2: [450,500). Intron: [150, 450)
-        assert!(junctions.contains("CHR1:150-450"));
-        assert_eq!(junctions.len(), 1);
-
-        std::fs::remove_file(tmp).ok();
-    }
-
-    #[test]
-    fn test_fetch_introns_simple() {
-        use rust_htslib::bam::record::Cigar::*;
-        let cigar = vec![Match(50), RefSkip(1000), Match(50)];
-        let introns = fetch_introns("CHR1", 100, &cigar);
-        assert_eq!(introns.len(), 1);
-        assert_eq!(introns[0], ("CHR1".to_string(), 150, 1150));
-    }
-
-    #[test]
-    fn test_fetch_introns_no_splice() {
-        use rust_htslib::bam::record::Cigar::*;
-        let cigar = vec![Match(100)];
-        let introns = fetch_introns("CHR1", 0, &cigar);
-        assert!(introns.is_empty());
-    }
-
-    #[test]
-    fn test_fetch_introns_multiple() {
-        use rust_htslib::bam::record::Cigar::*;
-        let cigar = vec![Match(20), RefSkip(500), Match(30), RefSkip(300), Match(20)];
-        let introns = fetch_introns("CHR1", 100, &cigar);
-        assert_eq!(introns.len(), 2);
-        assert_eq!(introns[0], ("CHR1".to_string(), 120, 620));
-        assert_eq!(introns[1], ("CHR1".to_string(), 650, 950));
-    }
-
-    #[test]
-    fn test_fetch_introns_soft_clip_no_advance() {
-        use rust_htslib::bam::record::Cigar::*;
-        // Soft clip should NOT advance position in fetch_intron
-        let cigar = vec![SoftClip(5), Match(50), RefSkip(1000), Match(50)];
-        let introns = fetch_introns("CHR1", 100, &cigar);
-        assert_eq!(introns.len(), 1);
-        // Without soft clip advancing: intron starts at 100 + 50 = 150
-        assert_eq!(introns[0], ("CHR1".to_string(), 150, 1150));
-    }
-}
+// Note: CIGAR intron extraction tests and BED junction parsing tests have been
+// moved to the common module (rseqc::common::tests). Tests here focus on
+// saturation-specific logic.

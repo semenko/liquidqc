@@ -154,27 +154,11 @@ cargo build --release
 > to match the GENCODE GTF. The `--biotype-attribute gene_type` flag is needed
 > because GENCODE uses `gene_type` instead of the Ensembl default `gene_biotype`.
 
-### 5. Run RSeQC tools (RustQC reimplementations)
+### 5. RSeQC tools (RustQC reimplementations)
 
-The RSeQC tools are integrated into `rustqc rna` and run automatically when a
-`--bed` file is provided. To include all 7 RSeQC tools in the analysis, add
-`--bed` to the command:
-
-```bash
-# Small — all analyses including RSeQC tools
-./target/release/rustqc rna benchmark/input/small/test.bam \
-  --gtf benchmark/input/small/chr6.gtf -p --skip-dup-check \
-  --bed benchmark/input/small/chr6.bed \
-  -o benchmark/RustQC/small
-
-# Large — all analyses including RSeQC tools
-./target/release/rustqc rna benchmark/input/large/GM12878_REP1.markdup.sorted.bam \
-  --gtf benchmark/input/large/genes.gtf -p -t 10 \
-  --bed benchmark/input/large/genes.bed \
-  -o benchmark/RustQC/large \
-  -c benchmark/input/large/config.yaml \
-  --biotype-attribute gene_type
-```
+All 7 RSeQC tools are integrated into `rustqc rna` and run automatically when
+`--gtf` is provided (the commands in step 4 already include all RSeQC analyses).
+No separate `--bed` file is needed — all required data is derived from the GTF.
 
 ### 6. Generate RSeQC Python reference outputs
 

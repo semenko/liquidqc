@@ -4,7 +4,9 @@
 //! between read pairs, classifying each pair by gene model overlap and producing
 //! histogram and R plot output.
 
+use crate::gtf::Gene;
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use log::info;
 use rust_htslib::bam::{self, Read as BamRead};
 use std::collections::{HashMap, HashSet};
@@ -39,14 +41,98 @@ pub struct PairRecord {
 /// Exon bitset: tracks which genomic positions are exonic per chromosome.
 /// Uses a simple sorted interval list with point-query via binary search.
 #[derive(Debug, Default)]
-struct ExonBitset {
-    /// Sorted, non-overlapping intervals per chromosome
-    intervals: HashMap<String, Vec<(u64, u64)>>,
+pub struct ExonBitset {
+    /// Sorted, non-overlapping intervals per chromosome (0-based half-open)
+    pub intervals: HashMap<String, Vec<(u64, u64)>>,
 }
 
 impl ExonBitset {
+    /// Build an `ExonBitset` from parsed GTF gene annotations.
+    ///
+    /// Uses exons from multi-exon transcripts only, converting from GTF 1-based
+    /// inclusive coordinates to 0-based half-open coordinates. Single-exon
+    /// transcripts are skipped to match BED-path behavior (and RSeQC).
+    /// Chromosome names are uppercased.
+    pub fn from_genes(genes: &IndexMap<String, Gene>) -> Self {
+        let mut bitset = ExonBitset::default();
+        for gene in genes.values() {
+            for tx in &gene.transcripts {
+                // Skip single-exon transcripts (matches BED-path / RSeQC behavior)
+                if tx.exons.len() <= 1 {
+                    continue;
+                }
+                let chrom = tx.chrom.to_uppercase();
+                for &(start, end) in &tx.exons {
+                    // GTF: 1-based inclusive → BED-style 0-based half-open
+                    bitset.add(&chrom, start - 1, end);
+                }
+            }
+        }
+        bitset.merge();
+        bitset
+    }
+
+    /// Build an `ExonBitset` from a BED12 file.
+    ///
+    /// Parses the BED12 file and extracts exon blocks from multi-exon
+    /// transcripts. Single-exon transcripts are skipped (matches RSeQC).
+    pub fn from_bed(bed_path: &str) -> Result<Self> {
+        let file = std::fs::File::open(bed_path)
+            .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
+        let reader = BufReader::new(file);
+
+        let mut bitset = ExonBitset::default();
+
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty()
+                || line.starts_with('#')
+                || line.starts_with("track")
+                || line.starts_with("browser")
+            {
+                continue;
+            }
+
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() < 12 {
+                continue;
+            }
+
+            let chrom = fields[0].to_uppercase();
+            let tx_start: u64 = fields[1].parse().context("Invalid txStart")?;
+            let block_count: usize = fields[9].parse().context("Invalid blockCount")?;
+
+            if block_count == 1 {
+                continue;
+            }
+
+            let block_sizes: Vec<u64> = fields[10]
+                .trim_end_matches(',')
+                .split(',')
+                .map(|s| s.parse::<u64>())
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Invalid blockSizes")?;
+            let block_starts: Vec<u64> = fields[11]
+                .trim_end_matches(',')
+                .split(',')
+                .map(|s| s.parse::<u64>())
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Invalid blockStarts")?;
+
+            for i in 0..block_count.min(block_sizes.len()).min(block_starts.len()) {
+                let exon_start = tx_start + block_starts[i];
+                let exon_end = exon_start + block_sizes[i];
+                bitset.add(&chrom, exon_start, exon_end);
+            }
+        }
+
+        bitset.merge();
+        Ok(bitset)
+    }
+
     /// Add an exon interval for a chromosome.
-    fn add(&mut self, chrom: &str, start: u64, end: u64) {
+    pub fn add(&mut self, chrom: &str, start: u64, end: u64) {
         self.intervals
             .entry(chrom.to_string())
             .or_default()
@@ -114,36 +200,100 @@ impl ExonBitset {
 
 /// Transcript interval tree: maps chromosome to sorted transcript ranges.
 #[derive(Debug, Default)]
-struct TranscriptTree {
+pub struct TranscriptTree {
     /// Per-chromosome sorted list of (start, end, name)
-    transcripts: HashMap<String, Vec<(u64, u64, String)>>,
+    pub transcripts: HashMap<String, Vec<(u64, u64, String)>>,
 }
 
 impl TranscriptTree {
-    /// Add a transcript range. Note: RSeQC has a bug where the first transcript
-    /// per chromosome is dropped (the dict is created but `add_interval` is only
-    /// called in the `else` branch). We reproduce this bug for compatibility.
-    fn add(&mut self, chrom: &str, start: u64, end: u64, name: &str, first_seen: bool) {
-        if !first_seen {
-            self.transcripts
-                .entry(chrom.to_string())
-                .or_default()
-                .push((start, end, name.to_string()));
-        } else {
-            // Create entry but don't add the interval (RSeQC bug compatibility)
-            self.transcripts.entry(chrom.to_string()).or_default();
+    /// Build a `TranscriptTree` from parsed GTF gene annotations.
+    ///
+    /// Uses transcript-level data from each gene. Converts from GTF 1-based
+    /// inclusive coordinates to 0-based half-open coordinates. Chromosome names
+    /// are uppercased. Transcript names use the format `"transcript_id:CHROM:start-end"`.
+    /// Single-exon transcripts are skipped (matches RSeQC behaviour).
+    pub fn from_genes(genes: &IndexMap<String, Gene>) -> Self {
+        let mut tree = TranscriptTree::default();
+        for gene in genes.values() {
+            for tx in &gene.transcripts {
+                // Skip single-exon transcripts (matches BED12 path)
+                if tx.exons.len() <= 1 {
+                    continue;
+                }
+                let chrom = tx.chrom.to_uppercase();
+                // GTF: 1-based inclusive → BED-style 0-based half-open
+                let start = tx.start - 1;
+                let end = tx.end;
+                let name = format!("{}:{}:{}-{}", tx.transcript_id, chrom, start, end);
+                tree.add(&chrom, start, end, &name);
+            }
         }
+        tree.sort();
+        tree
+    }
+
+    /// Build a `TranscriptTree` from a BED12 file.
+    ///
+    /// Parses the BED12 file and extracts transcript spans from multi-exon
+    /// transcripts. Single-exon transcripts are skipped (matches RSeQC).
+    pub fn from_bed(bed_path: &str) -> Result<Self> {
+        let file = std::fs::File::open(bed_path)
+            .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
+        let reader = BufReader::new(file);
+
+        let mut tree = TranscriptTree::default();
+
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty()
+                || line.starts_with('#')
+                || line.starts_with("track")
+                || line.starts_with("browser")
+            {
+                continue;
+            }
+
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() < 12 {
+                continue;
+            }
+
+            let chrom = fields[0].to_uppercase();
+            let tx_start: u64 = fields[1].parse().context("Invalid txStart")?;
+            let tx_end: u64 = fields[2].parse().context("Invalid txEnd")?;
+            let name = fields[3];
+            let block_count: usize = fields[9].parse().context("Invalid blockCount")?;
+
+            if block_count == 1 {
+                continue;
+            }
+
+            let tx_name = format!("{}:{}:{}-{}", name, chrom, tx_start, tx_end);
+            tree.add(&chrom, tx_start, tx_end, &tx_name);
+        }
+
+        tree.sort();
+        Ok(tree)
+    }
+
+    /// Add a transcript range.
+    pub fn add(&mut self, chrom: &str, start: u64, end: u64, name: &str) {
+        self.transcripts
+            .entry(chrom.to_string())
+            .or_default()
+            .push((start, end, name.to_string()));
     }
 
     /// Sort intervals for efficient querying.
-    fn sort(&mut self) {
+    pub fn sort(&mut self) {
         for transcripts in self.transcripts.values_mut() {
             transcripts.sort_by_key(|&(s, _, _)| s);
         }
     }
 
     /// Find transcript names that overlap a point.
-    fn find_overlapping(&self, chrom: &str, point: u64) -> HashSet<String> {
+    pub fn find_overlapping(&self, chrom: &str, point: u64) -> HashSet<String> {
         let mut result = HashSet::new();
         if let Some(transcripts) = self.transcripts.get(chrom) {
             for &(start, end, ref name) in transcripts {
@@ -156,78 +306,7 @@ impl TranscriptTree {
     }
 }
 
-// ============================================================================
-// BED12 Parsing
-// ============================================================================
-
-/// Parse BED12 file and build exon bitsets and transcript tree.
-fn parse_bed12(bed_path: &str) -> Result<(ExonBitset, TranscriptTree)> {
-    let file = std::fs::File::open(bed_path)
-        .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
-    let reader = BufReader::new(file);
-
-    let mut exon_bitset = ExonBitset::default();
-    let mut transcript_tree = TranscriptTree::default();
-    let mut first_seen_chroms: HashSet<String> = HashSet::new();
-
-    for line in reader.lines() {
-        let line = line?;
-        let line = line.trim();
-        if line.is_empty()
-            || line.starts_with('#')
-            || line.starts_with("track")
-            || line.starts_with("browser")
-        {
-            continue;
-        }
-
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 12 {
-            continue;
-        }
-
-        let chrom = fields[0].to_uppercase();
-        let tx_start: u64 = fields[1].parse().context("Invalid txStart")?;
-        let tx_end: u64 = fields[2].parse().context("Invalid txEnd")?;
-        let name = fields[3];
-        let block_count: usize = fields[9].parse().context("Invalid blockCount")?;
-
-        // Skip single-exon transcripts (matches RSeQC: `if int(fields[9] == 1): continue`)
-        if block_count == 1 {
-            continue;
-        }
-
-        let block_sizes: Vec<u64> = fields[10]
-            .trim_end_matches(',')
-            .split(',')
-            .map(|s| s.parse::<u64>())
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("Invalid blockSizes")?;
-        let block_starts: Vec<u64> = fields[11]
-            .trim_end_matches(',')
-            .split(',')
-            .map(|s| s.parse::<u64>())
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("Invalid blockStarts")?;
-
-        // Add exons to bitset
-        for i in 0..block_count.min(block_sizes.len()).min(block_starts.len()) {
-            let exon_start = tx_start + block_starts[i];
-            let exon_end = exon_start + block_sizes[i];
-            exon_bitset.add(&chrom, exon_start, exon_end);
-        }
-
-        // Add transcript to tree (with RSeQC first-per-chrom bug)
-        let is_first = first_seen_chroms.insert(chrom.clone());
-        let tx_name = format!("{}:{}:{}-{}", name, chrom, tx_start, tx_end);
-        transcript_tree.add(&chrom, tx_start, tx_end, &tx_name, is_first);
-    }
-
-    exon_bitset.merge();
-    transcript_tree.sort();
-
-    Ok((exon_bitset, transcript_tree))
-}
+// (BED12 parsing moved to ExonBitset::from_bed and TranscriptTree::from_bed)
 
 // ============================================================================
 // CIGAR Helpers
@@ -266,7 +345,8 @@ fn fetch_exon_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
 ///
 /// # Arguments
 /// * `bam_path` - Path to the BAM file
-/// * `bed_path` - Path to the BED12 reference gene model
+/// * `exon_bitset` - Pre-built exon bitset for exonic base counting
+/// * `transcript_tree` - Pre-built transcript tree for membership queries
 /// * `sample_size` - Maximum number of read pairs to process
 /// * `mapq_cut` - Minimum MAPQ threshold
 /// * `lower_bound` - Lower bound for histogram
@@ -278,7 +358,8 @@ fn fetch_exon_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
 #[allow(clippy::too_many_arguments)]
 pub fn inner_distance(
     bam_path: &str,
-    bed_path: &str,
+    exon_bitset: &ExonBitset,
+    transcript_tree: &TranscriptTree,
     sample_size: u64,
     mapq_cut: u8,
     lower_bound: i64,
@@ -287,9 +368,6 @@ pub fn inner_distance(
     reference: Option<&str>,
 ) -> Result<InnerDistanceResult> {
     info!("Processing inner distance for: {}", bam_path);
-
-    // Parse reference gene model
-    let (exon_bitset, transcript_tree) = parse_bed12(bed_path)?;
 
     // Open BAM/CRAM file
     let mut bam = if let Some(ref_path) = reference {
@@ -684,14 +762,14 @@ mod tests {
     }
 
     #[test]
-    fn test_transcript_tree_first_per_chrom_bug() {
+    fn test_transcript_tree_all_transcripts_included() {
         let mut tree = TranscriptTree::default();
-        tree.add("CHR1", 100, 200, "gene1", true); // First = dropped
-        tree.add("CHR1", 150, 300, "gene2", false); // Second = added
+        tree.add("CHR1", 100, 200, "gene1"); // First transcript per chrom
+        tree.add("CHR1", 150, 300, "gene2"); // Second transcript
         tree.sort();
 
         let genes = tree.find_overlapping("CHR1", 175);
-        assert!(!genes.contains("gene1")); // First gene was dropped
+        assert!(genes.contains("gene1")); // First gene is now included (bug fixed)
         assert!(genes.contains("gene2"));
     }
 }

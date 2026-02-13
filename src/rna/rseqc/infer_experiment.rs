@@ -4,7 +4,9 @@
 //! gene models (BED12) and determines the fraction consistent with each strand
 //! protocol.
 
+use crate::gtf::Gene;
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use log::{debug, info, warn};
 use rust_htslib::bam::{self, Read as BamRead};
 use std::collections::HashMap;
@@ -35,6 +37,45 @@ pub struct GeneModel {
 }
 
 impl GeneModel {
+    /// Build a gene model from parsed GTF gene annotations.
+    ///
+    /// Uses each gene's overall span and strand to create transcript intervals.
+    /// GTF coordinates are 1-based inclusive; BED coordinates are 0-based
+    /// half-open. Conversion: BED start = GTF start - 1, BED end = GTF end
+    /// (since GTF end is inclusive and BED end is exclusive, the numeric value
+    /// is the same).
+    pub fn from_genes(genes: &IndexMap<String, Gene>) -> Self {
+        let mut model = GeneModel::default();
+        let mut count: u64 = 0;
+
+        for gene in genes.values() {
+            let strand = match gene.strand {
+                '+' => b'+',
+                '-' => b'-',
+                _ => continue, // Skip genes with unknown strand
+            };
+
+            // Convert 1-based inclusive GTF to 0-based half-open BED
+            let start = gene.start.saturating_sub(1);
+            let end = gene.end; // GTF inclusive end == BED exclusive end
+
+            model
+                .intervals
+                .entry(gene.chrom.clone())
+                .or_default()
+                .push(TranscriptInterval { start, end, strand });
+            count += 1;
+        }
+
+        // Sort intervals by start position for binary search
+        for intervals in model.intervals.values_mut() {
+            intervals.sort_by_key(|iv| iv.start);
+        }
+
+        info!("Loaded {} gene intervals from GTF annotation", count);
+        model
+    }
+
     /// Load a BED12 (or BED6+) file into the gene model.
     ///
     /// Extracts columns: chrom (0), start (1), end (2), strand (5).
@@ -428,6 +469,101 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gtf::{Exon, Gene};
+    use indexmap::IndexMap;
+
+    /// Helper to create a simple Gene for testing.
+    fn make_gene(gene_id: &str, chrom: &str, start: u64, end: u64, strand: char) -> Gene {
+        Gene {
+            gene_id: gene_id.to_string(),
+            chrom: chrom.to_string(),
+            start,
+            end,
+            strand,
+            exons: vec![Exon {
+                chrom: chrom.to_string(),
+                start,
+                end,
+                strand,
+            }],
+            effective_length: end - start + 1,
+            attributes: HashMap::new(),
+            transcripts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_from_genes_basic() {
+        let mut genes = IndexMap::new();
+        genes.insert(
+            "GENE1".to_string(),
+            make_gene("GENE1", "chr1", 100, 500, '+'),
+        );
+        genes.insert(
+            "GENE2".to_string(),
+            make_gene("GENE2", "chr1", 1000, 2000, '-'),
+        );
+
+        let model = GeneModel::from_genes(&genes);
+
+        // Should have chr1 with 2 intervals
+        assert_eq!(model.intervals.len(), 1);
+        let chr1 = model.intervals.get("chr1").unwrap();
+        assert_eq!(chr1.len(), 2);
+
+        // First interval: GTF 100-500 -> BED 99-500
+        assert_eq!(chr1[0].start, 99);
+        assert_eq!(chr1[0].end, 500);
+        assert_eq!(chr1[0].strand, b'+');
+
+        // Second interval: GTF 1000-2000 -> BED 999-2000
+        assert_eq!(chr1[1].start, 999);
+        assert_eq!(chr1[1].end, 2000);
+        assert_eq!(chr1[1].strand, b'-');
+    }
+
+    #[test]
+    fn test_from_genes_skips_unknown_strand() {
+        let mut genes = IndexMap::new();
+        genes.insert(
+            "GENE1".to_string(),
+            make_gene("GENE1", "chr1", 100, 500, '.'),
+        );
+        genes.insert(
+            "GENE2".to_string(),
+            make_gene("GENE2", "chr1", 600, 800, '+'),
+        );
+
+        let model = GeneModel::from_genes(&genes);
+        let chr1 = model.intervals.get("chr1").unwrap();
+        assert_eq!(chr1.len(), 1); // Only GENE2, GENE1 skipped
+        assert_eq!(chr1[0].strand, b'+');
+    }
+
+    #[test]
+    fn test_from_genes_find_strands() {
+        let mut genes = IndexMap::new();
+        genes.insert(
+            "GENE1".to_string(),
+            make_gene("GENE1", "chr1", 100, 500, '+'),
+        );
+        genes.insert(
+            "GENE2".to_string(),
+            make_gene("GENE2", "chr1", 300, 800, '-'),
+        );
+
+        let model = GeneModel::from_genes(&genes);
+
+        // Query overlapping both genes (BED coords: 350-400)
+        let strands = model.find_strands("chr1", 350, 400);
+        assert_eq!(strands.len(), 2);
+        assert!(strands.contains(&b'+'));
+        assert!(strands.contains(&b'-'));
+
+        // Query overlapping only GENE2 (BED coords: 550-600)
+        let strands = model.find_strands("chr1", 550, 600);
+        assert_eq!(strands, vec![b'-']);
+    }
 
     #[test]
     fn test_bed_loading() {

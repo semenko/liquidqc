@@ -29,7 +29,7 @@ All tools accept SAM/BAM/CRAM input and support processing multiple files in a s
 
 ### `rustqc rna` -- RNA-Seq quality control
 
-Performs dupRadar-equivalent duplicate rate analysis, featureCounts-compatible read counting, and 7 RSeQC-equivalent QC analyses in a single pass. Given a duplicate-marked BAM, GTF annotation, and optional BED12 gene model, it computes per-gene duplication rates, fits a logistic regression model, generates diagnostic plots, produces gene-level count files with biotype summaries, and runs comprehensive QC metrics (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance).
+Performs dupRadar-equivalent duplicate rate analysis, featureCounts-compatible read counting, and 7 RSeQC-equivalent QC analyses in a single pass. Given a duplicate-marked BAM and either a GTF annotation or a BED12 gene model, it computes per-gene duplication rates, fits a logistic regression model, generates diagnostic plots, produces gene-level count files with biotype summaries, and runs comprehensive QC metrics (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance).
 
 | Feature | dupRadar (R) | RustQC |
 |---------|-------------|--------|
@@ -56,7 +56,7 @@ The `rustqc rna` command also includes reimplementations of 7 popular [RSeQC](ht
 | junction_saturation | `junction_saturation.py` | Saturation analysis of detected splice junctions |
 | inner_distance | `inner_distance.py` | Inner distance distribution for paired-end reads |
 
-All RSeQC tools run by default. Five of the seven tools require a BED12 gene model file (`--bed`); if `--bed` is not provided, those tools are skipped with a warning. Individual tools can be disabled via the [configuration file](#configuration).
+All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed`. With a GTF file, all 7 tools run alongside dupRadar and featureCounts. With a BED file only, all 7 RSeQC tools run but dupRadar and featureCounts are skipped (they require a GTF). Individual tools can be disabled via the [configuration file](#configuration).
 
 ## Density scatter plots
 
@@ -140,7 +140,7 @@ The binary will be at `target/release/rustqc`.
 ### RNA duplicate rate analysis
 
 ```bash
-rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
+rustqc rna <INPUT>... (--gtf <GTF> | --bed <BED>) [OPTIONS]
 ```
 
 #### Required arguments
@@ -148,7 +148,8 @@ rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
 | Argument | Description |
 |----------|-------------|
 | `<INPUT>...` | One or more duplicate-marked alignment files (SAM/BAM/CRAM). Duplicates must be flagged (SAM flag 0x400), not removed. BAM/CRAM files should be sorted and indexed for parallel processing. |
-| `--gtf <GTF>` | Path to a GTF gene annotation file (e.g., from Ensembl or UCSC). |
+| `--gtf <GTF>` | Path to a GTF gene annotation file. Runs all analyses (dupRadar + featureCounts + all 7 RSeQC tools). Mutually exclusive with `--bed`. |
+| `--bed <BED>` | Path to a BED12 gene model file. Runs RSeQC tools only (dupRadar and featureCounts are skipped). Mutually exclusive with `--gtf`. |
 
 #### Options
 
@@ -166,10 +167,13 @@ rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
 #### Examples
 
 ```bash
-# Single BAM, single-end, unstranded
+# Single BAM with GTF (all analyses: dupRadar + featureCounts + all 7 RSeQC tools)
 rustqc rna sample.markdup.bam --gtf genes.gtf --outdir results/
 
-# Single BAM, paired-end, reverse-stranded
+# Single BAM with BED (RSeQC tools only, no dupRadar/featureCounts)
+rustqc rna sample.markdup.bam --bed genes.bed --outdir results/
+
+# Paired-end, reverse-stranded
 rustqc rna sample.markdup.bam --gtf genes.gtf --paired --stranded 2 --outdir results/
 
 # CRAM input with reference FASTA
@@ -184,21 +188,12 @@ rustqc rna sample.markdup.bam --gtf gencode.gtf --paired --biotype-attribute gen
 
 ### RSeQC tools
 
-The RSeQC tools are integrated into `rustqc rna` and run automatically. To enable the tools that require a BED12 gene model (infer_experiment, read_distribution, junction_annotation, junction_saturation, inner_distance), pass `--bed`:
-
-```bash
-# Run everything: dupRadar + featureCounts + all 7 RSeQC tools
-rustqc rna sample.markdup.bam --gtf genes.gtf --bed genes.bed --outdir results/
-
-# Without --bed: dupRadar + featureCounts + bam_stat + read_duplication only
-rustqc rna sample.markdup.bam --gtf genes.gtf --outdir results/
-```
+The 7 RSeQC tools are integrated into `rustqc rna` and run automatically with either `--gtf` or `--bed`. With a GTF file, all analyses run (dupRadar + featureCounts + all 7 RSeQC tools). With a BED file, only the 7 RSeQC tools run.
 
 RSeQC-specific options:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--bed <BED>` | none | BED12 gene model (enables 5 additional RSeQC tools) |
 | `-q` / `--mapq <N>` | `30` | Minimum mapping quality for RSeQC tools |
 | `--infer-experiment-sample-size <N>` | `200000` | Max reads to sample for strandedness inference |
 | `--min-intron <N>` | `50` | Minimum intron size for junction tools |

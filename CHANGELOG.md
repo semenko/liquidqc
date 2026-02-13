@@ -29,10 +29,10 @@ be disabled via the YAML config file.
 - bam_stat -- alignment statistics
 - infer_experiment -- library strandedness inference
 - read_duplication -- position-based and sequence-based duplication histograms
-- read_distribution -- read distribution across genomic features (requires `--bed`)
-- junction_annotation -- splice junction classification (requires `--bed`)
-- junction_saturation -- junction saturation curves (requires `--bed`)
-- inner_distance -- insert size estimation for paired-end reads (requires `--bed`)
+- read_distribution -- read distribution across genomic features
+- junction_annotation -- splice junction classification
+- junction_saturation -- junction saturation curves
+- inner_distance -- insert size estimation for paired-end reads
 
 ### General
 

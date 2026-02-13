@@ -1,8 +1,10 @@
 //! GTF annotation file parser.
 //!
-//! Parses GTF/GFF2 format files to extract gene and exon information.
-//! Computes effective gene lengths as the total number of non-overlapping
-//! exon bases (matching featureCounts behavior).
+//! Parses GTF/GFF2 format files to extract gene, transcript, and exon
+//! information. Computes effective gene lengths as the total number of
+//! non-overlapping exon bases (matching featureCounts behavior).
+//! Also extracts transcript-level structure (exon blocks, CDS ranges) for
+//! use by RSeQC-equivalent tools.
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
@@ -24,22 +26,47 @@ pub struct Exon {
     pub strand: char,
 }
 
-/// Represents a gene with all its exons.
+/// Represents a single transcript with its exon blocks and optional CDS range.
+///
+/// Transcript-level structure is needed by RSeQC-equivalent tools that require
+/// per-transcript exon/intron/CDS information (e.g. read_distribution,
+/// junction_annotation, inner_distance).
+#[derive(Debug, Clone)]
+pub struct Transcript {
+    /// Transcript identifier (from transcript_id attribute)
+    pub transcript_id: String,
+    /// Chromosome/contig name
+    pub chrom: String,
+    /// Transcript start (minimum of all exon starts, 1-based inclusive)
+    pub start: u64,
+    /// Transcript end (maximum of all exon ends, 1-based inclusive)
+    pub end: u64,
+    /// Strand: '+', '-', or '.'
+    pub strand: char,
+    /// Sorted exon blocks as (start, end) pairs (1-based inclusive)
+    pub exons: Vec<(u64, u64)>,
+    /// CDS start (minimum of all CDS feature starts, 1-based inclusive).
+    /// `None` for non-coding transcripts.
+    pub cds_start: Option<u64>,
+    /// CDS end (maximum of all CDS feature ends, 1-based inclusive).
+    /// `None` for non-coding transcripts.
+    pub cds_end: Option<u64>,
+}
+
+/// Represents a gene with all its exons and transcripts.
 #[derive(Debug, Clone)]
 pub struct Gene {
     /// Gene identifier (from gene_id attribute)
     pub gene_id: String,
     /// Chromosome/contig name (populated from GTF, used by downstream tools)
-    #[allow(dead_code)]
     pub chrom: String,
     /// Gene start (minimum of all exon starts, 1-based)
     pub start: u64,
     /// Gene end (maximum of all exon ends, 1-based)
     pub end: u64,
     /// Strand: '+', '-', or '.' (populated from GTF, used by downstream tools)
-    #[allow(dead_code)]
     pub strand: char,
-    /// All exons belonging to this gene
+    /// All exons belonging to this gene (flattened across transcripts)
     pub exons: Vec<Exon>,
     /// Effective length: total non-overlapping exon bases
     pub effective_length: u64,
@@ -48,6 +75,12 @@ pub struct Gene {
     /// Keys are attribute names, values are the attribute values from the GTF.
     /// Only attributes requested via `extra_attributes` in [`parse_gtf`] are stored.
     pub attributes: HashMap<String, String>,
+    /// Per-transcript exon/CDS structure, built from transcript_id grouping.
+    ///
+    /// This is populated during GTF parsing and provides the transcript-level
+    /// detail needed by RSeQC-equivalent tools. May be empty if the GTF lacks
+    /// transcript_id attributes.
+    pub transcripts: Vec<Transcript>,
 }
 
 /// Parse a GTF attribute string to extract a specific attribute value.
@@ -108,9 +141,24 @@ fn compute_non_overlapping_length(exons: &[Exon]) -> u64 {
     total_bases
 }
 
+/// Intermediate accumulator for building a transcript from parsed GTF features.
+struct TranscriptBuilder {
+    /// Transcript identifier
+    transcript_id: String,
+    /// Chromosome (from first exon)
+    chrom: String,
+    /// Strand (from first exon)
+    strand: char,
+    /// Exon intervals: (start, end), 1-based inclusive
+    exons: Vec<(u64, u64)>,
+    /// CDS intervals: (start, end), 1-based inclusive
+    cds: Vec<(u64, u64)>,
+}
+
 /// Parse a GTF file and return a map of gene_id -> Gene.
 ///
-/// Extracts all exon features and groups them by gene_id.
+/// Extracts all exon and CDS features, groups them by gene_id, and builds
+/// transcript-level structures by grouping exons/CDS by transcript_id.
 /// Computes effective gene length from non-overlapping exon bases.
 /// Returns genes in the order they are first encountered in the GTF.
 ///
@@ -127,6 +175,10 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
 
     let mut genes: IndexMap<String, Gene> = IndexMap::new();
 
+    // Accumulate transcript-level data: (gene_id, transcript_id) -> TranscriptBuilder
+    // Use IndexMap to preserve insertion order within each gene
+    let mut tx_builders: IndexMap<(String, String), TranscriptBuilder> = IndexMap::new();
+
     for line in reader.lines() {
         let line = line.context("Failed to read line from GTF file")?;
 
@@ -140,8 +192,10 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
             continue;
         }
 
-        // We only care about exon features (matching featureCounts default)
-        if fields[2] != "exon" {
+        let feature_type = fields[2];
+
+        // We care about exon and CDS features
+        if feature_type != "exon" && feature_type != "CDS" {
             continue;
         }
 
@@ -154,9 +208,10 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
             .with_context(|| format!("Invalid end position: {}", fields[4]))?;
         anyhow::ensure!(
             start <= end,
-            "Malformed GTF: start ({}) > end ({}) for exon on {}",
+            "Malformed GTF: start ({}) > end ({}) for {} on {}",
             start,
             end,
+            feature_type,
             fields[0]
         );
         let strand = fields[6].chars().next().unwrap_or('.');
@@ -164,42 +219,66 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         let attr_str = fields[8];
         let gene_id = match get_attribute(attr_str, "gene_id") {
             Some(id) => id,
-            None => continue, // Skip exons without gene_id
+            None => continue, // Skip features without gene_id
         };
 
-        let exon = Exon {
-            chrom: chrom.clone(),
-            start,
-            end,
-            strand,
-        };
+        // For exon features, update the gene-level data (unchanged from original)
+        if feature_type == "exon" {
+            let exon = Exon {
+                chrom: chrom.clone(),
+                start,
+                end,
+                strand,
+            };
 
-        // Extract extra attributes from the first exon encountered for this gene
-        genes
-            .entry(gene_id.clone())
-            .and_modify(|gene| {
-                gene.start = gene.start.min(start);
-                gene.end = gene.end.max(end);
-                gene.exons.push(exon.clone());
-            })
-            .or_insert_with(|| {
-                let mut attrs = HashMap::new();
-                for attr_name in extra_attributes {
-                    if let Some(val) = get_attribute(attr_str, attr_name) {
-                        attrs.insert(attr_name.clone(), val);
+            // Extract extra attributes from the first exon encountered for this gene
+            genes
+                .entry(gene_id.clone())
+                .and_modify(|gene| {
+                    gene.start = gene.start.min(start);
+                    gene.end = gene.end.max(end);
+                    gene.exons.push(exon.clone());
+                })
+                .or_insert_with(|| {
+                    let mut attrs = HashMap::new();
+                    for attr_name in extra_attributes {
+                        if let Some(val) = get_attribute(attr_str, attr_name) {
+                            attrs.insert(attr_name.clone(), val);
+                        }
                     }
-                }
-                Gene {
-                    gene_id: gene_id.clone(),
-                    chrom,
-                    start,
-                    end,
-                    strand,
-                    exons: vec![exon],
-                    effective_length: 0, // computed later
-                    attributes: attrs,
-                }
-            });
+                    Gene {
+                        gene_id: gene_id.clone(),
+                        chrom: chrom.clone(),
+                        start,
+                        end,
+                        strand,
+                        exons: vec![exon],
+                        effective_length: 0, // computed later
+                        attributes: attrs,
+                        transcripts: Vec::new(), // populated later
+                    }
+                });
+        }
+
+        // Accumulate transcript-level data for both exon and CDS features.
+        // Features without transcript_id are grouped under a synthetic key.
+        let transcript_id = get_attribute(attr_str, "transcript_id")
+            .unwrap_or_else(|| format!("{}__no_tx", gene_id));
+
+        let key = (gene_id.clone(), transcript_id.clone());
+        let builder = tx_builders.entry(key).or_insert_with(|| TranscriptBuilder {
+            transcript_id,
+            chrom: chrom.clone(),
+            strand,
+            exons: Vec::new(),
+            cds: Vec::new(),
+        });
+
+        match feature_type {
+            "exon" => builder.exons.push((start, end)),
+            "CDS" => builder.cds.push((start, end)),
+            _ => unreachable!(),
+        }
     }
 
     // Warn if no genes were extracted — likely indicates a format problem
@@ -209,6 +288,46 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
              format and contains exon features with gene_id attributes.",
             path
         );
+    }
+
+    // Build Transcript structs from accumulated data and attach to genes
+    for ((gene_id, _), mut builder) in tx_builders {
+        // Skip transcript builders that have no exons (CDS-only entries are useless)
+        if builder.exons.is_empty() {
+            continue;
+        }
+
+        // Sort exon blocks by start position
+        builder.exons.sort_unstable();
+
+        let tx_start = builder.exons.first().map(|e| e.0).unwrap_or(0);
+        let tx_end = builder.exons.last().map(|e| e.1).unwrap_or(0);
+
+        // Compute CDS range from all CDS features for this transcript
+        let (cds_start, cds_end) = if builder.cds.is_empty() {
+            (None, None)
+        } else {
+            let cs = builder.cds.iter().map(|c| c.0).min().unwrap_or(0);
+            let ce = builder.cds.iter().map(|c| c.1).max().unwrap_or(0);
+            (Some(cs), Some(ce))
+        };
+
+        let transcript = Transcript {
+            transcript_id: builder.transcript_id,
+            chrom: builder.chrom,
+            start: tx_start,
+            end: tx_end,
+            strand: builder.strand,
+            exons: builder.exons,
+            cds_start,
+            cds_end,
+        };
+
+        // Attach to the parent gene (which must exist since we only created
+        // transcript builders for features that also had exon lines)
+        if let Some(gene) = genes.get_mut(&gene_id) {
+            gene.transcripts.push(transcript);
+        }
     }
 
     // Compute effective lengths for all genes
@@ -320,5 +439,128 @@ mod tests {
         // Empty
         let exons: Vec<Exon> = vec![];
         assert_eq!(compute_non_overlapping_length(&exons), 0);
+    }
+
+    /// Helper to create a temporary GTF file for testing.
+    fn write_temp_gtf(content: &str) -> (std::path::PathBuf, std::fs::File) {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir();
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!(
+            "rustqc_test_{:?}_{}.gtf",
+            std::thread::current().id(),
+            id
+        ));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        f.flush().unwrap();
+        (path, f)
+    }
+
+    #[test]
+    fn test_parse_gtf_transcripts_basic() {
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t300\t400\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t100\t250\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T2\";\n\
+chr1\ttest\tCDS\t120\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t300\t380\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        assert_eq!(genes.len(), 1);
+        let gene = &genes["G1"];
+
+        // Gene-level: 3 exons total, spanning 100-400
+        assert_eq!(gene.exons.len(), 3);
+        assert_eq!(gene.start, 100);
+        assert_eq!(gene.end, 400);
+        assert_eq!(gene.strand, '+');
+
+        // Should have 2 transcripts
+        assert_eq!(gene.transcripts.len(), 2);
+
+        let t1 = gene
+            .transcripts
+            .iter()
+            .find(|t| t.transcript_id == "T1")
+            .unwrap();
+        assert_eq!(t1.exons, vec![(100, 200), (300, 400)]);
+        assert_eq!(t1.start, 100);
+        assert_eq!(t1.end, 400);
+        assert_eq!(t1.cds_start, Some(120));
+        assert_eq!(t1.cds_end, Some(380));
+
+        let t2 = gene
+            .transcripts
+            .iter()
+            .find(|t| t.transcript_id == "T2")
+            .unwrap();
+        assert_eq!(t2.exons, vec![(100, 250)]);
+        assert_eq!(t2.start, 100);
+        assert_eq!(t2.end, 250);
+        assert_eq!(t2.cds_start, None); // non-coding
+        assert_eq!(t2.cds_end, None);
+    }
+
+    #[test]
+    fn test_parse_gtf_no_transcript_id() {
+        // Exons without transcript_id should be grouped under a synthetic key
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id \"G1\";\n\
+chr1\ttest\texon\t300\t400\t.\t+\t.\tgene_id \"G1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let gene = &genes["G1"];
+        // Should have exactly 1 transcript with synthetic ID
+        assert_eq!(gene.transcripts.len(), 1);
+        assert_eq!(gene.transcripts[0].transcript_id, "G1__no_tx");
+        assert_eq!(gene.transcripts[0].exons, vec![(100, 200), (300, 400)]);
+    }
+
+    #[test]
+    fn test_parse_gtf_cds_only_no_exon() {
+        // CDS features without corresponding exons should not create transcripts
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t500\t600\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T_orphan\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let gene = &genes["G1"];
+        // T_orphan should be skipped because it has no exons
+        assert_eq!(gene.transcripts.len(), 1);
+        assert_eq!(gene.transcripts[0].transcript_id, "T1");
+    }
+
+    #[test]
+    fn test_parse_gtf_multi_gene_transcripts() {
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t120\t180\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr2\ttest\texon\t500\t600\t.\t-\t.\tgene_id \"G2\"; transcript_id \"T2\";\n\
+chr2\ttest\texon\t700\t800\t.\t-\t.\tgene_id \"G2\"; transcript_id \"T2\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        assert_eq!(genes.len(), 2);
+
+        let g1 = &genes["G1"];
+        assert_eq!(g1.transcripts.len(), 1);
+        assert_eq!(g1.transcripts[0].cds_start, Some(120));
+        assert_eq!(g1.transcripts[0].cds_end, Some(180));
+
+        let g2 = &genes["G2"];
+        assert_eq!(g2.transcripts.len(), 1);
+        assert_eq!(g2.transcripts[0].exons, vec![(500, 600), (700, 800)]);
+        assert_eq!(g2.transcripts[0].strand, '-');
+        assert_eq!(g2.transcripts[0].cds_start, None);
     }
 }

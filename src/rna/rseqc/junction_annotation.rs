@@ -2,15 +2,18 @@
 //!
 //! Reimplementation of RSeQC's `junction_annotation.py`: extracts splice junctions
 //! from BAM files (CIGAR N-operations) and classifies them as known (annotated),
-//! partial novel, or complete novel by comparing against a BED12 gene model.
+//! partial novel, or complete novel by comparing against a reference gene model
+//! (BED12 or GTF).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use log::{debug, info};
 use rust_htslib::bam::{self, Read as BamRead};
+
+use super::common::{self, ReferenceJunctions};
 
 // ===================================================================
 // Data types
@@ -56,15 +59,6 @@ pub struct Junction {
     pub intron_start: u64,
     /// 0-based intron end (exclusive — first base after intron).
     pub intron_end: u64,
-}
-
-/// Reference annotation: sets of known intron start and end positions per chromosome.
-#[derive(Debug)]
-pub struct ReferenceJunctions {
-    /// Known intron start positions per chromosome (uppercased).
-    pub intron_starts: HashMap<String, HashSet<u64>>,
-    /// Known intron end positions per chromosome (uppercased).
-    pub intron_ends: HashMap<String, HashSet<u64>>,
 }
 
 /// Aggregated results from junction annotation.
@@ -120,147 +114,6 @@ impl JunctionResults {
 }
 
 // ===================================================================
-// BED12 reference parsing
-// ===================================================================
-
-/// Parse a BED12 file and extract reference intron start/end positions.
-///
-/// Single-exon transcripts are skipped. Chromosome names are uppercased.
-///
-/// # Arguments
-/// * `bed_path` - Path to BED12 gene model file.
-///
-/// # Returns
-/// A `ReferenceJunctions` with intron start and end position sets per chromosome.
-pub fn parse_reference_bed(bed_path: &str) -> Result<ReferenceJunctions> {
-    let content = std::fs::read_to_string(bed_path)
-        .with_context(|| format!("Failed to read BED file: {}", bed_path))?;
-
-    let mut intron_starts: HashMap<String, HashSet<u64>> = HashMap::new();
-    let mut intron_ends: HashMap<String, HashSet<u64>> = HashMap::new();
-    let mut transcript_count = 0u64;
-    let mut skipped = 0u64;
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty()
-            || line.starts_with('#')
-            || line.starts_with("track")
-            || line.starts_with("browser")
-        {
-            continue;
-        }
-
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 12 {
-            debug!("Skipping BED line with {} fields (need 12)", fields.len());
-            skipped += 1;
-            continue;
-        }
-
-        let block_count: usize = fields[9].parse().unwrap_or(0);
-        // Skip single-exon transcripts (matching RSeQC behavior)
-        if block_count <= 1 {
-            continue;
-        }
-
-        let chrom = fields[0].to_uppercase();
-        let tx_start: u64 = fields[1].parse().unwrap_or(0);
-
-        let block_sizes: Vec<u64> = fields[10]
-            .trim_end_matches(',')
-            .split(',')
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let block_starts: Vec<u64> = fields[11]
-            .trim_end_matches(',')
-            .split(',')
-            .filter_map(|s| s.parse().ok())
-            .collect();
-
-        if block_sizes.len() != block_count || block_starts.len() != block_count {
-            debug!("Skipping BED line: block count mismatch");
-            skipped += 1;
-            continue;
-        }
-
-        // Compute exon coordinates
-        let exon_starts: Vec<u64> = block_starts.iter().map(|&bs| tx_start + bs).collect();
-        let exon_ends: Vec<u64> = exon_starts
-            .iter()
-            .zip(block_sizes.iter())
-            .map(|(&s, &sz)| s + sz)
-            .collect();
-
-        // Introns are the gaps between consecutive exons
-        let starts_set = intron_starts.entry(chrom.clone()).or_default();
-        let ends_set = intron_ends.entry(chrom).or_default();
-
-        for i in 0..block_count - 1 {
-            let intron_start = exon_ends[i]; // first intronic base (0-based)
-            let intron_end = exon_starts[i + 1]; // first base after intron (0-based, exclusive)
-            starts_set.insert(intron_start);
-            ends_set.insert(intron_end);
-        }
-
-        transcript_count += 1;
-    }
-
-    info!(
-        "Parsed {} multi-exon transcripts from BED12 ({} lines skipped)",
-        transcript_count, skipped
-    );
-
-    Ok(ReferenceJunctions {
-        intron_starts,
-        intron_ends,
-    })
-}
-
-// ===================================================================
-// CIGAR intron extraction
-// ===================================================================
-
-/// Extract intron intervals from a CIGAR string.
-///
-/// Matches RSeQC's `fetch_intron()` behavior: only CIGAR `N` operations produce
-/// intron intervals. Soft clips do NOT advance position (unlike `fetch_exon()`).
-/// `=` and `X` operations are ignored (do not advance position) — matching the
-/// original Python bug.
-///
-/// # Arguments
-/// * `start_pos` - Alignment start position (0-based, from BAM record).
-/// * `cigar` - CIGAR operations from the BAM record.
-///
-/// # Returns
-/// Vector of `(intron_start, intron_end)` tuples (0-based coordinates).
-fn fetch_introns(start_pos: u64, cigar: &[rust_htslib::bam::record::Cigar]) -> Vec<(u64, u64)> {
-    use rust_htslib::bam::record::Cigar::*;
-
-    let mut pos = start_pos;
-    let mut introns = Vec::new();
-
-    for op in cigar {
-        match op {
-            Match(len) => pos += *len as u64, // M: advance position
-            Ins(_) => {}                      // I: no position change
-            Del(len) => pos += *len as u64,   // D: advance position
-            RefSkip(len) => {
-                // N: intron!
-                let intron_start = pos;
-                let intron_end = pos + *len as u64;
-                introns.push((intron_start, intron_end));
-                pos = intron_end;
-            }
-            SoftClip(_) => {} // S: no position change (unlike fetch_exon)
-            HardClip(_) | Pad(_) | Equal(_) | Diff(_) => {} // ignored entirely
-        }
-    }
-
-    introns
-}
-
-// ===================================================================
 // Junction classification
 // ===================================================================
 
@@ -295,7 +148,7 @@ fn classify_junction(
 ///
 /// # Arguments
 /// * `bam_path` - Path to input BAM file.
-/// * `bed_path` - Path to BED12 reference gene model.
+/// * `ref_junctions` - Pre-built reference junction data (from BED12 or GTF).
 /// * `min_intron` - Minimum intron size to include (default 50).
 /// * `mapq_cut` - Minimum mapping quality (default 30).
 /// * `reference` - Optional path to reference FASTA (required for CRAM).
@@ -304,14 +157,11 @@ fn classify_junction(
 /// `JunctionResults` containing all junction classifications and summary counts.
 pub fn junction_annotation(
     bam_path: &str,
-    bed_path: &str,
+    ref_junctions: &ReferenceJunctions,
     min_intron: u64,
     mapq_cut: u8,
     reference: Option<&str>,
 ) -> Result<JunctionResults> {
-    info!("Parsing reference gene model: {}", bed_path);
-    let ref_junctions = parse_reference_bed(bed_path)?;
-
     info!("Processing BAM file: {}", bam_path);
     let mut bam = if let Some(ref_path) = reference {
         let mut r = bam::Reader::from_path(bam_path)
@@ -391,7 +241,7 @@ pub fn junction_annotation(
 
         let start_pos = record.pos() as u64;
         let cigar = record.cigar();
-        let introns = fetch_introns(start_pos, cigar.as_ref());
+        let introns = common::fetch_introns(start_pos, cigar.as_ref());
 
         for (intron_start, intron_end) in introns {
             total_events += 1;
@@ -403,7 +253,7 @@ pub fn junction_annotation(
                 continue;
             }
 
-            let class = classify_junction(chrom, intron_start, intron_end, &ref_junctions);
+            let class = classify_junction(chrom, intron_start, intron_end, ref_junctions);
 
             match class {
                 JunctionClass::Annotated => known_events += 1,
@@ -432,7 +282,7 @@ pub fn junction_annotation(
             &junction.chrom,
             junction.intron_start,
             junction.intron_end,
-            &ref_junctions,
+            ref_junctions,
         );
         junctions.insert(junction.clone(), (*count, class));
     }
@@ -680,55 +530,7 @@ pub fn print_summary(results: &JunctionResults) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_fetch_introns_simple() {
-        use rust_htslib::bam::record::Cigar::*;
-        // 50M500N50M — one intron at position 100+50=150 to 150+500=650
-        let cigar = vec![Match(50), RefSkip(500), Match(50)];
-        let introns = fetch_introns(100, &cigar);
-        assert_eq!(introns.len(), 1);
-        assert_eq!(introns[0], (150, 650));
-    }
-
-    #[test]
-    fn test_fetch_introns_multiple() {
-        use rust_htslib::bam::record::Cigar::*;
-        // 10M500N20M300N10M — two introns
-        let cigar = vec![Match(10), RefSkip(500), Match(20), RefSkip(300), Match(10)];
-        let introns = fetch_introns(100, &cigar);
-        assert_eq!(introns.len(), 2);
-        assert_eq!(introns[0], (110, 610)); // first intron
-        assert_eq!(introns[1], (630, 930)); // second intron
-    }
-
-    #[test]
-    fn test_fetch_introns_with_deletions() {
-        use rust_htslib::bam::record::Cigar::*;
-        // 10M5D10M500N10M
-        let cigar = vec![Match(10), Del(5), Match(10), RefSkip(500), Match(10)];
-        let introns = fetch_introns(100, &cigar);
-        assert_eq!(introns.len(), 1);
-        assert_eq!(introns[0], (125, 625)); // 100+10+5+10=125
-    }
-
-    #[test]
-    fn test_fetch_introns_no_introns() {
-        use rust_htslib::bam::record::Cigar::*;
-        let cigar = vec![Match(100)];
-        let introns = fetch_introns(100, &cigar);
-        assert!(introns.is_empty());
-    }
-
-    #[test]
-    fn test_fetch_introns_soft_clip_no_advance() {
-        use rust_htslib::bam::record::Cigar::*;
-        // 5S50M500N50M — soft clip should NOT advance position
-        let cigar = vec![SoftClip(5), Match(50), RefSkip(500), Match(50)];
-        let introns = fetch_introns(100, &cigar);
-        assert_eq!(introns.len(), 1);
-        assert_eq!(introns[0], (150, 650)); // same as without soft clip
-    }
+    use std::collections::HashSet;
 
     #[test]
     fn test_classify_junction_annotated() {

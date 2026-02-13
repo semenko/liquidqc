@@ -55,7 +55,7 @@ Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, all in
 | junction_saturation | Assess saturation of splice junction detection at increasing read depths |
 | inner_distance | Compute inner distance between paired-end read mates |
 
-Five tools (infer_experiment, read_distribution, junction_annotation, junction_saturation, inner_distance) require a BED12 gene model file via `--bed`. If `--bed` is omitted, these tools are skipped with a warning while the remaining tools still run. Individual tools can be disabled via the YAML configuration file.
+When a GTF file is provided via `--gtf`, all 7 tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed` (mutually exclusive with `--gtf`), which runs only the RSeQC tools. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 

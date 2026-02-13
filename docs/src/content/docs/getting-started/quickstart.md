@@ -10,8 +10,7 @@ This guide walks you through a basic RustQC analysis from start to finish.
 The `rustqc rna` command runs all analyses in a single pass. It requires:
 
 - A **duplicate-marked** alignment file (BAM, SAM, or CRAM). Duplicates must be flagged with SAM flag 0x400 by a tool like [Picard MarkDuplicates](https://broadinstitute.github.io/picard/), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba](https://github.com/biod/sambamba).
-- A **GTF annotation** file (for dupRadar, featureCounts, and gene-level analyses).
-- Optionally, a **BED12 gene model** file (`--bed`) for the 5 RSeQC tools that require it (infer_experiment, read_distribution, junction_annotation, junction_saturation, inner_distance). If omitted, these tools are skipped with a warning.
+- Either a **GTF annotation** file (`--gtf`) or a **BED12 gene model** file (`--bed`). With a GTF, all analyses run (dupRadar, featureCounts, and all 7 RSeQC tools). With a BED file, only the 7 RSeQC tools run. The two flags are mutually exclusive.
 
 ## RNA-seq duplicate analysis
 
@@ -50,13 +49,12 @@ integrated into the `rustqc rna` command. They run automatically alongside the
 dupRadar and featureCounts analyses:
 
 ```bash
-# Run everything: dupRadar + featureCounts + all 7 RSeQC tools
-rustqc rna sample.markdup.bam --gtf genes.gtf --bed genes.bed -p -o results/
-```
+# Run everything with a GTF: dupRadar + featureCounts + all 7 RSeQC tools
+rustqc rna sample.markdup.bam --gtf genes.gtf -p -o results/
 
-The `--bed` flag provides a BED12 gene model required by 5 of the 7 tools. If
-omitted, those tools are skipped with a warning while bam_stat and
-read_duplication still run.
+# Or run RSeQC tools only with a BED file (no dupRadar/featureCounts)
+rustqc rna sample.markdup.bam --bed genes.bed -p -o results/
+```
 
 To disable specific RSeQC tools, use a YAML config file:
 
@@ -67,7 +65,7 @@ inner_distance:
 ```
 
 ```bash
-rustqc rna sample.markdup.bam --gtf genes.gtf --bed genes.bed -p -c config.yaml -o results/
+rustqc rna sample.markdup.bam --gtf genes.gtf -p -c config.yaml -o results/
 ```
 
 See [RSeQC Outputs](/outputs/rseqc/) for details on output files.
@@ -79,32 +77,32 @@ producing its own set of output files:
 
 ```bash
 rustqc rna sample1.bam sample2.bam sample3.bam \
-  --gtf genes.gtf --bed genes.bed -p -t 8 -o results/
+  --gtf genes.gtf -p -t 8 -o results/
 ```
 
-The GTF and BED files are parsed once and shared across all samples. Threads
+The annotation file is parsed once and shared across all samples. Threads
 are distributed automatically among concurrent jobs.
 
 ## Common options
 
 ```bash
 # Stranded library (forward)
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p -s 1
+rustqc rna sample.bam --gtf genes.gtf -p -s 1
 
 # Use 8 threads
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p -t 8
+rustqc rna sample.bam --gtf genes.gtf -p -t 8
 
 # CRAM input with reference
-rustqc rna sample.cram --gtf genes.gtf --bed genes.bed -p --reference genome.fa
+rustqc rna sample.cram --gtf genes.gtf -p --reference genome.fa
 
 # Skip duplicate-marking validation
 rustqc rna sample.bam --gtf genes.gtf -p --skip-dup-check
 
 # Use a YAML config file
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p --config config.yaml
+rustqc rna sample.bam --gtf genes.gtf -p --config config.yaml
 
 # Custom MAPQ cutoff for RSeQC tools
-rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p -q 20 -o results/
+rustqc rna sample.bam --gtf genes.gtf -p -q 20 -o results/
 ```
 
 ## Next steps

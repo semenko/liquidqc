@@ -63,7 +63,8 @@ src/
       mod.rs        — Re-exports output
       output.rs     — featureCounts-format output & biotype counting
     rseqc/
-      mod.rs        — Re-exports all 7 RSeQC modules
+      mod.rs        — Re-exports all 7 RSeQC modules + common helpers
+      common.rs             — Shared junction/intron extraction, from_genes/from_bed builders
       bam_stat.rs           — bam_stat.py reimplementation
       infer_experiment.rs   — infer_experiment.py reimplementation
       read_duplication.rs   — read_duplication.py reimplementation
@@ -83,17 +84,19 @@ in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool g
 Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
 
 The CLI uses a single subcommand:
-- `rustqc rna <BAM>... --gtf <GTF> [--bed <BED>] [OPTIONS]`
+- `rustqc rna <BAM>... (--gtf <GTF> | --bed <BED>) [OPTIONS]`
 
-This runs all analyses in a single pass: dupRadar duplicate rate analysis,
-featureCounts-compatible gene counting, and all 7 RSeQC-equivalent tools
-(bam_stat, infer_experiment, read_duplication, read_distribution,
-junction_annotation, junction_saturation, inner_distance).
+The `--gtf` and `--bed` flags are **mutually exclusive** — provide one or the other:
 
-The `--bed` flag is optional. If omitted, a warning is printed and the 5 tools
-that require a BED12 gene model (infer_experiment, read_distribution,
-junction_annotation, junction_saturation, inner_distance) are skipped.
-The 2 tools that don't need a BED file (bam_stat, read_duplication) still run.
+- **`--gtf`** (recommended): Runs all analyses — dupRadar duplicate rate analysis,
+  featureCounts-compatible gene counting, and all 7 RSeQC-equivalent tools
+  (bam_stat, infer_experiment, read_duplication, read_distribution,
+  junction_annotation, junction_saturation, inner_distance). The GTF parser
+  extracts transcript-level structure (exons + CDS features) to derive all
+  data needed by every tool.
+- **`--bed`**: Runs only the 7 RSeQC tools + bam_stat + read_duplication.
+  DupRadar and featureCounts are skipped (they require gene-level annotation
+  with biotype attributes that BED12 cannot provide).
 
 Individual tools can be disabled via the YAML config file (each has an `enabled`
 toggle). Tool-specific parameters (e.g., `--min-intron`, `--inner-distance-lower-bound`)

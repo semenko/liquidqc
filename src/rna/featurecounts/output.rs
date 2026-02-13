@@ -263,6 +263,7 @@ mod tests {
             }],
             effective_length: 101,
             attributes,
+            transcripts: Vec::new(),
         }
     }
 
