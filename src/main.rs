@@ -6,21 +6,10 @@
 //! level in RNA-Seq datasets. It also produces featureCounts-compatible output
 //! files and biotype count summaries in a single pass.
 
-mod bam_stat;
 mod cli;
 mod config;
-mod counting;
-mod dupmatrix;
-mod featurecounts;
-mod fitting;
 mod gtf;
-mod infer_experiment;
-mod inner_distance;
-mod junction_annotation;
-mod junction_saturation;
-mod plots;
-mod read_distribution;
-mod read_duplication;
+mod rna;
 
 use anyhow::{ensure, Context, Result};
 use indexmap::IndexMap;
@@ -403,7 +392,7 @@ fn process_single_bam(
     let bam_start = Instant::now();
     info!("[{}] Counting reads across 4 modes...", bam_stem);
     let count_start = Instant::now();
-    let count_result = counting::count_reads(
+    let count_result = rna::dupradar::counting::count_reads(
         bam_path,
         genes,
         stranded,
@@ -441,7 +430,7 @@ fn process_single_bam(
 
         if config.featurecounts.counts_file {
             let counts_path = outdir.join(format!("{}.featureCounts.tsv", bam_stem));
-            featurecounts::write_counts_file(
+            rna::featurecounts::output::write_counts_file(
                 &counts_path,
                 genes,
                 &count_result,
@@ -457,7 +446,7 @@ fn process_single_bam(
 
         if config.featurecounts.summary_file {
             let summary_path = outdir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
-            featurecounts::write_summary_file(&summary_path, &count_result, bam_path)?;
+            rna::featurecounts::output::write_summary_file(&summary_path, &count_result, bam_path)?;
             info!(
                 "[{}] Summary file written to {}",
                 bam_stem,
@@ -467,8 +456,11 @@ fn process_single_bam(
 
         // Biotype outputs (only if attribute was found in GTF)
         if biotype_in_gtf && config.any_biotype_output() {
-            let biotype_counts =
-                featurecounts::aggregate_biotype_counts(genes, &count_result, biotype_attribute);
+            let biotype_counts = rna::featurecounts::output::aggregate_biotype_counts(
+                genes,
+                &count_result,
+                biotype_attribute,
+            );
             info!(
                 "[{}] Biotype counting: {} biotypes found",
                 bam_stem,
@@ -477,7 +469,7 @@ fn process_single_bam(
 
             if config.featurecounts.biotype_counts {
                 let biotype_path = outdir.join(format!("{}.biotype_counts.tsv", bam_stem));
-                featurecounts::write_biotype_counts(&biotype_path, &biotype_counts)?;
+                rna::featurecounts::output::write_biotype_counts(&biotype_path, &biotype_counts)?;
                 info!(
                     "[{}] Biotype counts written to {}",
                     bam_stem,
@@ -487,7 +479,7 @@ fn process_single_bam(
 
             if config.featurecounts.biotype_counts_mqc {
                 let mqc_biotype_path = outdir.join(format!("{}.biotype_counts_mqc.tsv", bam_stem));
-                featurecounts::write_biotype_counts_mqc(
+                rna::featurecounts::output::write_biotype_counts_mqc(
                     &mqc_biotype_path,
                     &biotype_counts,
                     bam_stem,
@@ -502,7 +494,7 @@ fn process_single_bam(
             if config.featurecounts.biotype_rrna_mqc {
                 let mqc_rrna_path =
                     outdir.join(format!("{}.biotype_counts_rrna_mqc.tsv", bam_stem));
-                featurecounts::write_biotype_rrna_mqc(
+                rna::featurecounts::output::write_biotype_rrna_mqc(
                     &mqc_rrna_path,
                     &biotype_counts,
                     count_result.stat_assigned,
@@ -520,7 +512,7 @@ fn process_single_bam(
     // === dupRadar outputs ===
     if config.any_dupradar_output() {
         info!("[{}] Building duplication matrix...", bam_stem);
-        let dup_matrix = dupmatrix::DupMatrix::build(genes, &count_result);
+        let dup_matrix = rna::dupradar::dupmatrix::DupMatrix::build(genes, &count_result);
 
         let stats = dup_matrix.get_stats();
         info!(
@@ -550,7 +542,7 @@ fn process_single_bam(
             let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
             let dup_rate_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.dup_rate).collect();
 
-            let fit_result = fitting::duprate_exp_fit(&rpk_values, &dup_rate_values);
+            let fit_result = rna::dupradar::fitting::duprate_exp_fit(&rpk_values, &dup_rate_values);
             match &fit_result {
                 Ok(fit) => {
                     info!(
@@ -559,7 +551,7 @@ fn process_single_bam(
                     );
                     if config.dupradar.intercept_slope {
                         let fit_path = outdir.join(format!("{}_intercept_slope.txt", bam_stem));
-                        plots::write_intercept_slope(fit, &fit_path)?;
+                        rna::dupradar::plots::write_intercept_slope(fit, &fit_path)?;
                         info!(
                             "[{}] Fit results written to {}",
                             bam_stem,
@@ -589,7 +581,7 @@ fn process_single_bam(
             let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
                 let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
                 let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
-                fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5)
+                rna::dupradar::fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5)
             });
 
             let density_path = outdir.join(format!("{}_duprateExpDens.png", bam_stem));
@@ -604,7 +596,9 @@ fn process_single_bam(
                         let thresh = rpkm_threshold_rpk;
                         let path = &density_path;
                         s.spawn(move || {
-                            plots::density_scatter_plot(dm_ref, fit, thresh, bam_stem, path)
+                            rna::dupradar::plots::density_scatter_plot(
+                                dm_ref, fit, thresh, bam_stem, path,
+                            )
                         })
                     })
                 } else {
@@ -615,7 +609,9 @@ fn process_single_bam(
                 let boxplot_handle = if config.dupradar.boxplot {
                     let dm_ref = &dup_matrix;
                     let path = &boxplot_path;
-                    Some(s.spawn(move || plots::duprate_boxplot(dm_ref, bam_stem, path)))
+                    Some(s.spawn(move || {
+                        rna::dupradar::plots::duprate_boxplot(dm_ref, bam_stem, path)
+                    }))
                 } else {
                     None
                 };
@@ -624,7 +620,9 @@ fn process_single_bam(
                 let histogram_handle = if config.dupradar.expression_histogram {
                     let dm_ref = &dup_matrix;
                     let path = &histogram_path;
-                    Some(s.spawn(move || plots::expression_histogram(dm_ref, bam_stem, path)))
+                    Some(s.spawn(move || {
+                        rna::dupradar::plots::expression_histogram(dm_ref, bam_stem, path)
+                    }))
                 } else {
                     None
                 };
@@ -660,13 +658,13 @@ fn process_single_bam(
         if let Some(ref fit) = fit_ok {
             if config.dupradar.multiqc_intercept {
                 let mqc_intercept_path = outdir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
-                plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
+                rna::dupradar::plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
             }
 
             if config.dupradar.multiqc_curve {
                 let mqc_curve_path =
                     outdir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
-                plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
+                rna::dupradar::plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
             }
 
             if config.dupradar.multiqc_intercept || config.dupradar.multiqc_curve {
@@ -720,10 +718,11 @@ fn run_bam_stat(args: cli::BamStatArgs) -> Result<()> {
 
         info!("[{}] Running bam_stat analysis...", bam_stem);
 
-        let result = bam_stat::bam_stat(bam_path, args.mapq_cut, args.reference.as_deref())?;
+        let result =
+            rna::rseqc::bam_stat::bam_stat(bam_path, args.mapq_cut, args.reference.as_deref())?;
 
         let output_path = outdir.join(format!("{}.bam_stat.txt", bam_stem));
-        bam_stat::write_bam_stat(&result, args.mapq_cut, &output_path)?;
+        rna::rseqc::bam_stat::write_bam_stat(&result, args.mapq_cut, &output_path)?;
 
         info!(
             "[{}] bam_stat completed in {:.2}s",
@@ -752,7 +751,7 @@ fn run_infer_experiment(args: cli::InferExperimentArgs) -> Result<()> {
         .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
 
     info!("Loading gene model from BED file: {}", args.bed);
-    let gene_model = infer_experiment::GeneModel::from_bed(&args.bed)?;
+    let gene_model = rna::rseqc::infer_experiment::GeneModel::from_bed(&args.bed)?;
 
     for bam_path in &args.input {
         let bam_start = Instant::now();
@@ -763,7 +762,7 @@ fn run_infer_experiment(args: cli::InferExperimentArgs) -> Result<()> {
 
         info!("[{}] Running infer_experiment analysis...", bam_stem);
 
-        let result = infer_experiment::infer_experiment(
+        let result = rna::rseqc::infer_experiment::infer_experiment(
             bam_path,
             &gene_model,
             args.mapq_cut,
@@ -772,7 +771,7 @@ fn run_infer_experiment(args: cli::InferExperimentArgs) -> Result<()> {
         )?;
 
         let output_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
-        infer_experiment::write_infer_experiment(&result, &output_path)?;
+        rna::rseqc::infer_experiment::write_infer_experiment(&result, &output_path)?;
 
         info!(
             "[{}] Total {} usable reads were sampled",
@@ -811,10 +810,13 @@ fn run_read_duplication(args: cli::ReadDuplicationArgs) -> Result<()> {
 
         info!("[{}] Running read duplication analysis...", bam_stem);
 
-        let result =
-            read_duplication::read_duplication(bam_path, args.mapq_cut, args.reference.as_deref())?;
+        let result = rna::rseqc::read_duplication::read_duplication(
+            bam_path,
+            args.mapq_cut,
+            args.reference.as_deref(),
+        )?;
 
-        read_duplication::write_read_duplication(&result, outdir, &bam_stem)?;
+        rna::rseqc::read_duplication::write_read_duplication(&result, outdir, &bam_stem)?;
 
         info!(
             "[{}] read_duplication completed in {:.2}s",
@@ -853,11 +855,14 @@ fn run_read_distribution(args: cli::ReadDistributionArgs) -> Result<()> {
 
         info!("[{}] Running read_distribution analysis...", bam_stem);
 
-        let result =
-            read_distribution::read_distribution(bam_path, &args.bed, args.reference.as_deref())?;
+        let result = rna::rseqc::read_distribution::read_distribution(
+            bam_path,
+            &args.bed,
+            args.reference.as_deref(),
+        )?;
 
         let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
-        read_distribution::write_read_distribution(&result, &output_path)?;
+        rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
 
         info!(
             "[{}] Total {} reads, {} tags ({} assigned)",
@@ -903,7 +908,7 @@ fn run_junction_annotation(args: cli::JunctionAnnotationArgs) -> Result<()> {
 
         info!("[{}] Running junction_annotation analysis...", bam_stem);
 
-        let results = junction_annotation::junction_annotation(
+        let results = rna::rseqc::junction_annotation::junction_annotation(
             bam_path,
             &args.bed,
             args.min_intron,
@@ -913,20 +918,20 @@ fn run_junction_annotation(args: cli::JunctionAnnotationArgs) -> Result<()> {
 
         // Write output files
         let xls_path = outdir.join(format!("{}.junction.xls", bam_stem));
-        junction_annotation::write_junction_xls(&results, &xls_path)?;
+        rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
 
         let bed_path = outdir.join(format!("{}.junction.bed", bam_stem));
-        junction_annotation::write_junction_bed(&results, &bed_path)?;
+        rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_path)?;
 
         let r_path = outdir.join(format!("{}.junction_plot.r", bam_stem));
         let r_prefix = outdir.join(bam_stem).to_string_lossy().to_string();
-        junction_annotation::write_junction_plot_r(&results, &r_prefix, &r_path)?;
+        rna::rseqc::junction_annotation::write_junction_plot_r(&results, &r_prefix, &r_path)?;
 
         let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
-        junction_annotation::write_summary(&results, &summary_path)?;
+        rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
 
         // Print summary to stderr
-        junction_annotation::print_summary(&results);
+        rna::rseqc::junction_annotation::print_summary(&results);
 
         info!(
             "[{}] junction_annotation completed in {:.2}s",
@@ -965,7 +970,7 @@ fn run_junction_saturation(args: cli::JunctionSaturationArgs) -> Result<()> {
 
         info!("[{}] Running junction_saturation analysis...", bam_stem);
 
-        let results = junction_saturation::junction_saturation(
+        let results = rna::rseqc::junction_saturation::junction_saturation(
             bam_path,
             &args.bed,
             args.min_intron,
@@ -979,9 +984,9 @@ fn run_junction_saturation(args: cli::JunctionSaturationArgs) -> Result<()> {
 
         // Write R script and summary
         let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
-        junction_saturation::write_r_script(&results, &prefix)?;
+        rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
         let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
-        junction_saturation::write_summary(&results, &summary_path)?;
+        rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;
 
         info!(
             "[{}] junction_saturation completed in {:.2}s",
@@ -1018,7 +1023,7 @@ fn run_inner_distance(args: cli::InnerDistanceArgs) -> Result<()> {
             .and_then(|s| s.to_str())
             .unwrap_or("output");
 
-        let results = inner_distance::inner_distance(
+        let results = rna::rseqc::inner_distance::inner_distance(
             bam_path,
             &args.bed,
             args.sample_size,
@@ -1035,16 +1040,16 @@ fn run_inner_distance(args: cli::InnerDistanceArgs) -> Result<()> {
             .to_string_lossy()
             .to_string();
         let detail_path = format!("{prefix}.inner_distance.txt");
-        inner_distance::write_detail_file(&results, &detail_path)?;
+        rna::rseqc::inner_distance::write_detail_file(&results, &detail_path)?;
 
         let freq_path = format!("{prefix}.inner_distance_freq.txt");
-        inner_distance::write_freq_file(&results, &freq_path)?;
+        rna::rseqc::inner_distance::write_freq_file(&results, &freq_path)?;
 
         let r_path = format!("{prefix}.inner_distance_plot.r");
-        inner_distance::write_r_script(&results, &prefix, &r_path, args.step)?;
+        rna::rseqc::inner_distance::write_r_script(&results, &prefix, &r_path, args.step)?;
 
         let summary_path = format!("{prefix}.inner_distance_summary.txt");
-        inner_distance::write_summary(&results, &summary_path)?;
+        rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
 
         info!(
             "[{}] inner_distance completed in {:.2}s — {} read pairs processed",
