@@ -578,10 +578,15 @@ fn process_single_bam(
             info!("[{}] Generating plots...", bam_stem);
             let plot_start = Instant::now();
 
+            let rpkm_threshold = 0.5;
             let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
                 let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
                 let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
-                rna::dupradar::fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5)
+                rna::dupradar::fitting::compute_rpkm_threshold_rpk(
+                    &rpk_values,
+                    &rpkm_values,
+                    rpkm_threshold,
+                )
             });
 
             let density_path = outdir.join(format!("{}_duprateExpDens.png", bam_stem));
@@ -597,7 +602,12 @@ fn process_single_bam(
                         let path = &density_path;
                         s.spawn(move || {
                             rna::dupradar::plots::density_scatter_plot(
-                                dm_ref, fit, thresh, bam_stem, path,
+                                dm_ref,
+                                fit,
+                                thresh,
+                                rpkm_threshold,
+                                bam_stem,
+                                path,
                             )
                         })
                     })
