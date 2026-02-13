@@ -1,0 +1,19 @@
+processing /data/genes.bed ... Done
+processing /data/GM12878_REP1.markdup.sorted.bam ... Finished
+
+Total Reads                   41185202
+Total Tags                    55374023
+Total Assigned Tags           52400513
+=====================================================================
+Group               Total_bases         Tag_count           Tags/Kb             
+CDS_Exons           35417326            33261445            939.13            
+5'UTR_Exons         34549124            2634396             76.25             
+3'UTR_Exons         56248427            8459978             150.40            
+Introns             1443394904          7390637             5.12              
+TSS_up_1kb          30352574            65636               2.16              
+TSS_up_5kb          135672077           149678              1.10              
+TSS_up_10kb         243165718           206943              0.85              
+TES_down_1kb        32111565            147759              4.60              
+TES_down_5kb        139489391           373552              2.68              
+TES_down_10kb       246237178           447114              1.82              
+=====================================================================
