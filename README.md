@@ -99,7 +99,7 @@ sudo mv rustqc /usr/local/bin/
 
 ```bash
 docker run --rm -v "$PWD":/data ghcr.io/ewels/rustqc:latest \
-  rna /data/sample.markdup.bam /data/genes.gtf --outdir /data/results
+  rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
 ```
 
 Available tags: `latest`, or a specific version (e.g., `0.1.0`).
@@ -117,15 +117,15 @@ The binary will be at `target/release/rustqc`.
 ## Usage
 
 ```bash
-rustqc rna <INPUT> <GTF> [OPTIONS]
+rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
 ```
 
 ### Required arguments
 
 | Argument | Description |
 |----------|-------------|
-| `<INPUT>` | Path to a duplicate-marked alignment file (SAM/BAM/CRAM). Duplicates must be flagged (SAM flag 0x400), not removed. BAM/CRAM files should be sorted and indexed for parallel processing. |
-| `<GTF>` | Path to a GTF gene annotation file (e.g., from Ensembl or UCSC). |
+| `<INPUT>...` | One or more duplicate-marked alignment files (SAM/BAM/CRAM). Duplicates must be flagged (SAM flag 0x400), not removed. BAM/CRAM files should be sorted and indexed for parallel processing. |
+| `--gtf <GTF>` | Path to a GTF gene annotation file (e.g., from Ensembl or UCSC). |
 
 ### Options
 
@@ -147,23 +147,28 @@ Before processing, RustQC checks the BAM `@PG` header lines for known duplicate-
 
 If you are confident that your BAM file has duplicates correctly flagged despite the header check failing, you can bypass the verification with `--skip-dup-check`.
 
+When multiple BAM files are provided, they are processed in parallel using the available threads. The GTF is parsed once and shared across all BAM files. Threads are divided evenly among the parallel BAM jobs.
+
 ### Example
 
 ```bash
-# Single-end, unstranded (BAM)
-rustqc rna sample.markdup.bam genes.gtf --outdir results/
+# Single BAM, single-end, unstranded
+rustqc rna sample.markdup.bam --gtf genes.gtf --outdir results/
 
-# Paired-end, reverse-stranded (BAM)
-rustqc rna sample.markdup.bam genes.gtf --paired --stranded 2 --outdir results/
+# Single BAM, paired-end, reverse-stranded
+rustqc rna sample.markdup.bam --gtf genes.gtf --paired --stranded 2 --outdir results/
 
 # CRAM input with reference FASTA
-rustqc rna sample.markdup.cram genes.gtf --reference genome.fa --outdir results/
+rustqc rna sample.markdup.cram --gtf genes.gtf --reference genome.fa --outdir results/
 
 # SAM input (single-threaded only, no index)
-rustqc rna sample.markdup.sam genes.gtf --outdir results/
+rustqc rna sample.markdup.sam --gtf genes.gtf --outdir results/
+
+# Multiple alignment files in parallel
+rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf --paired --threads 12 --outdir results/
 
 # With chromosome name mapping (e.g. Ensembl alignment + UCSC GTF)
-rustqc rna sample.markdup.bam genes.gtf --paired --config config.yaml --outdir results/
+rustqc rna sample.markdup.bam --gtf genes.gtf --paired --config config.yaml --outdir results/
 ```
 
 ## Configuration
@@ -239,7 +244,7 @@ For an input file named `sample.bam` (or `sample.cram`, etc.), the following fil
 
 ## Performance tuning
 
-RustQC uses multi-threaded alignment processing when `--threads` is set above 1. Chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. For a typical RNA-Seq sample, `--threads 4` is a good starting point. Multi-threading requires an indexed file (`.bai`/`.csi` for BAM, `.crai` for CRAM). SAM files are always processed single-threaded.
+RustQC uses multi-threaded alignment processing when `--threads` is set above 1. Within a single file, chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. When multiple alignment files are provided, they are also processed in parallel — the available threads are divided evenly among concurrent jobs. For a single sample, `--threads 4` is a good starting point. For multiple samples, use enough threads to keep all jobs busy (e.g., `--threads 12` for 3 files gives each 4 threads). Multi-threading requires an indexed file (`.bai`/`.csi` for BAM, `.crai` for CRAM). SAM files are always processed single-threaded.
 
 For maximum performance when building from source, you can enable CPU-specific optimizations:
 
@@ -255,7 +260,7 @@ For an additional 5-20% speedup on frequently-used machines, Profile-Guided Opti
 RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release
 
 # Step 2: Run on representative data to collect profiles
-target/release/rustqc rna sample.bam genes.gtf --paired --threads 4 -o /tmp/pgo-run
+target/release/rustqc rna sample.bam --gtf genes.gtf --paired --threads 4 -o /tmp/pgo-run
 
 # Step 3: Merge profile data
 llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data

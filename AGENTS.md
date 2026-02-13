@@ -58,8 +58,9 @@ tests/
 Flat module structure — all modules declared in `main.rs`, no `lib.rs`.
 Inter-module access uses `crate::` paths (e.g., `use crate::gtf::Gene;`).
 
-The CLI uses clap subcommands: `rustqc rna <BAM> <GTF> [OPTIONS]`. Future QC
-modules will be added as additional subcommands.
+The CLI uses clap subcommands: `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]`.
+Multiple BAM files can be passed as positional arguments and are processed in
+parallel. Future QC modules will be added as additional subcommands.
 
 ## Code Style
 

@@ -34,12 +34,12 @@ pub enum Commands {
 /// Arguments for the `rna` (dupRadar) subcommand.
 #[derive(Parser, Debug)]
 pub struct RnaArgs {
-    /// Path to the duplicate-marked alignment file (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT")]
-    pub input: String,
+    /// Path(s) to duplicate-marked alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
 
     /// Path to the GTF gene annotation file
-    #[arg(value_name = "GTF")]
+    #[arg(short, long, value_name = "GTF")]
     pub gtf: String,
 
     /// Library strandedness: 0=unstranded, 1=forward, 2=reverse
@@ -86,11 +86,11 @@ mod tests {
 
     #[test]
     fn test_rna_default_args() {
-        // Test that defaults are sensible
-        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "genes.gtf"]);
+        // Test that defaults are sensible with a single BAM
+        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.input, "test.bam");
+                assert_eq!(args.input, vec!["test.bam"]);
                 assert_eq!(args.gtf, "genes.gtf");
                 assert_eq!(args.stranded, 0);
                 assert!(!args.paired);
@@ -101,11 +101,32 @@ mod tests {
     }
 
     #[test]
+    fn test_rna_multiple_bams() {
+        // Test that multiple BAM files are accepted
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "a.bam",
+            "b.bam",
+            "c.bam",
+            "--gtf",
+            "genes.gtf",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.input, vec!["a.bam", "b.bam", "c.bam"]);
+                assert_eq!(args.gtf, "genes.gtf");
+            }
+        }
+    }
+
+    #[test]
     fn test_rna_all_args() {
         let cli = Cli::parse_from([
             "rustqc",
             "rna",
             "test.bam",
+            "--gtf",
             "genes.gtf",
             "--stranded",
             "2",

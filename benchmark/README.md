@@ -31,7 +31,7 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 Rscript benchmark/small/run_dupRadar_R.R
 
 # RustQC
-cargo run --release -- rna benchmark/small/test.bam benchmark/small/chr6.gtf -p -o benchmark/small/RustQC
+cargo run --release -- rna benchmark/small/test.bam --gtf benchmark/small/chr6.gtf -p -o benchmark/small/RustQC
 ```
 
 ## Large benchmark
@@ -115,7 +115,7 @@ cargo build --release
 # Single-threaded
 ./target/release/rustqc rna \
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
-  benchmark/large/genes.gtf \
+  --gtf benchmark/large/genes.gtf \
   -p \
   -o benchmark/large/RustQC \
   -c benchmark/large/config.yaml
@@ -123,7 +123,7 @@ cargo build --release
 # Multi-threaded (8 threads)
 ./target/release/rustqc rna \
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
-  benchmark/large/genes.gtf \
+  --gtf benchmark/large/genes.gtf \
   -p \
   -t 8 \
   -o benchmark/large/RustQC \
