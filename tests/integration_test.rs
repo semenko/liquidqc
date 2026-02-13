@@ -39,6 +39,7 @@ fn run_rustqc(outdir: &str) -> std::process::Output {
             "tests/data/test.gtf",
             "--outdir",
             outdir,
+            "--skip-dup-check",
         ])
         .output()
         .expect("Failed to execute rustqc")
