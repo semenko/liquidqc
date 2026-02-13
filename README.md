@@ -123,7 +123,7 @@ duprust <BAM> <GTF> [OPTIONS]
 |--------|---------|-------------|
 | `--stranded <0\|1\|2>` | `0` | Library strandedness: `0` = unstranded, `1` = stranded (forward), `2` = reverse-stranded |
 | `--paired` | `false` | Set if the library is paired-end |
-| `--threads <N>` | `1` | Number of threads for BAM reading |
+| `--threads <N>` | `1` | Number of threads for parallel BAM processing |
 | `--outdir <DIR>` | `.` | Output directory |
 | `--config <FILE>` | none | Path to a YAML configuration file (see [Configuration](#configuration)) |
 
@@ -210,6 +210,36 @@ For an input BAM file named `sample.bam`, the following files are generated:
 | `dupsPerId` | Number of duplicate reads (unique mappers only) |
 | `RPK` | Reads per kilobase (unique mappers only) |
 | `RPKM` | RPKM (unique mappers only) |
+
+## Performance tuning
+
+dupRust uses multi-threaded BAM processing when `--threads` is set above 1. Chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. For a typical RNA-Seq sample, `--threads 4` is a good starting point.
+
+For maximum performance when building from source, you can enable CPU-specific optimizations:
+
+```bash
+# Build with native CPU instruction set (AVX2, etc.)
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+```
+
+For an additional 5-20% speedup on frequently-used machines, Profile-Guided Optimization (PGO) can be used:
+
+```bash
+# Step 1: Build with profiling instrumentation
+RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release
+
+# Step 2: Run on representative data to collect profiles
+target/release/duprust sample.bam genes.gtf --paired --threads 4 -o /tmp/pgo-run
+
+# Step 3: Merge profile data
+llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
+
+# Step 4: Rebuild with profile data
+RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata -Cllvm-args=-pgo-warn-missing-function" \
+  cargo build --release
+```
+
+Note: PGO profiles are machine-specific and `target-cpu=native` produces non-portable binaries. Pre-built release binaries use generic optimizations that work on all machines.
 
 ## How it works
 
