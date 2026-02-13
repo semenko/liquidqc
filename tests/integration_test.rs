@@ -36,6 +36,7 @@ fn run_rustqc(outdir: &str) -> std::process::Output {
         .args([
             "rna",
             "tests/data/test.bam",
+            "--gtf",
             "tests/data/test.gtf",
             "--outdir",
             outdir,
@@ -77,6 +78,33 @@ fn parse_intercept_slope(path: &str) -> (f64, f64) {
         }
     }
     (intercept, slope)
+}
+
+/// Helper: run rustqc rna on test data with multiple BAM files
+fn run_rustqc_multi(outdir: &str) -> std::process::Output {
+    let binary = rustqc_binary();
+
+    // Ensure output directory exists before copying files into it
+    fs::create_dir_all(outdir).expect("Failed to create output directory");
+
+    // Create a copy of test.bam with a different stem so outputs don't collide
+    let copy_bam = format!("{}/test_copy.bam", outdir);
+    let copy_bai = format!("{}/test_copy.bam.bai", outdir);
+    fs::copy("tests/data/test.bam", &copy_bam).expect("Failed to copy BAM");
+    fs::copy("tests/data/test.bam.bai", &copy_bai).expect("Failed to copy BAI");
+
+    Command::new(&binary)
+        .args([
+            "rna",
+            "tests/data/test.bam",
+            &copy_bam,
+            "--gtf",
+            "tests/data/test.gtf",
+            "--outdir",
+            outdir,
+        ])
+        .output()
+        .expect("Failed to execute rustqc")
 }
 
 /// Compare two floating-point values with a relative tolerance
@@ -441,4 +469,91 @@ fn test_count_values_exact() {
 
     // Cleanup
     let _ = fs::remove_dir_all(outdir);
+}
+
+// ===================================================================
+// Multi-BAM tests
+// ===================================================================
+
+/// Multiple BAM files should each produce their own output files.
+#[test]
+fn test_multiple_bam_files() {
+    let outdir = "tests/output_multi_bam";
+    let output = run_rustqc_multi(outdir);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "rustqc failed with multiple BAMs:\n{}",
+        stderr
+    );
+
+    // Both BAM stems should have produced output files
+    let expected_files = [
+        "test_dupMatrix.txt",
+        "test_duprateExpDens.png",
+        "test_duprateExpBoxplot.png",
+        "test_expressionHist.png",
+        "test_copy_dupMatrix.txt",
+        "test_copy_duprateExpDens.png",
+        "test_copy_duprateExpBoxplot.png",
+        "test_copy_expressionHist.png",
+    ];
+
+    for filename in &expected_files {
+        let path = format!("{}/{}", outdir, filename);
+        assert!(
+            std::path::Path::new(&path).exists(),
+            "Expected output file missing: {}",
+            path
+        );
+    }
+
+    // Both dupMatrix files should match the R reference (same input data)
+    let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
+    for stem in &["test", "test_copy"] {
+        let rust_matrix = parse_dup_matrix(&format!("{}/{}_dupMatrix.txt", outdir, stem));
+        assert_eq!(
+            r_matrix.len(),
+            rust_matrix.len(),
+            "Row count mismatch for {} matrix",
+            stem
+        );
+    }
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// Passing the same BAM file twice should fail with a duplicate-stem error.
+#[test]
+fn test_duplicate_bam_stems_rejected() {
+    let bin = env!("CARGO_BIN_EXE_rustqc");
+    let output = Command::new(bin)
+        .args([
+            "rna",
+            "tests/data/test.bam",
+            "tests/data/test.bam",
+            "--gtf",
+            "tests/data/test.gtf",
+            "--outdir",
+            "tests/output_dup_stems",
+        ])
+        .output()
+        .expect("Failed to execute rustqc");
+
+    assert!(
+        !output.status.success(),
+        "rustqc should fail with duplicate BAM stems"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("duplicate") || stderr.contains("Duplicate"),
+        "Error message should mention duplicate stems, got:\n{}",
+        stderr
+    );
+
+    // Cleanup (may not exist if it failed early)
+    let _ = fs::remove_dir_all("tests/output_dup_stems");
 }

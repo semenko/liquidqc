@@ -33,12 +33,12 @@ pub enum Commands {
 /// Arguments for the `rna` (dupRadar) subcommand.
 #[derive(Parser, Debug)]
 pub struct RnaArgs {
-    /// Path to the duplicate-marked BAM file
-    #[arg(value_name = "BAM")]
-    pub bam: String,
+    /// Path(s) to duplicate-marked BAM file(s)
+    #[arg(value_name = "BAM", num_args = 1.., required = true)]
+    pub bam: Vec<String>,
 
     /// Path to the GTF gene annotation file
-    #[arg(value_name = "GTF")]
+    #[arg(short, long, value_name = "GTF")]
     pub gtf: String,
 
     /// Library strandedness: 0=unstranded, 1=forward, 2=reverse
@@ -73,11 +73,11 @@ mod tests {
 
     #[test]
     fn test_rna_default_args() {
-        // Test that defaults are sensible
-        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "genes.gtf"]);
+        // Test that defaults are sensible with a single BAM
+        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.bam, "test.bam");
+                assert_eq!(args.bam, vec!["test.bam"]);
                 assert_eq!(args.gtf, "genes.gtf");
                 assert_eq!(args.stranded, 0);
                 assert!(!args.paired);
@@ -88,11 +88,32 @@ mod tests {
     }
 
     #[test]
+    fn test_rna_multiple_bams() {
+        // Test that multiple BAM files are accepted
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "a.bam",
+            "b.bam",
+            "c.bam",
+            "--gtf",
+            "genes.gtf",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.bam, vec!["a.bam", "b.bam", "c.bam"]);
+                assert_eq!(args.gtf, "genes.gtf");
+            }
+        }
+    }
+
+    #[test]
     fn test_rna_all_args() {
         let cli = Cli::parse_from([
             "rustqc",
             "rna",
             "test.bam",
+            "--gtf",
             "genes.gtf",
             "--stranded",
             "2",

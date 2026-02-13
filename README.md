@@ -99,7 +99,7 @@ sudo mv rustqc /usr/local/bin/
 
 ```bash
 docker run --rm -v "$PWD":/data ghcr.io/ewels/rustqc:latest \
-  rna /data/sample.markdup.bam /data/genes.gtf --outdir /data/results
+  rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
 ```
 
 Available tags: `latest`, or a specific version (e.g., `0.1.0`).
@@ -117,15 +117,15 @@ The binary will be at `target/release/rustqc`.
 ## Usage
 
 ```bash
-rustqc rna <BAM> <GTF> [OPTIONS]
+rustqc rna <BAM>... --gtf <GTF> [OPTIONS]
 ```
 
 ### Required arguments
 
 | Argument | Description |
 |----------|-------------|
-| `<BAM>` | Path to a duplicate-marked BAM file (sorted, indexed). Duplicates must be flagged (SAM flag 0x400), not removed. |
-| `<GTF>` | Path to a GTF gene annotation file (e.g., from Ensembl or UCSC). |
+| `<BAM>...` | One or more duplicate-marked BAM files (sorted, indexed). Duplicates must be flagged (SAM flag 0x400), not removed. |
+| `--gtf <GTF>` | Path to a GTF gene annotation file (e.g., from Ensembl or UCSC). |
 
 ### Options
 
@@ -137,17 +137,22 @@ rustqc rna <BAM> <GTF> [OPTIONS]
 | `--outdir <DIR>` | `.` | Output directory |
 | `--config <FILE>` | none | Path to a YAML configuration file (see [Configuration](#configuration)) |
 
+When multiple BAM files are provided, they are processed in parallel using the available threads. The GTF is parsed once and shared across all BAM files. Threads are divided evenly among the parallel BAM jobs.
+
 ### Example
 
 ```bash
-# Single-end, unstranded
-rustqc rna sample.markdup.bam genes.gtf --outdir results/
+# Single BAM, single-end, unstranded
+rustqc rna sample.markdup.bam --gtf genes.gtf --outdir results/
 
-# Paired-end, reverse-stranded
-rustqc rna sample.markdup.bam genes.gtf --paired --stranded 2 --outdir results/
+# Single BAM, paired-end, reverse-stranded
+rustqc rna sample.markdup.bam --gtf genes.gtf --paired --stranded 2 --outdir results/
+
+# Multiple BAMs in parallel
+rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf --paired --threads 12 --outdir results/
 
 # With chromosome name mapping (e.g. Ensembl BAM + UCSC GTF)
-rustqc rna sample.markdup.bam genes.gtf --paired --config config.yaml --outdir results/
+rustqc rna sample.markdup.bam --gtf genes.gtf --paired --config config.yaml --outdir results/
 ```
 
 ## Configuration
@@ -223,7 +228,7 @@ For an input BAM file named `sample.bam`, the following files are generated:
 
 ## Performance tuning
 
-RustQC uses multi-threaded BAM processing when `--threads` is set above 1. Chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. For a typical RNA-Seq sample, `--threads 4` is a good starting point.
+RustQC uses multi-threaded BAM processing when `--threads` is set above 1. Within a single BAM file, chromosomes are distributed across threads and processed in parallel. When multiple BAM files are provided, they are also processed in parallel — the available threads are divided evenly among concurrent BAM jobs. For a single sample, `--threads 4` is a good starting point. For multiple samples, use enough threads to keep all BAM jobs busy (e.g., `--threads 12` for 3 BAMs gives each 4 threads).
 
 For maximum performance when building from source, you can enable CPU-specific optimizations:
 
@@ -239,7 +244,7 @@ For an additional 5-20% speedup on frequently-used machines, Profile-Guided Opti
 RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release
 
 # Step 2: Run on representative data to collect profiles
-target/release/rustqc rna sample.bam genes.gtf --paired --threads 4 -o /tmp/pgo-run
+target/release/rustqc rna sample.bam --gtf genes.gtf --paired --threads 4 -o /tmp/pgo-run
 
 # Step 3: Merge profile data
 llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data

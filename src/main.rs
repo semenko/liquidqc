@@ -14,7 +14,10 @@ mod gtf;
 mod plots;
 
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 use log::info;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
@@ -32,6 +35,10 @@ fn main() -> Result<()> {
 }
 
 /// Run the RNA-Seq duplication rate analysis (dupRadar equivalent).
+///
+/// When multiple BAM files are provided, they are processed in parallel using
+/// rayon. The GTF annotation is parsed once and shared across all BAM files.
+/// Available threads are distributed across the parallel BAM processing jobs.
 fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Load configuration file if provided
     let config = if let Some(ref config_path) = args.config {
@@ -49,8 +56,13 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     };
 
     let start = Instant::now();
+    let n_bams = args.bam.len();
     info!("RustQC rna v{}", env!("CARGO_PKG_VERSION"));
-    info!("BAM file: {}", args.bam);
+    info!(
+        "BAM file{}: {}",
+        if n_bams > 1 { "s" } else { "" },
+        args.bam.join(", ")
+    );
     info!("GTF file: {}", args.gtf);
     info!(
         "Stranded: {}",
@@ -64,7 +76,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     info!("Paired: {}", args.paired);
     info!("Threads: {}", args.threads);
 
-    // Step 1: Parse GTF annotation
+    // Step 1: Parse GTF annotation (shared across all BAM files)
     info!("Parsing GTF annotation...");
     let gtf_start = Instant::now();
     let genes = gtf::parse_gtf(&args.gtf)?;
@@ -74,49 +86,190 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         gtf_start.elapsed().as_secs_f64()
     );
 
-    // Step 2: Count reads with featureCounts-compatible logic
-    info!("Counting reads across 4 modes...");
-    let count_start = Instant::now();
     let chrom_mapping = config.bam_to_gtf_mapping();
-    let count_result = counting::count_reads(
-        &args.bam,
-        &genes,
-        args.stranded,
-        args.paired,
-        args.threads,
-        &chrom_mapping,
-        config.chromosome_prefix(),
-    )?;
-    info!(
-        "Counting complete in {:.2}s",
-        count_start.elapsed().as_secs_f64()
-    );
+    let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
-    // Step 3: Build duplication matrix
-    info!("Building duplication matrix...");
-    let dup_matrix = dupmatrix::DupMatrix::build(&genes, &count_result);
+    // Validate that BAM file stems are unique (otherwise outputs would collide).
+    if n_bams > 1 {
+        let mut seen_stems = HashSet::new();
+        for bam_path in &args.bam {
+            let stem = Path::new(bam_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(bam_path);
+            anyhow::ensure!(
+                seen_stems.insert(stem.to_owned()),
+                "Duplicate BAM file stem '{}': multiple BAM files with the same \
+                 filename would produce conflicting output files. Rename or \
+                 reorganise input files so each has a unique filename.",
+                stem
+            );
+        }
+    }
 
-    let stats = dup_matrix.get_stats();
-    info!(
-        "Matrix built for {} genes ({} with reads)",
-        stats.n_regions, stats.n_regions_covered
-    );
+    // Determine thread allocation for parallel BAM processing.
+    // When processing multiple BAMs, we run BAMs in parallel and divide threads
+    // among them. Each BAM's count_reads() creates its own rayon pool internally.
+    // Note: the outer pool threads are mostly blocked waiting on inner pools, so
+    // actual CPU-active threads stay close to `args.threads`. However, the total
+    // OS thread count may briefly exceed `--threads` due to the outer pool threads
+    // and temporary plot-generation threads (3 per BAM via std::thread::scope).
+    // Integer division may leave up to `n_parallel - 1` threads unused.
+    let n_parallel = n_bams.min(args.threads).max(1);
+    let threads_per_bam = (args.threads / n_parallel).max(1);
+    if n_bams > 1 {
+        info!(
+            "Processing {} BAM files ({} in parallel, {} threads each)",
+            n_bams, n_parallel, threads_per_bam
+        );
+    }
 
-    // Step 4: Write duplication matrix
+    // Create output directory
     let outdir = Path::new(&args.outdir);
     std::fs::create_dir_all(outdir)?;
-    let bam_stem = Path::new(&args.bam)
+
+    // Step 2: Process all BAM files (in parallel when multiple)
+    let bam_results: Vec<Result<()>> = if n_bams == 1 {
+        // Single BAM: use all threads directly, no outer rayon pool needed
+        vec![process_single_bam(
+            &args.bam[0],
+            &genes,
+            args.stranded,
+            args.paired,
+            args.threads,
+            &chrom_mapping,
+            chrom_prefix.as_deref(),
+            outdir,
+        )]
+    } else {
+        // Multiple BAMs: process in parallel with a dedicated rayon pool
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(n_parallel)
+            .build()
+            .context("Failed to create rayon thread pool for parallel BAM processing")?;
+
+        pool.install(|| {
+            args.bam
+                .par_iter()
+                .map(|bam_path| {
+                    process_single_bam(
+                        bam_path,
+                        &genes,
+                        args.stranded,
+                        args.paired,
+                        threads_per_bam,
+                        &chrom_mapping,
+                        chrom_prefix.as_deref(),
+                        outdir,
+                    )
+                })
+                .collect()
+        })
+    };
+
+    // Report results
+    let mut n_ok = 0;
+    let mut n_err = 0;
+    for (bam_path, result) in args.bam.iter().zip(bam_results.into_iter()) {
+        match result {
+            Ok(()) => n_ok += 1,
+            Err(e) => {
+                n_err += 1;
+                log::error!("Failed to process {}: {:?}", bam_path, e);
+            }
+        }
+    }
+
+    if n_bams > 1 {
+        info!(
+            "Processed {} BAM file{}: {} succeeded, {} failed",
+            n_bams,
+            if n_bams > 1 { "s" } else { "" },
+            n_ok,
+            n_err,
+        );
+    }
+
+    info!("Total runtime: {:.2}s", start.elapsed().as_secs_f64());
+
+    if n_err > 0 {
+        anyhow::bail!("{} BAM file(s) failed to process", n_err);
+    }
+
+    Ok(())
+}
+
+/// Process a single BAM file through the full analysis pipeline.
+///
+/// This runs the complete dupRadar-equivalent analysis for one BAM:
+/// counting, matrix construction, model fitting, plotting, and MultiQC output.
+///
+/// # Arguments
+///
+/// * `bam_path` - Path to the duplicate-marked BAM file
+/// * `genes` - Parsed GTF gene annotations (shared, read-only)
+/// * `stranded` - Library strandedness (0/1/2)
+/// * `paired` - Whether the library is paired-end
+/// * `threads` - Number of threads for this BAM's read counting
+/// * `chrom_mapping` - BAM-to-GTF chromosome name mapping
+/// * `chrom_prefix` - Optional chromosome name prefix
+/// * `outdir` - Output directory for results
+#[allow(clippy::too_many_arguments)]
+fn process_single_bam(
+    bam_path: &str,
+    genes: &IndexMap<String, gtf::Gene>,
+    stranded: u8,
+    paired: bool,
+    threads: usize,
+    chrom_mapping: &HashMap<String, String>,
+    chrom_prefix: Option<&str>,
+    outdir: &Path,
+) -> Result<()> {
+    let bam_stem = Path::new(bam_path)
         .file_stem()
         .context("BAM path has no filename")?
         .to_str()
         .context("BAM filename is not valid UTF-8")?;
 
+    let bam_start = Instant::now();
+    info!("[{}] Counting reads across 4 modes...", bam_stem);
+    let count_start = Instant::now();
+    let count_result = counting::count_reads(
+        bam_path,
+        genes,
+        stranded,
+        paired,
+        threads,
+        chrom_mapping,
+        chrom_prefix,
+    )?;
+    info!(
+        "[{}] Counting complete in {:.2}s",
+        bam_stem,
+        count_start.elapsed().as_secs_f64()
+    );
+
+    // Build duplication matrix
+    info!("[{}] Building duplication matrix...", bam_stem);
+    let dup_matrix = dupmatrix::DupMatrix::build(genes, &count_result);
+
+    let stats = dup_matrix.get_stats();
+    info!(
+        "[{}] Matrix built for {} genes ({} with reads)",
+        bam_stem, stats.n_regions, stats.n_regions_covered
+    );
+
+    // Write duplication matrix
     let matrix_path = outdir.join(format!("{}_dupMatrix.txt", bam_stem));
     dup_matrix.write_tsv(&matrix_path)?;
-    info!("Duplication matrix written to {}", matrix_path.display());
+    info!(
+        "[{}] Duplication matrix written to {}",
+        bam_stem,
+        matrix_path.display()
+    );
 
-    // Step 5: Fit logistic regression model
-    info!("Fitting duplication rate model...");
+    // Fit logistic regression model
+    info!("[{}] Fitting duplication rate model...", bam_stem);
     let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
     let dup_rate_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.dup_rate).collect();
 
@@ -124,22 +277,26 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     let fit_ok = match &fit_result {
         Ok(fit) => {
             info!(
-                "Model fit: intercept={:.6}, slope={:.6}",
-                fit.intercept, fit.slope
+                "[{}] Model fit: intercept={:.6}, slope={:.6}",
+                bam_stem, fit.intercept, fit.slope
             );
             let fit_path = outdir.join(format!("{}_intercept_slope.txt", bam_stem));
             plots::write_intercept_slope(fit, &fit_path)?;
-            info!("Fit results written to {}", fit_path.display());
+            info!(
+                "[{}] Fit results written to {}",
+                bam_stem,
+                fit_path.display()
+            );
             Some(fit.clone())
         }
         Err(e) => {
-            info!("Warning: Could not fit model: {}", e);
+            info!("[{}] Warning: Could not fit model: {}", bam_stem, e);
             None
         }
     };
 
-    // Step 6: Generate plots (in parallel — all plots read shared immutable data)
-    info!("Generating plots...");
+    // Generate plots (in parallel — all plots read shared immutable data)
+    info!("[{}] Generating plots...", bam_stem);
     let plot_start = Instant::now();
 
     let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
@@ -189,35 +346,41 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     })?;
 
     info!(
-        "Plots generated in {:.2}s",
+        "[{}] Plots generated in {:.2}s",
+        bam_stem,
         plot_start.elapsed().as_secs_f64()
     );
 
-    // Step 7: Write MultiQC-compatible output files
+    // Write MultiQC-compatible output files
     if let Some(ref fit) = fit_ok {
         let mqc_intercept_path = outdir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
         plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
 
         let mqc_curve_path = outdir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
         plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
-        info!("MultiQC output files written");
+        info!("[{}] MultiQC output files written", bam_stem);
     }
 
-    // Step 8: Print summary statistics
-    info!("--- Summary ---");
-    info!("Total genes: {}", stats.n_regions);
+    // Print summary statistics
+    info!("[{}] --- Summary ---", bam_stem);
+    info!("[{}] Total genes: {}", bam_stem, stats.n_regions);
     info!(
-        "Genes with reads: {} ({:.1}%)",
+        "[{}] Genes with reads: {} ({:.1}%)",
+        bam_stem,
         stats.n_regions_covered,
         stats.f_regions_covered * 100.0
     );
     info!(
-        "Genes with duplication: {} ({:.1}%)",
+        "[{}] Genes with duplication: {} ({:.1}%)",
+        bam_stem,
         stats.n_regions_duplication,
         stats.f_regions_duplication * 100.0
     );
-
-    info!("Total runtime: {:.2}s", start.elapsed().as_secs_f64());
+    info!(
+        "[{}] Completed in {:.2}s",
+        bam_stem,
+        bam_start.elapsed().as_secs_f64()
+    );
 
     Ok(())
 }
