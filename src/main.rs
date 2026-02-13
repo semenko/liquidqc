@@ -3,12 +3,14 @@
 //! A collection of Rust-based QC tools for bioinformatics.
 //! The `rna` subcommand is a reimplementation of the dupRadar Bioconductor
 //! R package, analysing PCR duplicate rates as a function of gene expression
-//! level in RNA-Seq datasets.
+//! level in RNA-Seq datasets. It also produces featureCounts-compatible output
+//! files and biotype count summaries in a single pass.
 
 mod cli;
 mod config;
 mod counting;
 mod dupmatrix;
+mod featurecounts;
 mod fitting;
 mod gtf;
 mod plots;
@@ -34,7 +36,53 @@ fn main() -> Result<()> {
     }
 }
 
-/// Run the RNA-Seq duplication rate analysis (dupRadar equivalent).
+/// Reconstruct the command line for the featureCounts-compatible header comment.
+fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
+    let mut parts = vec![format!(
+        "rustqc rna {} --gtf {}",
+        args.input
+            .iter()
+            .map(|s| shell_escape(s))
+            .collect::<Vec<_>>()
+            .join(" "),
+        shell_escape(&args.gtf)
+    )];
+    parts.push(format!("-s {}", args.stranded));
+    if args.paired {
+        parts.push("-p".to_string());
+    }
+    if args.threads != 1 {
+        parts.push(format!("-t {}", args.threads));
+    }
+    if args.outdir != "." {
+        parts.push(format!("-o {}", shell_escape(&args.outdir)));
+    }
+    if let Some(ref config_path) = args.config {
+        parts.push(format!("-c {}", shell_escape(config_path)));
+    }
+    if let Some(ref biotype) = args.biotype_attribute {
+        parts.push(format!("--biotype-attribute {}", shell_escape(biotype)));
+    }
+    if let Some(ref reference) = args.reference {
+        parts.push(format!("--reference {}", shell_escape(reference)));
+    }
+    if args.skip_dup_check {
+        parts.push("--skip-dup-check".to_string());
+    }
+    parts.join(" ")
+}
+
+/// Simple shell-escaping: wrap in quotes if the string contains spaces.
+fn shell_escape(s: &str) -> String {
+    if s.contains(' ') {
+        format!("\"{}\"", s)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Run the RNA-Seq duplication rate analysis (dupRadar equivalent)
+/// and featureCounts-compatible output generation.
 ///
 /// When multiple BAM files are provided, they are processed in parallel using
 /// rayon. The GTF annotation is parsed once and shared across all BAM files.
@@ -91,10 +139,64 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     info!("Paired: {}", args.paired);
     info!("Threads: {}", args.threads);
 
+    // Determine biotype attribute name (CLI overrides config, with auto-detection fallback)
+    let configured_biotype = args
+        .biotype_attribute
+        .clone()
+        .unwrap_or_else(|| config.featurecounts.biotype_attribute.clone());
+
+    // Determine which extra GTF attributes we need
+    let mut extra_attributes: Vec<String> = Vec::new();
+    let mut biotype_attribute = configured_biotype.clone();
+    let need_biotype = config.any_biotype_output();
+    if need_biotype {
+        // Check if the configured biotype attribute exists in the GTF.
+        // If not found and the user didn't explicitly set it, try common alternatives:
+        // Ensembl GTFs use "gene_biotype", GENCODE GTFs use "gene_type".
+        let user_explicit = args.biotype_attribute.is_some();
+        if gtf::attribute_exists_in_gtf(&args.gtf, &biotype_attribute, 1000) {
+            extra_attributes.push(biotype_attribute.clone());
+            info!("Biotype attribute: {}", biotype_attribute);
+        } else if !user_explicit {
+            // Auto-detect: try known alternatives
+            let alternatives = if biotype_attribute == "gene_biotype" {
+                vec!["gene_type"]
+            } else if biotype_attribute == "gene_type" {
+                vec!["gene_biotype"]
+            } else {
+                vec!["gene_biotype", "gene_type"]
+            };
+            let mut found = false;
+            for alt in alternatives {
+                if gtf::attribute_exists_in_gtf(&args.gtf, alt, 1000) {
+                    info!(
+                        "Biotype attribute '{}' not found in GTF, using '{}' instead",
+                        biotype_attribute, alt
+                    );
+                    biotype_attribute = alt.to_string();
+                    extra_attributes.push(biotype_attribute.clone());
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                info!(
+                    "Warning: biotype attribute '{}' not found in GTF, skipping biotype outputs",
+                    configured_biotype
+                );
+            }
+        } else {
+            info!(
+                "Warning: biotype attribute '{}' not found in GTF, skipping biotype outputs",
+                biotype_attribute
+            );
+        }
+    }
+
     // Step 1: Parse GTF annotation (shared across all BAM files)
     info!("Parsing GTF annotation...");
     let gtf_start = Instant::now();
-    let genes = gtf::parse_gtf(&args.gtf)?;
+    let genes = gtf::parse_gtf(&args.gtf, &extra_attributes)?;
     info!(
         "Parsed {} genes in {:.2}s",
         genes.len(),
@@ -104,7 +206,10 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
-    // Validate that BAM file stems are unique (otherwise outputs would collide).
+    // Reconstruct command line for featureCounts-compatible header
+    let command_line = reconstruct_command_line(&args);
+
+    // Validate that input file stems are unique (otherwise outputs would collide).
     if n_bams > 1 {
         let mut seen_stems = HashSet::new();
         for bam_path in &args.input {
@@ -143,6 +248,9 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     let outdir = Path::new(&args.outdir);
     std::fs::create_dir_all(outdir)?;
 
+    // Determine if biotype attribute was found in the GTF
+    let biotype_in_gtf = extra_attributes.contains(&biotype_attribute);
+
     // Step 2: Process all alignment files (in parallel when multiple)
     let bam_results: Vec<Result<()>> = if n_bams == 1 {
         // Single file: use all threads directly, no outer rayon pool needed
@@ -157,6 +265,10 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
             outdir,
             args.reference.as_deref(),
             args.skip_dup_check,
+            &config,
+            &biotype_attribute,
+            biotype_in_gtf,
+            &command_line,
         )]
     } else {
         // Multiple files: process in parallel with a dedicated rayon pool
@@ -183,6 +295,10 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
                         outdir,
                         reference,
                         skip_dup_check,
+                        &config,
+                        &biotype_attribute,
+                        biotype_in_gtf,
+                        &command_line,
                     )
                 })
                 .collect()
@@ -223,8 +339,8 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
 
 /// Process a single alignment file through the full analysis pipeline.
 ///
-/// This runs the complete dupRadar-equivalent analysis for one file:
-/// counting, matrix construction, model fitting, plotting, and MultiQC output.
+/// This runs the complete analysis for one file: counting, featureCounts output,
+/// biotype counting, duplication matrix, model fitting, plotting, and MultiQC output.
 ///
 /// # Arguments
 ///
@@ -238,6 +354,10 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
 /// * `outdir` - Output directory for results
 /// * `reference` - Optional reference FASTA for CRAM files
 /// * `skip_dup_check` - Whether to skip duplicate-marking validation
+/// * `config` - Configuration for conditional outputs
+/// * `biotype_attribute` - GTF attribute name for biotype counting
+/// * `biotype_in_gtf` - Whether the biotype attribute was found in the GTF
+/// * `command_line` - Reconstructed command line for featureCounts header
 #[allow(clippy::too_many_arguments)]
 fn process_single_bam(
     bam_path: &str,
@@ -250,6 +370,10 @@ fn process_single_bam(
     outdir: &Path,
     reference: Option<&str>,
     skip_dup_check: bool,
+    config: &config::Config,
+    biotype_attribute: &str,
+    biotype_in_gtf: bool,
+    command_line: &str,
 ) -> Result<()> {
     let bam_stem = Path::new(bam_path)
         .file_stem()
@@ -277,133 +401,273 @@ fn process_single_bam(
         count_start.elapsed().as_secs_f64()
     );
 
-    // Build duplication matrix
-    info!("[{}] Building duplication matrix...", bam_stem);
-    let dup_matrix = dupmatrix::DupMatrix::build(genes, &count_result);
-
-    let stats = dup_matrix.get_stats();
+    // Log counting summary stats
     info!(
-        "[{}] Matrix built for {} genes ({} with reads)",
-        bam_stem, stats.n_regions, stats.n_regions_covered
+        "[{}] Total reads processed: {} ({} fragments)",
+        bam_stem, count_result.stat_total_reads, count_result.stat_total_fragments
     );
-
-    // Write duplication matrix
-    let matrix_path = outdir.join(format!("{}_dupMatrix.txt", bam_stem));
-    dup_matrix.write_tsv(&matrix_path)?;
+    info!("[{}] Assigned: {}", bam_stem, count_result.stat_assigned);
     info!(
-        "[{}] Duplication matrix written to {}",
-        bam_stem,
-        matrix_path.display()
+        "[{}] No features: {}",
+        bam_stem, count_result.stat_no_features
     );
+    info!("[{}] Ambiguous: {}", bam_stem, count_result.stat_ambiguous);
 
-    // Fit logistic regression model
-    info!("[{}] Fitting duplication rate model...", bam_stem);
-    let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
-    let dup_rate_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.dup_rate).collect();
+    // === featureCounts outputs ===
+    if config.any_featurecounts_output() {
+        info!(
+            "[{}] Writing featureCounts-compatible output files...",
+            bam_stem
+        );
 
-    let fit_result = fitting::duprate_exp_fit(&rpk_values, &dup_rate_values);
-    let fit_ok = match &fit_result {
-        Ok(fit) => {
+        if config.featurecounts.counts_file {
+            let counts_path = outdir.join(format!("{}.featureCounts.tsv", bam_stem));
+            featurecounts::write_counts_file(
+                &counts_path,
+                genes,
+                &count_result,
+                bam_path,
+                command_line,
+            )?;
             info!(
-                "[{}] Model fit: intercept={:.6}, slope={:.6}",
-                bam_stem, fit.intercept, fit.slope
-            );
-            let fit_path = outdir.join(format!("{}_intercept_slope.txt", bam_stem));
-            plots::write_intercept_slope(fit, &fit_path)?;
-            info!(
-                "[{}] Fit results written to {}",
+                "[{}] Counts file written to {}",
                 bam_stem,
-                fit_path.display()
+                counts_path.display()
             );
-            Some(fit.clone())
         }
-        Err(e) => {
-            info!("[{}] Warning: Could not fit model: {}", bam_stem, e);
-            None
+
+        if config.featurecounts.summary_file {
+            let summary_path = outdir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
+            featurecounts::write_summary_file(&summary_path, &count_result, bam_path)?;
+            info!(
+                "[{}] Summary file written to {}",
+                bam_stem,
+                summary_path.display()
+            );
         }
-    };
 
-    // Generate plots (in parallel — all plots read shared immutable data)
-    info!("[{}] Generating plots...", bam_stem);
-    let plot_start = Instant::now();
+        // Biotype outputs (only if attribute was found in GTF)
+        if biotype_in_gtf && config.any_biotype_output() {
+            let biotype_counts =
+                featurecounts::aggregate_biotype_counts(genes, &count_result, biotype_attribute);
+            info!(
+                "[{}] Biotype counting: {} biotypes found",
+                bam_stem,
+                biotype_counts.len()
+            );
 
-    let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
-        let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
-        fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5)
-    });
+            if config.featurecounts.biotype_counts {
+                let biotype_path = outdir.join(format!("{}.biotype_counts.tsv", bam_stem));
+                featurecounts::write_biotype_counts(&biotype_path, &biotype_counts)?;
+                info!(
+                    "[{}] Biotype counts written to {}",
+                    bam_stem,
+                    biotype_path.display()
+                );
+            }
 
-    let density_path = outdir.join(format!("{}_duprateExpDens.png", bam_stem));
-    let boxplot_path = outdir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
-    let histogram_path = outdir.join(format!("{}_expressionHist.png", bam_stem));
+            if config.featurecounts.biotype_counts_mqc {
+                let mqc_biotype_path = outdir.join(format!("{}.biotype_counts_mqc.tsv", bam_stem));
+                featurecounts::write_biotype_counts_mqc(
+                    &mqc_biotype_path,
+                    &biotype_counts,
+                    bam_stem,
+                )?;
+                info!(
+                    "[{}] Biotype MultiQC file written to {}",
+                    bam_stem,
+                    mqc_biotype_path.display()
+                );
+            }
 
-    std::thread::scope(|s| -> Result<()> {
-        // Density scatter plot (only if fit succeeded)
-        let density_handle = fit_ok.as_ref().map(|fit| {
-            let dm_ref = &dup_matrix;
-            let thresh = rpkm_threshold_rpk;
-            let path = &density_path;
-            s.spawn(move || plots::density_scatter_plot(dm_ref, fit, thresh, bam_stem, path))
-        });
-
-        // Boxplot
-        let boxplot_handle = {
-            let dm_ref = &dup_matrix;
-            let path = &boxplot_path;
-            s.spawn(move || plots::duprate_boxplot(dm_ref, bam_stem, path))
-        };
-
-        // Histogram
-        let histogram_handle = {
-            let dm_ref = &dup_matrix;
-            let path = &histogram_path;
-            s.spawn(move || plots::expression_histogram(dm_ref, bam_stem, path))
-        };
-
-        // Collect results
-        if let Some(handle) = density_handle {
-            handle
-                .join()
-                .expect("density scatter plot thread panicked")?;
+            if config.featurecounts.biotype_rrna_mqc {
+                let mqc_rrna_path =
+                    outdir.join(format!("{}.biotype_counts_rrna_mqc.tsv", bam_stem));
+                featurecounts::write_biotype_rrna_mqc(
+                    &mqc_rrna_path,
+                    &biotype_counts,
+                    count_result.stat_assigned,
+                    bam_stem,
+                )?;
+                info!(
+                    "[{}] rRNA MultiQC file written to {}",
+                    bam_stem,
+                    mqc_rrna_path.display()
+                );
+            }
         }
-        boxplot_handle.join().expect("boxplot thread panicked")?;
-        histogram_handle
-            .join()
-            .expect("histogram thread panicked")?;
-
-        Ok(())
-    })?;
-
-    info!(
-        "[{}] Plots generated in {:.2}s",
-        bam_stem,
-        plot_start.elapsed().as_secs_f64()
-    );
-
-    // Write MultiQC-compatible output files
-    if let Some(ref fit) = fit_ok {
-        let mqc_intercept_path = outdir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
-        plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
-
-        let mqc_curve_path = outdir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
-        plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
-        info!("[{}] MultiQC output files written", bam_stem);
     }
 
-    // Print summary statistics
-    info!("[{}] --- Summary ---", bam_stem);
-    info!("[{}] Total genes: {}", bam_stem, stats.n_regions);
-    info!(
-        "[{}] Genes with reads: {} ({:.1}%)",
-        bam_stem,
-        stats.n_regions_covered,
-        stats.f_regions_covered * 100.0
-    );
-    info!(
-        "[{}] Genes with duplication: {} ({:.1}%)",
-        bam_stem,
-        stats.n_regions_duplication,
-        stats.f_regions_duplication * 100.0
-    );
+    // === dupRadar outputs ===
+    if config.any_dupradar_output() {
+        info!("[{}] Building duplication matrix...", bam_stem);
+        let dup_matrix = dupmatrix::DupMatrix::build(genes, &count_result);
+
+        let stats = dup_matrix.get_stats();
+        info!(
+            "[{}] Matrix built for {} genes ({} with reads)",
+            bam_stem, stats.n_regions, stats.n_regions_covered
+        );
+
+        // Write duplication matrix
+        if config.dupradar.dup_matrix {
+            let matrix_path = outdir.join(format!("{}_dupMatrix.txt", bam_stem));
+            dup_matrix.write_tsv(&matrix_path)?;
+            info!(
+                "[{}] Duplication matrix written to {}",
+                bam_stem,
+                matrix_path.display()
+            );
+        }
+
+        // Fit logistic regression model (needed for intercept/slope, density plot, and MultiQC)
+        let need_fit = config.dupradar.intercept_slope
+            || config.dupradar.density_scatter_plot
+            || config.dupradar.multiqc_intercept
+            || config.dupradar.multiqc_curve;
+
+        let fit_ok = if need_fit {
+            info!("[{}] Fitting duplication rate model...", bam_stem);
+            let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
+            let dup_rate_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.dup_rate).collect();
+
+            let fit_result = fitting::duprate_exp_fit(&rpk_values, &dup_rate_values);
+            match &fit_result {
+                Ok(fit) => {
+                    info!(
+                        "[{}] Model fit: intercept={:.6}, slope={:.6}",
+                        bam_stem, fit.intercept, fit.slope
+                    );
+                    if config.dupradar.intercept_slope {
+                        let fit_path = outdir.join(format!("{}_intercept_slope.txt", bam_stem));
+                        plots::write_intercept_slope(fit, &fit_path)?;
+                        info!(
+                            "[{}] Fit results written to {}",
+                            bam_stem,
+                            fit_path.display()
+                        );
+                    }
+                    Some(fit.clone())
+                }
+                Err(e) => {
+                    info!("[{}] Warning: Could not fit model: {}", bam_stem, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Generate plots (in parallel — all plots read shared immutable data)
+        let any_plot = config.dupradar.density_scatter_plot
+            || config.dupradar.boxplot
+            || config.dupradar.expression_histogram;
+
+        if any_plot {
+            info!("[{}] Generating plots...", bam_stem);
+            let plot_start = Instant::now();
+
+            let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
+                let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
+                let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
+                fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5)
+            });
+
+            let density_path = outdir.join(format!("{}_duprateExpDens.png", bam_stem));
+            let boxplot_path = outdir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
+            let histogram_path = outdir.join(format!("{}_expressionHist.png", bam_stem));
+
+            std::thread::scope(|s| -> Result<()> {
+                // Density scatter plot (only if fit succeeded and enabled)
+                let density_handle = if config.dupradar.density_scatter_plot {
+                    fit_ok.as_ref().map(|fit| {
+                        let dm_ref = &dup_matrix;
+                        let thresh = rpkm_threshold_rpk;
+                        let path = &density_path;
+                        s.spawn(move || {
+                            plots::density_scatter_plot(dm_ref, fit, thresh, bam_stem, path)
+                        })
+                    })
+                } else {
+                    None
+                };
+
+                // Boxplot
+                let boxplot_handle = if config.dupradar.boxplot {
+                    let dm_ref = &dup_matrix;
+                    let path = &boxplot_path;
+                    Some(s.spawn(move || plots::duprate_boxplot(dm_ref, bam_stem, path)))
+                } else {
+                    None
+                };
+
+                // Histogram
+                let histogram_handle = if config.dupradar.expression_histogram {
+                    let dm_ref = &dup_matrix;
+                    let path = &histogram_path;
+                    Some(s.spawn(move || plots::expression_histogram(dm_ref, bam_stem, path)))
+                } else {
+                    None
+                };
+
+                // Collect results
+                if let Some(handle) = density_handle {
+                    handle
+                        .join()
+                        .expect("density scatter plot thread panicked")?;
+                }
+                if let Some(handle) = boxplot_handle {
+                    handle.join().expect("boxplot thread panicked")?;
+                }
+                if let Some(handle) = histogram_handle {
+                    handle.join().expect("histogram thread panicked")?;
+                }
+
+                Ok(())
+            })?;
+
+            info!(
+                "[{}] Plots generated in {:.2}s",
+                bam_stem,
+                plot_start.elapsed().as_secs_f64()
+            );
+        }
+
+        // Write MultiQC-compatible output files
+        if let Some(ref fit) = fit_ok {
+            if config.dupradar.multiqc_intercept {
+                let mqc_intercept_path = outdir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
+                plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
+            }
+
+            if config.dupradar.multiqc_curve {
+                let mqc_curve_path =
+                    outdir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
+                plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
+            }
+
+            if config.dupradar.multiqc_intercept || config.dupradar.multiqc_curve {
+                info!("[{}] MultiQC output files written", bam_stem);
+            }
+        }
+
+        // Print dupRadar summary statistics
+        info!("[{}] --- dupRadar Summary ---", bam_stem);
+        info!("[{}] Total genes: {}", bam_stem, stats.n_regions);
+        info!(
+            "[{}] Genes with reads: {} ({:.1}%)",
+            bam_stem,
+            stats.n_regions_covered,
+            stats.f_regions_covered * 100.0
+        );
+        info!(
+            "[{}] Genes with duplication: {} ({:.1}%)",
+            bam_stem,
+            stats.n_regions_duplication,
+            stats.f_regions_duplication * 100.0
+        );
+    }
+
     info!(
         "[{}] Completed in {:.2}s",
         bam_stem,

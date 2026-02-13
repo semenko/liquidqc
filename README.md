@@ -10,9 +10,9 @@
 
 ---
 
-**RustQC** is a suite of fast QC tools for sequencing data. Currently it includes the `rna` subcommand — a reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
+**RustQC** is a suite of fast QC tools for sequencing data. Currently it includes the `rna` subcommand — a reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets, with [featureCounts](http://subread.sourceforge.net/)-compatible output and biotype counting.
 
-It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original **dupRadar** R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
+It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene duplication rates as a function of expression level. In a single pass, it produces the same outputs as the original **dupRadar** R/Bioconductor package, featureCounts-format count files, and biotype-level QC summaries — all significantly faster and compiled to a single static binary with no runtime dependencies.
 
 ## Comparison with dupRadar
 
@@ -137,6 +137,7 @@ rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
 | `--outdir <DIR>` | `.` | Output directory |
 | `--reference <FASTA>` / `-r` | none | Reference FASTA file (required for CRAM input) |
 | `--config <FILE>` | none | Path to a YAML configuration file (see [Configuration](#configuration)) |
+| `--biotype-attribute <NAME>` | none | Override the GTF attribute used for biotype counting (default from config: `gene_biotype`). Use `gene_type` for GENCODE GTFs. |
 | `--skip-dup-check` | `false` | Skip verification that duplicates have been marked in the BAM file (see [Duplicate marking](#duplicate-marking)) |
 
 ### Duplicate marking
@@ -169,6 +170,9 @@ rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf --paired --thread
 
 # With chromosome name mapping (e.g. Ensembl alignment + UCSC GTF)
 rustqc rna sample.markdup.bam --gtf genes.gtf --paired --config config.yaml --outdir results/
+
+# GENCODE GTF with gene_type attribute for biotypes
+rustqc rna sample.markdup.bam --gtf gencode.gtf --paired --biotype-attribute gene_type --outdir results/
 ```
 
 ## Configuration
@@ -197,6 +201,33 @@ chromosome_mapping:
 
 Both options can be combined. The prefix is applied first, then explicit mappings override specific names.
 
+### Output control
+
+Output files are grouped by tool and can be individually enabled or disabled. All outputs are enabled by default.
+
+```yaml
+dupradar:
+  dup_matrix: true
+  intercept_slope: true
+  density_scatter_plot: true
+  boxplot: true
+  expression_histogram: true
+  multiqc_intercept: true
+  multiqc_curve: true
+
+featurecounts:
+  counts_file: true            # featureCounts-format gene counts
+  summary_file: true           # featureCounts-format assignment summary
+  biotype_counts: true         # per-biotype count table
+  biotype_counts_mqc: true     # MultiQC biotype bargraph
+  biotype_rrna_mqc: true       # MultiQC rRNA percentage
+  biotype_attribute: "gene_biotype"  # GTF attribute for biotype grouping
+```
+
+The `biotype_attribute` controls which GTF attribute is used to group genes into biotypes. Ensembl GTFs use `gene_biotype` (the default), while GENCODE GTFs use `gene_type`. This can also be overridden on the command line with `--biotype-attribute`.
+
+If the configured biotype attribute is not found in the GTF, biotype outputs are skipped with a warning.
+
 ### Example config file
 
 ```yaml
@@ -207,21 +238,45 @@ chromosome_prefix: "chr"
 # (prefix would produce "chrMT", but GTF uses "chrM")
 chromosome_mapping:
   chrM: "MT"
+
+# Disable dupRadar plots, keep only the matrix
+dupradar:
+  density_scatter_plot: false
+  boxplot: false
+  expression_histogram: false
+
+# Use GENCODE biotype attribute
+featurecounts:
+  biotype_attribute: "gene_type"
 ```
 
 ## Output files
 
-For an input file named `sample.bam` (or `sample.cram`, etc.), the following files are generated:
+For an input file named `sample.bam` (or `sample.cram`, etc.), the following files are generated. All outputs can be individually enabled or disabled via the [configuration file](#output-control).
+
+### dupRadar outputs
 
 | File | Description |
 |------|-------------|
 | `sample_dupMatrix.txt` | Tab-separated duplication matrix (14 columns, one row per gene) |
-| `sample_duprateExpDens.png` | Density scatter plot of duplication rate vs. expression |
-| `sample_duprateExpBoxplot.png` | Boxplot of duplication rate by expression quantile bins |
-| `sample_expressionHist.png` | Histogram of gene expression levels (log10 RPK) |
+| `sample_duprateExpDens.{png,svg}` | Density scatter plot of duplication rate vs. expression |
+| `sample_duprateExpBoxplot.{png,svg}` | Boxplot of duplication rate by expression quantile bins |
+| `sample_expressionHist.{png,svg}` | Histogram of gene expression levels (log10 RPK) |
 | `sample_intercept_slope.txt` | Logistic regression fit parameters (intercept and slope) |
 | `sample_dup_intercept_mqc.txt` | MultiQC general stats format with intercept value |
 | `sample_duprateExpDensCurve_mqc.txt` | MultiQC line graph data for the fitted curve |
+
+### featureCounts outputs
+
+| File | Description |
+|------|-------------|
+| `sample.featureCounts.tsv` | Gene-level read counts in featureCounts format (7 columns: Geneid, Chr, Start, End, Strand, Length, counts) |
+| `sample.featureCounts.tsv.summary` | Assignment summary statistics (Assigned, Unassigned_NoFeatures, Unassigned_Ambiguity, etc.) |
+| `sample.biotype_counts.tsv` | Read counts aggregated by biotype (e.g., protein_coding, lncRNA, rRNA) |
+| `sample.biotype_counts_mqc.tsv` | MultiQC bargraph format for biotype counts |
+| `sample.biotype_counts_rrna_mqc.tsv` | MultiQC general stats with rRNA percentage |
+
+The featureCounts output files use the same format as [Subread featureCounts](http://subread.sourceforge.net/), making them compatible with downstream tools that expect that format. The biotype outputs replicate the [nf-core/rnaseq](https://nf-co.re/rnaseq) biotype QC functionality.
 
 ### Duplication matrix columns
 
@@ -274,13 +329,16 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 
 ## How it works
 
-1. **GTF parsing**: Reads gene annotations and computes effective gene lengths from non-overlapping exon bases.
+1. **GTF parsing**: Reads gene annotations, computes effective gene lengths from non-overlapping exon bases, and extracts additional attributes (e.g., biotype) for downstream grouping.
 2. **Read counting**: Reads the alignment file (SAM/BAM/CRAM) once, assigning each read to a gene based on exon overlap. Four count modes are tracked simultaneously:
    - With/without multimappers x with/without duplicates
-3. **Duplication matrix**: Computes RPK, RPKM, and duplication rates for each gene in all four modes.
-4. **Logistic regression**: Fits a binomial GLM (`dupRate ~ log10(RPK)`) using iteratively reweighted least squares (IRLS) to model the relationship between expression and duplication.
-5. **Plots**: Generates density scatter, boxplot, and histogram visualizations.
-6. **MultiQC integration**: Outputs files compatible with [MultiQC](https://multiqc.info/) for pipeline reporting.
+   - Assignment statistics (assigned, ambiguous, no features) are tracked for the featureCounts summary.
+3. **featureCounts output**: Writes gene-level counts and summary statistics in the standard featureCounts format.
+4. **Biotype counting**: Aggregates assigned read counts by a configurable GTF attribute (e.g., `gene_biotype`), producing biotype count tables and MultiQC-compatible rRNA QC metrics.
+5. **Duplication matrix**: Computes RPK, RPKM, and duplication rates for each gene in all four modes.
+6. **Logistic regression**: Fits a binomial GLM (`dupRate ~ log10(RPK)`) using iteratively reweighted least squares (IRLS) to model the relationship between expression and duplication.
+7. **Plots**: Generates density scatter, boxplot, and histogram visualizations.
+8. **MultiQC integration**: Outputs files compatible with [MultiQC](https://multiqc.info/) for pipeline reporting (dupRadar intercept, fit curve, biotype bargraph, rRNA percentage).
 
 ## Interpreting the results
 

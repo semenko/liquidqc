@@ -62,6 +62,14 @@ pub struct RnaArgs {
     #[arg(short, long, value_name = "CONFIG")]
     pub config: Option<String>,
 
+    /// GTF attribute for biotype grouping (e.g. gene_biotype, gene_type).
+    ///
+    /// Overrides the biotype_attribute setting in the config file. If neither
+    /// this flag nor the config file specifies a value, defaults to "gene_biotype".
+    /// Set to empty string to disable biotype counting.
+    #[arg(long, value_name = "ATTRIBUTE")]
+    pub biotype_attribute: Option<String>,
+
     /// Path to reference FASTA file (required for CRAM input)
     #[arg(short, long, value_name = "FASTA")]
     pub reference: Option<String>,
@@ -96,6 +104,7 @@ mod tests {
                 assert!(!args.paired);
                 assert_eq!(args.threads, 1);
                 assert_eq!(args.outdir, ".");
+                assert!(args.biotype_attribute.is_none());
             }
         }
     }
