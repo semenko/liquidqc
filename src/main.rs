@@ -86,6 +86,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         args.threads,
         &chrom_mapping,
         config.chromosome_prefix(),
+        args.skip_dup_check,
     )?;
     info!(
         "Counting complete in {:.2}s",

@@ -60,6 +60,14 @@ pub struct RnaArgs {
     /// Path to a YAML configuration file (e.g. chromosome name mapping)
     #[arg(short, long, value_name = "CONFIG")]
     pub config: Option<String>,
+
+    /// Skip the check for duplicate-marking tools in the BAM header.
+    ///
+    /// By default, RustQC verifies that the BAM file has been processed by a
+    /// duplicate-marking tool (e.g. Picard MarkDuplicates, samblaster) before
+    /// running. Use this flag to bypass that check.
+    #[arg(long, default_value_t = false)]
+    pub skip_dup_check: bool,
 }
 
 /// Parse command-line arguments and return the Cli struct.
