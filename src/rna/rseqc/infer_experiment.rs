@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn test_bed_loading() {
         // Test that BED loading works with the small test file if available
-        let bed_path = "../RustQC/benchmark/small/chr6.bed";
+        let bed_path = "benchmark/input/small/chr6.bed";
         if Path::new(bed_path).exists() {
             let model = GeneModel::from_bed(bed_path).unwrap();
             assert!(!model.intervals.is_empty(), "Should have loaded intervals");

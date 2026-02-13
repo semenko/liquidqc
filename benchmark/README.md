@@ -11,6 +11,24 @@ documentation:
 - [dupRadar benchmarks](https://ewels.github.io/RustQC/benchmarks/dupradar/)
 - [featureCounts benchmarks](https://ewels.github.io/RustQC/benchmarks/featurecounts/)
 
+## Directory structure
+
+```
+benchmark/
+  input/            — Shared input files (BAM, GTF, BED, config)
+    large/          — Full-size GM12878 dataset (~10 GB BAM)
+    small/          — Small chr6 test dataset
+  dupRadar/         — R dupRadar reference output
+    large/          — R script + output for large dataset
+    small/          — R script + output for small dataset
+  RustQC/           — RustQC output (dupRadar + featureCounts)
+    large/          — Output for large dataset
+    small/          — Output for small dataset
+  RSeQC/            — Python RSeQC reference output
+    large/          — Reference output for large dataset
+    small/          — Reference output for small dataset
+```
+
 ## Benchmark data
 
 ### Small benchmark
@@ -18,9 +36,9 @@ documentation:
 Included in this repository. A test BAM file with chr6 reads, a chr6-only GTF
 annotation (2,905 genes), and a BED12 gene model for RSeQC tools.
 
-- `small/test.bam` + `small/chr6.gtf` + `small/chr6.bed`
-- `small/dupRadar/` — R dupRadar reference output
-- `small/RustQC/` — RustQC output
+- `input/small/test.bam` + `input/small/chr6.gtf` + `input/small/chr6.bed`
+- `dupRadar/small/` — R dupRadar reference output
+- `RustQC/small/` — RustQC output
 
 ### Large benchmark
 
@@ -33,14 +51,14 @@ Picard. Paired-end, unstranded, aligned to GRCh37 (Ensembl chromosome names).
 | BAM  | ~10 GB | <https://nf-core-awsmegatests.s3-eu-west-1.amazonaws.com/rnaseq/results-3816d48abd9fab2eee41775b60b4eb8745e1fcaa/aligner_star_salmon/star_salmon/GM12878_REP1.markdup.sorted.bam> |
 | GTF  | ~1.5 GB | <https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.annotation.gtf.gz> |
 
-The dupRadar/featureCounts pipeline uses a GENCODE v46 GTF (`genes.gtf`). The
-RSeQC tools use a BED12 gene model (`genes.bed`) converted from a
+The dupRadar/featureCounts pipeline uses a GENCODE v46 GTF (`input/large/genes.gtf`). The
+RSeQC tools use a BED12 gene model (`input/large/genes.bed`) converted from a
 genome-matched GTF with matching Ensembl chromosome names.
 
 ### RSeQC reference outputs
 
 Reference outputs for validating RSeQC reimplementations are stored in
-`rseqc/small/` and `rseqc/large/`. These were generated with
+`RSeQC/small/` and `RSeQC/large/`. These were generated with
 [RSeQC 5.0.4](https://rseqc.sourceforge.net/) run via Docker
 (`--platform linux/amd64`).
 
@@ -73,19 +91,19 @@ pending):
 ### 1. Download large benchmark input files
 
 ```bash
-mkdir -p benchmark/large
+mkdir -p benchmark/input/large
 
 # Download BAM (~10 GB)
-curl -L -o benchmark/large/GM12878_REP1.markdup.sorted.bam \
+curl -L -o benchmark/input/large/GM12878_REP1.markdup.sorted.bam \
   "https://nf-core-awsmegatests.s3-eu-west-1.amazonaws.com/rnaseq/results-3816d48abd9fab2eee41775b60b4eb8745e1fcaa/aligner_star_salmon/star_salmon/GM12878_REP1.markdup.sorted.bam"
 
 # Download GTF
-curl -L -o benchmark/large/genes.gtf.gz \
+curl -L -o benchmark/input/large/genes.gtf.gz \
   "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.annotation.gtf.gz"
-gunzip benchmark/large/genes.gtf.gz
+gunzip benchmark/input/large/genes.gtf.gz
 
 # Index BAM
-samtools index benchmark/large/GM12878_REP1.markdup.sorted.bam
+samtools index benchmark/input/large/GM12878_REP1.markdup.sorted.bam
 ```
 
 ### 2. Generate BED12 for RSeQC tools
@@ -97,7 +115,7 @@ with the [wave CLI](https://github.com/seqeralabs/wave-cli):
 wave --conda ucsc-gtftogenepred ucsc-genepredtobed
 
 # Then run the conversion (substitute the wave image name):
-docker run --rm -v $(pwd)/benchmark/large:/data <wave-image> \
+docker run --rm -v $(pwd)/benchmark/input/large:/data <wave-image> \
   bash -c 'gtfToGenePred /data/genes_matched.gtf /tmp/genes.genePred && \
            genePredToBed /tmp/genes.genePred /data/genes.bed'
 ```
@@ -108,10 +126,10 @@ Requires R with `dupRadar` and `Rsubread` installed.
 
 ```bash
 # Small
-Rscript benchmark/small/run_dupRadar_R.R
+Rscript benchmark/dupRadar/small/run_dupRadar_R.R
 
 # Large
-Rscript benchmark/large/run_dupRadar_R.R
+Rscript benchmark/dupRadar/large/run_dupRadar_R.R
 ```
 
 ### 4. Run RustQC
@@ -120,15 +138,15 @@ Rscript benchmark/large/run_dupRadar_R.R
 cargo build --release
 
 # Small
-./target/release/rustqc rna benchmark/small/test.bam \
-  --gtf benchmark/small/chr6.gtf -p --skip-dup-check \
-  -o benchmark/small/RustQC
+./target/release/rustqc rna benchmark/input/small/test.bam \
+  --gtf benchmark/input/small/chr6.gtf -p --skip-dup-check \
+  -o benchmark/RustQC/small
 
 # Large (the GENCODE GTF uses UCSC chrom names while the BAM uses Ensembl names)
-./target/release/rustqc rna benchmark/large/GM12878_REP1.markdup.sorted.bam \
-  --gtf benchmark/large/genes.gtf -p -t 10 \
-  -o benchmark/large/RustQC \
-  -c benchmark/large/config.yaml \
+./target/release/rustqc rna benchmark/input/large/GM12878_REP1.markdup.sorted.bam \
+  --gtf benchmark/input/large/genes.gtf -p -t 10 \
+  -o benchmark/RustQC/large \
+  -c benchmark/input/large/config.yaml \
   --biotype-attribute gene_type
 ```
 
@@ -140,21 +158,21 @@ cargo build --release
 
 ```bash
 # Small — all tools
-./target/release/rustqc bam-stat benchmark/small/test.bam -o benchmark/small/RustQC
-./target/release/rustqc infer-experiment benchmark/small/test.bam -b benchmark/small/chr6.bed -o benchmark/small/RustQC
-./target/release/rustqc read-duplication benchmark/small/test.bam -o benchmark/small/RustQC
-./target/release/rustqc read-distribution benchmark/small/test.bam -b benchmark/small/chr6.bed -o benchmark/small/RustQC
-./target/release/rustqc junction-annotation benchmark/small/test.bam -b benchmark/small/chr6.bed -o benchmark/small/RustQC
-./target/release/rustqc junction-saturation benchmark/small/test.bam -b benchmark/small/chr6.bed -o benchmark/small/RustQC
-./target/release/rustqc inner-distance benchmark/small/test.bam -b benchmark/small/chr6.bed -o benchmark/small/RustQC
+./target/release/rustqc bam-stat benchmark/input/small/test.bam -o benchmark/RustQC/small
+./target/release/rustqc infer-experiment benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
+./target/release/rustqc read-duplication benchmark/input/small/test.bam -o benchmark/RustQC/small
+./target/release/rustqc read-distribution benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
+./target/release/rustqc junction-annotation benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
+./target/release/rustqc junction-saturation benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
+./target/release/rustqc inner-distance benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
 
 # Large — same commands with large BAM + BED
-./target/release/rustqc bam-stat benchmark/large/GM12878_REP1.markdup.sorted.bam -o benchmark/large/RustQC
-./target/release/rustqc infer-experiment benchmark/large/GM12878_REP1.markdup.sorted.bam -b benchmark/large/genes.bed -o benchmark/large/RustQC
-./target/release/rustqc read-distribution benchmark/large/GM12878_REP1.markdup.sorted.bam -b benchmark/large/genes.bed -o benchmark/large/RustQC
-./target/release/rustqc junction-annotation benchmark/large/GM12878_REP1.markdup.sorted.bam -b benchmark/large/genes.bed -o benchmark/large/RustQC
-./target/release/rustqc junction-saturation benchmark/large/GM12878_REP1.markdup.sorted.bam -b benchmark/large/genes.bed -o benchmark/large/RustQC
-./target/release/rustqc inner-distance benchmark/large/GM12878_REP1.markdup.sorted.bam -b benchmark/large/genes.bed -o benchmark/large/RustQC
+./target/release/rustqc bam-stat benchmark/input/large/GM12878_REP1.markdup.sorted.bam -o benchmark/RustQC/large
+./target/release/rustqc infer-experiment benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
+./target/release/rustqc read-distribution benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
+./target/release/rustqc junction-annotation benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
+./target/release/rustqc junction-saturation benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
+./target/release/rustqc inner-distance benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
 ```
 
 ### 6. Generate RSeQC Python reference outputs
@@ -165,33 +183,33 @@ Requires RSeQC 5.0.4 via Docker:
 RSEQC_IMG="wave.seqera.io/wt/ea3e9f972b6e/wave/build:rseqc-5.0.4--14c99cde3bff8d57"
 
 # bam_stat
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data \
-  $RSEQC_IMG bam_stat.py -i /data/test.bam > benchmark/rseqc/small/bam_stat.txt 2>&1
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
+  $RSEQC_IMG bam_stat.py -i /data/test.bam > benchmark/RSeQC/small/bam_stat.txt 2>&1
 
 # infer_experiment
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
   $RSEQC_IMG infer_experiment.py -i /data/test.bam -r /data/chr6.bed \
-  > benchmark/rseqc/small/infer_experiment.txt 2>&1
+  > benchmark/RSeQC/small/infer_experiment.txt 2>&1
 
 # read_duplication
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data -v $(pwd)/benchmark/rseqc/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
   $RSEQC_IMG read_duplication.py -i /data/test.bam -o /out/read_duplication
 
 # read_distribution
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
   $RSEQC_IMG read_distribution.py -i /data/test.bam -r /data/chr6.bed \
-  > benchmark/rseqc/small/read_distribution.txt 2>&1
+  > benchmark/RSeQC/small/read_distribution.txt 2>&1
 
 # junction_annotation
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data -v $(pwd)/benchmark/rseqc/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
   $RSEQC_IMG junction_annotation.py -i /data/test.bam -r /data/chr6.bed -o /out/junction_annotation
 
 # junction_saturation
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data -v $(pwd)/benchmark/rseqc/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
   $RSEQC_IMG junction_saturation.py -i /data/test.bam -r /data/chr6.bed -o /out/junction_saturation
 
 # inner_distance
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data -v $(pwd)/benchmark/rseqc/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
   $RSEQC_IMG inner_distance.py -i /data/test.bam -r /data/chr6.bed -o /out/inner_distance
 ```
 
@@ -201,8 +219,8 @@ docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/small:/data -v $(pwd)
 # Compare duplication matrices cell-by-cell
 python3 -c "
 import csv
-with open('benchmark/large/dupRadar/dupMatrix.txt') as rf, \
-     open('benchmark/large/RustQC/GM12878_REP1.markdup.sorted_dupMatrix.txt') as rustf:
+with open('benchmark/dupRadar/large/dupMatrix.txt') as rf, \
+     open('benchmark/RustQC/large/GM12878_REP1.markdup.sorted_dupMatrix.txt') as rustf:
     r = list(csv.reader(rf, delimiter='\t'))
     rust = list(csv.reader(rustf, delimiter='\t'))
     mismatches = sum(1 for i in range(1, len(r)) for j in range(1, len(r[i]))

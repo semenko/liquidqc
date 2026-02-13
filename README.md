@@ -51,8 +51,8 @@ See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupr
 <table>
 <tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
-<td><img src="benchmark/large/dupRadar/duprateExpDens.png" width="400"></td>
-<td><img src="benchmark/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png" width="400"></td>
+<td><img src="benchmark/dupRadar/large/duprateExpDens.png" width="400"></td>
+<td><img src="benchmark/RustQC/large/GM12878_REP1.markdup.sorted_duprateExpDens.png" width="400"></td>
 </tr>
 </table>
 
@@ -61,8 +61,8 @@ See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupr
 <table>
 <tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
-<td><img src="benchmark/large/dupRadar/duprateExpBoxplot.png" width="400"></td>
-<td><img src="benchmark/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" width="400"></td>
+<td><img src="benchmark/dupRadar/large/duprateExpBoxplot.png" width="400"></td>
+<td><img src="benchmark/RustQC/large/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" width="400"></td>
 </tr>
 </table>
 
@@ -71,8 +71,8 @@ See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupr
 <table>
 <tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
-<td><img src="benchmark/large/dupRadar/expressionHist.png" width="400"></td>
-<td><img src="benchmark/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png" width="400"></td>
+<td><img src="benchmark/dupRadar/large/expressionHist.png" width="400"></td>
+<td><img src="benchmark/RustQC/large/GM12878_REP1.markdup.sorted_expressionHist.png" width="400"></td>
 </tr>
 </table>
 
