@@ -1,8 +1,9 @@
-//! dupRust - Fast duplication rate analysis for RNA-Seq data
+//! RustQC - Fast quality control tools for sequencing data
 //!
-//! A Rust reimplementation of the dupRadar Bioconductor R package.
-//! Analyzes PCR duplicate rates as a function of gene expression level
-//! in RNA-Seq datasets.
+//! A collection of Rust-based QC tools for bioinformatics.
+//! The `rna` subcommand is a reimplementation of the dupRadar Bioconductor
+//! R package, analysing PCR duplicate rates as a function of gene expression
+//! level in RNA-Seq datasets.
 
 mod cli;
 mod config;
@@ -23,8 +24,15 @@ fn main() -> Result<()> {
         .format_timestamp(None)
         .init();
 
-    let args = cli::parse_args();
+    let cli = cli::parse_args();
 
+    match cli.command {
+        cli::Commands::Rna(args) => run_rna(args),
+    }
+}
+
+/// Run the RNA-Seq duplication rate analysis (dupRadar equivalent).
+fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Load configuration file if provided
     let config = if let Some(ref config_path) = args.config {
         let cfg = config::Config::from_file(Path::new(config_path))?;
@@ -41,7 +49,7 @@ fn main() -> Result<()> {
     };
 
     let start = Instant::now();
-    info!("dupRust v{}", env!("CARGO_PKG_VERSION"));
+    info!("RustQC rna v{}", env!("CARGO_PKG_VERSION"));
     info!("BAM file: {}", args.bam);
     info!("GTF file: {}", args.gtf);
     info!(

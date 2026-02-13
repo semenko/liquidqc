@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Create synthetic test data for dupRust integration tests
+# Create synthetic test data for RustQC integration tests
 # This script:
 # 1. Creates a small GTF annotation file
 # 2. Creates a synthetic BAM file with known duplicate patterns
@@ -7,7 +7,7 @@
 
 library(dupRadar)
 
-cat("=== Creating test data for dupRust ===\n")
+cat("=== Creating test data for RustQC ===\n")
 
 outdir <- "tests/data"
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)

@@ -1,4 +1,4 @@
-//! Plot generation for dupRust.
+//! Plot generation for RustQC.
 //!
 //! Generates three types of plots matching dupRadar's R output style:
 //! 1. Density scatter plot of duplication rate vs expression (primary plot)

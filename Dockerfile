@@ -17,7 +17,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
 
-RUN cargo build --release && strip target/release/duprust
+RUN cargo build --release && strip target/release/rustqc
 
 # ---- Runtime stage ----
 FROM debian:bookworm-slim
@@ -26,6 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/duprust /usr/local/bin/duprust
+COPY --from=builder /build/target/release/rustqc /usr/local/bin/rustqc
 
-ENTRYPOINT ["duprust"]
+ENTRYPOINT ["rustqc"]

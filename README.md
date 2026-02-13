@@ -1,13 +1,15 @@
-# ![dupRust](dupRust_logo.png)
+# ![RustQC](RustQC_logo.png)
 
-<h4 align="center">A fast Rust reimplementation of <a href="https://github.com/ssayols/dupRadar">dupRadar</a> for assessing PCR duplicate rates in RNA-Seq datasets.</h4>
+<h4 align="center">Fast quality control tools for sequencing data, written in Rust.</h4>
 
-**dupRust** analyzes duplicate-marked BAM files to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original **dupRadar** R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
+**RustQC** is a suite of fast QC tools for sequencing data. Currently it includes the `rna` subcommand — a reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
+
+It analyzes duplicate-marked BAM files to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original **dupRadar** R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
 
 ## Comparison with dupRadar
 
-| Feature | dupRadar (R) | dupRust |
-|---------|-------------|---------|
+| Feature | dupRadar (R) | RustQC |
+|---------|-------------|--------|
 | Language | R | Rust |
 | Dependencies | R, Bioconductor, Rsubread | None (static binary) |
 | BAM counting | 4 separate featureCounts calls | Single-pass BAM reading |
@@ -17,7 +19,7 @@
 
 ### Benchmarked on GM12878 REP1 (~10 GB paired-end BAM)
 
-| Metric | dupRadar (R) | dupRust (1 thread) | dupRust (8 threads) | dupRust (10 threads) |
+| Metric | dupRadar (R) | RustQC (1 thread) | RustQC (8 threads) | RustQC (10 threads) |
 | --- | --- | --- | --- | --- |
 | **Runtime** | 23m 48s | 3m 20s (~7x) | 1m 04s (~22x) | 0m 53s (~27x) |
 | **Intercept** | 0.8245 | 0.8245 | 0.8245 | 0.8245 |
@@ -30,30 +32,30 @@ See the [benchmark README](benchmark/README.md) for full results and replication
 ### Density scatter plots
 
 <table>
-<tr><th>dupRadar (R)</th><th>dupRust</th></tr>
+<tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
 <td><img src="benchmark/large/dupRadar/duprateExpDens.png" width="400"></td>
-<td><img src="benchmark/large/dupRust/GM12878_REP1.markdup.sorted_duprateExpDens.png" width="400"></td>
+<td><img src="benchmark/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png" width="400"></td>
 </tr>
 </table>
 
 ### Boxplots
 
 <table>
-<tr><th>dupRadar (R)</th><th>dupRust</th></tr>
+<tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
 <td><img src="benchmark/large/dupRadar/duprateExpBoxplot.png" width="400"></td>
-<td><img src="benchmark/large/dupRust/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" width="400"></td>
+<td><img src="benchmark/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" width="400"></td>
 </tr>
 </table>
 
 ### Expression histograms
 
 <table>
-<tr><th>dupRadar (R)</th><th>dupRust</th></tr>
+<tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
 <td><img src="benchmark/large/dupRadar/expressionHist.png" width="400"></td>
-<td><img src="benchmark/large/dupRust/GM12878_REP1.markdup.sorted_expressionHist.png" width="400"></td>
+<td><img src="benchmark/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png" width="400"></td>
 </tr>
 </table>
 
@@ -61,35 +63,35 @@ See the [benchmark README](benchmark/README.md) for full results and replication
 
 ### Pre-built binaries
 
-Download a pre-built binary for your platform from the [Releases](https://github.com/ewels/dupRust/releases) page:
+Download a pre-built binary for your platform from the [Releases](https://github.com/ewels/RustQC/releases) page:
 
 ```bash
 # Linux (x86_64)
-curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-linux-x86_64.tar.gz \
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz \
   | tar xz
-sudo mv duprust /usr/local/bin/
+sudo mv rustqc /usr/local/bin/
 
 # Linux (aarch64)
-curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-linux-aarch64.tar.gz \
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz \
   | tar xz
-sudo mv duprust /usr/local/bin/
+sudo mv rustqc /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-macos-aarch64.tar.gz \
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz \
   | tar xz
-sudo mv duprust /usr/local/bin/
+sudo mv rustqc /usr/local/bin/
 
 # macOS (Intel)
-curl -fsSL https://github.com/ewels/dupRust/releases/latest/download/duprust-macos-x86_64.tar.gz \
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz \
   | tar xz
-sudo mv duprust /usr/local/bin/
+sudo mv rustqc /usr/local/bin/
 ```
 
 ### Docker
 
 ```bash
-docker run --rm -v "$PWD":/data ghcr.io/ewels/duprust:latest \
-  /data/sample.markdup.bam /data/genes.gtf --outdir /data/results
+docker run --rm -v "$PWD":/data ghcr.io/ewels/rustqc:latest \
+  rna /data/sample.markdup.bam /data/genes.gtf --outdir /data/results
 ```
 
 Available tags: `latest`, or a specific version (e.g., `0.1.0`).
@@ -102,12 +104,12 @@ Requires Rust toolchain and C build dependencies (see [CONTRIBUTING.md](CONTRIBU
 cargo build --release
 ```
 
-The binary will be at `target/release/duprust`.
+The binary will be at `target/release/rustqc`.
 
 ## Usage
 
 ```bash
-duprust <BAM> <GTF> [OPTIONS]
+rustqc rna <BAM> <GTF> [OPTIONS]
 ```
 
 ### Required arguments
@@ -131,13 +133,13 @@ duprust <BAM> <GTF> [OPTIONS]
 
 ```bash
 # Single-end, unstranded
-duprust sample.markdup.bam genes.gtf --outdir results/
+rustqc rna sample.markdup.bam genes.gtf --outdir results/
 
 # Paired-end, reverse-stranded
-duprust sample.markdup.bam genes.gtf --paired --stranded 2 --outdir results/
+rustqc rna sample.markdup.bam genes.gtf --paired --stranded 2 --outdir results/
 
 # With chromosome name mapping (e.g. Ensembl BAM + UCSC GTF)
-duprust sample.markdup.bam genes.gtf --paired --config config.yaml --outdir results/
+rustqc rna sample.markdup.bam genes.gtf --paired --config config.yaml --outdir results/
 ```
 
 ## Configuration
@@ -146,7 +148,7 @@ An optional YAML configuration file can be provided with `--config` to control r
 
 ### Chromosome name mapping
 
-When the BAM and GTF files use different chromosome naming conventions (e.g. Ensembl `1, 2, X` vs. UCSC `chr1, chr2, chrX`), dupRust will detect the mismatch and exit with a helpful error. You can resolve this with either a prefix or explicit mapping.
+When the BAM and GTF files use different chromosome naming conventions (e.g. Ensembl `1, 2, X` vs. UCSC `chr1, chr2, chrX`), RustQC will detect the mismatch and exit with a helpful error. You can resolve this with either a prefix or explicit mapping.
 
 **Prefix** — prepend a string to every BAM chromosome name before matching:
 
@@ -213,7 +215,7 @@ For an input BAM file named `sample.bam`, the following files are generated:
 
 ## Performance tuning
 
-dupRust uses multi-threaded BAM processing when `--threads` is set above 1. Chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. For a typical RNA-Seq sample, `--threads 4` is a good starting point.
+RustQC uses multi-threaded BAM processing when `--threads` is set above 1. Chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. For a typical RNA-Seq sample, `--threads 4` is a good starting point.
 
 For maximum performance when building from source, you can enable CPU-specific optimizations:
 
@@ -229,7 +231,7 @@ For an additional 5-20% speedup on frequently-used machines, Profile-Guided Opti
 RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release
 
 # Step 2: Run on representative data to collect profiles
-target/release/duprust sample.bam genes.gtf --paired --threads 4 -o /tmp/pgo-run
+target/release/rustqc rna sample.bam genes.gtf --paired --threads 4 -o /tmp/pgo-run
 
 # Step 3: Merge profile data
 llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data

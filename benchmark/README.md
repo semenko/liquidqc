@@ -1,6 +1,6 @@
-# dupRust Benchmarks 🧬 🦀
+# RustQC Benchmarks 🧬 🦀
 
-Comparison of [dupRadar](https://bioconductor.org/packages/dupRadar/) (R/Bioconductor) and dupRust on the same input data.
+Comparison of [dupRadar](https://bioconductor.org/packages/dupRadar/) (R/Bioconductor) and RustQC on the same input data.
 
 ## Small benchmark
 
@@ -8,7 +8,7 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 
 ### Results
 
-| Metric | dupRadar (R) | dupRust |
+| Metric | dupRadar (R) | RustQC |
 | --- | --- | --- |
 | **Intercept** | 0.03 | 0.03 |
 | **Slope** | 1.60 | 1.60 |
@@ -17,7 +17,7 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 
 #### Count comparison
 
-| Metric | dupRadar (R) | dupRust | Exact match |
+| Metric | dupRadar (R) | RustQC | Exact match |
 | --- | ---: | ---: | ---: |
 | **allCounts (unique)** | 20,449 | 20,449 | 100% |
 | **filteredCounts (unique)** | 17,879 | 17,879 | 100% |
@@ -30,8 +30,8 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 # dupRadar (R)
 Rscript benchmark/small/run_dupRadar_R.R
 
-# dupRust
-cargo run --release -- benchmark/small/test.bam benchmark/small/chr6.gtf -p -o benchmark/small/dupRust
+# RustQC
+cargo run --release -- rna benchmark/small/test.bam benchmark/small/chr6.gtf -p -o benchmark/small/RustQC
 ```
 
 ## Large benchmark
@@ -48,7 +48,7 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 
 ### Results
 
-| Metric | dupRadar (R) | dupRust (1 thread) | dupRust (8 threads) | dupRust (10 threads) |
+| Metric | dupRadar (R) | RustQC (1 thread) | RustQC (8 threads) | RustQC (10 threads) |
 | --- | --- | --- | --- | --- |
 | **Runtime** | 23m 48s | 3m 20s (~7x) | 1m 04s (~22x) | 0m 53s (~27x) |
 | **Speedup** | — | **~7x** | **~22x** | **~27x** |
@@ -60,7 +60,7 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 
 ### Count comparison
 
-| Metric | dupRadar (R) | dupRust | Exact match |
+| Metric | dupRadar (R) | RustQC | Exact match |
 | --- | ---: | ---: | ---: |
 | **allCounts (unique)** | 14,654,579 | 14,654,579 | **100%** |
 | **filteredCounts (unique)** | 3,599,832 | 3,599,832 | **100%** |
@@ -99,7 +99,7 @@ Requires R with `dupRadar` and `Rsubread` installed.
 Rscript benchmark/large/run_dupRadar_R.R
 ```
 
-#### 3. Run dupRust
+#### 3. Run RustQC
 
 The BAM uses Ensembl chromosome names (`1`, `2`, ...) but the GENCODE GTF uses UCSC names (`chr1`, `chr2`, ...).
 A config file is used to add the `chr` prefix to BAM chromosome names:
@@ -113,20 +113,20 @@ chromosome_prefix: "chr"
 cargo build --release
 
 # Single-threaded
-./target/release/duprust \
+./target/release/rustqc rna \
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
   benchmark/large/genes.gtf \
   -p \
-  -o benchmark/large/dupRust \
+  -o benchmark/large/RustQC \
   -c benchmark/large/config.yaml
 
 # Multi-threaded (8 threads)
-./target/release/duprust \
+./target/release/rustqc rna \
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
   benchmark/large/genes.gtf \
   -p \
   -t 8 \
-  -o benchmark/large/dupRust \
+  -o benchmark/large/RustQC \
   -c benchmark/large/config.yaml
 ```
 

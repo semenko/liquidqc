@@ -1,16 +1,16 @@
 [package]
-name = "duprust"
+name = "rustqc"
 version = "0.1.0"
 edition = "2021"
 authors = ["Phil Ewels"]
-description = "Fast duplication rate analysis for RNA-Seq data - a Rust reimplementation of dupRadar"
+description = "Fast quality control tools for sequencing data, written in Rust"
 license = "MIT"
-repository = "https://github.com/ewels/dupRust"
+repository = "https://github.com/ewels/RustQC"
 readme = "README.md"
 keywords = ["bioinformatics", "rna-seq", "duplication", "qc"]
 
 [[bin]]
-name = "duprust"
+name = "rustqc"
 path = "src/main.rs"
 
 [dependencies]

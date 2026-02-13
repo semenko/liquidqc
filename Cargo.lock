@@ -450,25 +450,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "duprust"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "coitrees",
- "env_logger",
- "indexmap",
- "log",
- "plotters",
- "plotters-backend",
- "plotters-svg",
- "rayon",
- "rust-htslib",
- "serde",
- "serde_yaml",
-]
-
-[[package]]
 name = "dwrote"
 version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1340,6 +1321,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver 1.0.27",
+]
+
+[[package]]
+name = "rustqc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "coitrees",
+ "env_logger",
+ "indexmap",
+ "log",
+ "plotters",
+ "plotters-backend",
+ "plotters-svg",
+ "rayon",
+ "rust-htslib",
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]

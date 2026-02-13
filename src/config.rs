@@ -1,4 +1,4 @@
-//! Configuration file support for dupRust.
+//! Configuration file support for RustQC.
 //!
 //! Supports an optional YAML configuration file that can provide settings
 //! like chromosome name mappings between BAM and GTF references.

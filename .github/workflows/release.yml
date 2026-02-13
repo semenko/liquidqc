@@ -104,7 +104,7 @@ jobs:
       - name: Package
         id: package
         run: |
-          BIN="duprust"
+          BIN="rustqc"
           TAG="${{ needs.create-release.outputs.tag }}"
           ARCHIVE="${BIN}-${TAG}-${{ matrix.name }}"
 

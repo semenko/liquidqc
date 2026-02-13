@@ -1,7 +1,8 @@
-# AGENTS.md — dupRust
+# AGENTS.md — RustQC
 
-> Fast Rust reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing
-> PCR duplicate rates in RNA-Seq datasets. Binary crate (`duprust`), Rust edition 2021.
+> Fast quality control tools for sequencing data, written in Rust. Currently includes an RNA-Seq
+> duplicate rate analyser (reimplementation of [dupRadar](https://github.com/ssayols/dupRadar)).
+> Binary crate (`rustqc`), Rust edition 2021.
 
 ## Build / Lint / Test Commands
 
@@ -39,8 +40,8 @@ cargo test --test integration_test test_intercept_slope_match
 
 ```
 src/
-  main.rs        — Entry point, orchestrates the 8-step pipeline
-  cli.rs         — CLI argument parsing (clap derive)
+  main.rs        — Entry point, dispatches subcommands
+  cli.rs         — CLI argument parsing (clap derive, subcommand structure)
   config.rs      — YAML configuration loading (serde)
   gtf.rs         — GTF annotation file parser
   counting.rs    — BAM read counting engine (largest module)
@@ -56,6 +57,9 @@ tests/
 
 Flat module structure — all modules declared in `main.rs`, no `lib.rs`.
 Inter-module access uses `crate::` paths (e.g., `use crate::gtf::Gene;`).
+
+The CLI uses clap subcommands: `rustqc rna <BAM> <GTF> [OPTIONS]`. Future QC
+modules will be added as additional subcommands.
 
 ## Code Style
 

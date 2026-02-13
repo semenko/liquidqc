@@ -1,8 +1,8 @@
-# dupRust Changelog 🧬 🦀
+# RustQC Changelog 🧬 🦀
 
-## [Version 0.1.0](https://github.com/ewels/dupRust/releases/tag/v0.1.0) - 2026-02-13
+## [Version 0.1.0](https://github.com/ewels/RustQC/releases/tag/v0.1.0) - 2026-02-13
 
-Initial release of dupRust — a fast Rust reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
+Initial release of RustQC — fast quality control tools for sequencing data, written in Rust. The first module (`rna`) is a reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
 
 ### Features
 
@@ -14,7 +14,7 @@ Initial release of dupRust — a fast Rust reimplementation of [dupRadar](https:
 - MultiQC-compatible output files
 - YAML configuration for chromosome name mapping
 - Cross-platform builds (Linux x86_64/aarch64, macOS x86_64/aarch64)
-- Docker container at `ghcr.io/ewels/duprust`
+- Docker container at `ghcr.io/ewels/rustqc`
 
 ### Performance
 

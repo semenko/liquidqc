@@ -1,20 +1,38 @@
-//! Command-line interface definition for dupRust.
+//! Command-line interface definition for RustQC.
 //!
-//! Provides argument parsing compatible with the dupRadar R package CLI wrapper,
-//! accepting BAM file, GTF annotation, strandedness, and pairing information.
+//! Provides a subcommand-based CLI where each QC tool is a separate subcommand.
+//! The `rna` subcommand provides duplication rate analysis compatible with the
+//! dupRadar R package.
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
-/// Fast duplication rate analysis for RNA-Seq data.
+/// Fast quality control tools for sequencing data, written in Rust.
 ///
-/// dupRust analyzes PCR duplicate rates as a function of gene expression level
-/// in RNA-Seq datasets. It is a Rust reimplementation of the dupRadar R package.
-///
-/// Input BAM files must have duplicates marked (SAM flag 0x400) but NOT removed.
-/// Use tools like Picard MarkDuplicates or samblaster to mark duplicates first.
+/// RustQC provides a collection of QC analysis tools. Use a subcommand to
+/// select the analysis to run.
 #[derive(Parser, Debug)]
-#[command(name = "duprust", version, about, long_about = None)]
-pub struct Args {
+#[command(name = "rustqc", version, about, long_about = None)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+/// Available analysis subcommands.
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Analyze PCR duplicate rates in RNA-Seq data (dupRadar equivalent).
+    ///
+    /// Analyzes PCR duplicate rates as a function of gene expression level
+    /// in RNA-Seq datasets. A Rust reimplementation of the dupRadar R package.
+    ///
+    /// Input BAM files must have duplicates marked (SAM flag 0x400) but NOT removed.
+    /// Use tools like Picard MarkDuplicates or samblaster to mark duplicates first.
+    Rna(RnaArgs),
+}
+
+/// Arguments for the `rna` (dupRadar) subcommand.
+#[derive(Parser, Debug)]
+pub struct RnaArgs {
     /// Path to the duplicate-marked BAM file
     #[arg(value_name = "BAM")]
     pub bam: String,
@@ -44,9 +62,9 @@ pub struct Args {
     pub config: Option<String>,
 }
 
-/// Parse command-line arguments and return the Args struct.
-pub fn parse_args() -> Args {
-    Args::parse()
+/// Parse command-line arguments and return the Cli struct.
+pub fn parse_args() -> Cli {
+    Cli::parse()
 }
 
 #[cfg(test)]
@@ -54,19 +72,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_args() {
+    fn test_rna_default_args() {
         // Test that defaults are sensible
-        let args = Args::parse_from(["duprust", "test.bam", "genes.gtf"]);
-        assert_eq!(args.stranded, 0);
-        assert!(!args.paired);
-        assert_eq!(args.threads, 1);
-        assert_eq!(args.outdir, ".");
+        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "genes.gtf"]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.bam, "test.bam");
+                assert_eq!(args.gtf, "genes.gtf");
+                assert_eq!(args.stranded, 0);
+                assert!(!args.paired);
+                assert_eq!(args.threads, 1);
+                assert_eq!(args.outdir, ".");
+            }
+        }
     }
 
     #[test]
-    fn test_all_args() {
-        let args = Args::parse_from([
-            "duprust",
+    fn test_rna_all_args() {
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
             "test.bam",
             "genes.gtf",
             "--stranded",
@@ -77,9 +102,13 @@ mod tests {
             "--outdir",
             "/tmp/out",
         ]);
-        assert_eq!(args.stranded, 2);
-        assert!(args.paired);
-        assert_eq!(args.threads, 4);
-        assert_eq!(args.outdir, "/tmp/out");
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.stranded, 2);
+                assert!(args.paired);
+                assert_eq!(args.threads, 4);
+                assert_eq!(args.outdir, "/tmp/out");
+            }
+        }
     }
 }

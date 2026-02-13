@@ -1,19 +1,19 @@
-//! Integration tests comparing dupRust output against R dupRadar reference output.
+//! Integration tests comparing RustQC output against R dupRadar reference output.
 //!
-//! These tests run dupRust on the same test BAM/GTF data used to generate
+//! These tests run RustQC on the same test BAM/GTF data used to generate
 //! the R reference outputs in tests/expected/.
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-/// Helper: get the path to the duprust binary.
+/// Helper: get the path to the rustqc binary.
 ///
-/// Uses the `CARGO_BIN_EXE_duprust` env var when available (set by cargo test),
-/// otherwise falls back to building and using `target/debug/duprust`.
-fn duprust_binary() -> String {
+/// Uses the `CARGO_BIN_EXE_rustqc` env var when available (set by cargo test),
+/// otherwise falls back to building and using `target/debug/rustqc`.
+fn rustqc_binary() -> String {
     // cargo test sets this for integration tests automatically
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_duprust") {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_rustqc") {
         return path;
     }
 
@@ -24,23 +24,24 @@ fn duprust_binary() -> String {
         .expect("Failed to run cargo build");
     assert!(status.success(), "cargo build failed");
 
-    let path = Path::new("target/debug/duprust");
+    let path = Path::new("target/debug/rustqc");
     assert!(path.exists(), "Binary not found at {:?}", path);
     path.to_str().unwrap().to_string()
 }
 
-/// Helper: run duprust on test data and return the output directory
-fn run_duprust(outdir: &str) -> std::process::Output {
-    let binary = duprust_binary();
+/// Helper: run rustqc rna on test data and return the output directory
+fn run_rustqc(outdir: &str) -> std::process::Output {
+    let binary = rustqc_binary();
     Command::new(&binary)
         .args([
+            "rna",
             "tests/data/test.bam",
             "tests/data/test.gtf",
             "--outdir",
             outdir,
         ])
         .output()
-        .expect("Failed to execute duprust")
+        .expect("Failed to execute rustqc")
 }
 
 /// Parse a dupMatrix TSV file into a Vec of (gene_id, HashMap<col_name, value_string>)
@@ -99,10 +100,10 @@ fn test_dup_matrix_exact_match() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(
         output.status.success(),
-        "duprust failed: {}",
+        "rustqc failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -188,10 +189,10 @@ fn test_intercept_slope_match() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(
         output.status.success(),
-        "duprust failed: {}",
+        "rustqc failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -225,10 +226,10 @@ fn test_all_output_files_generated() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(
         output.status.success(),
-        "duprust failed: {}",
+        "rustqc failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -265,7 +266,7 @@ fn test_dup_matrix_header() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(output.status.success());
 
     let content = fs::read_to_string(format!("{}/test_dupMatrix.txt", outdir)).unwrap();
@@ -314,7 +315,7 @@ fn test_mqc_intercept_format() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(output.status.success());
 
     // Check MultiQC intercept file format
@@ -351,7 +352,7 @@ fn test_mqc_curve_format() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(output.status.success());
 
     // Check MultiQC curve file format
@@ -391,7 +392,7 @@ fn test_gene_order_preserved() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(output.status.success());
 
     // Both R and Rust should output genes in the same order (GTF order)
@@ -417,7 +418,7 @@ fn test_count_values_exact() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_duprust(outdir);
+    let output = run_rustqc(outdir);
     assert!(output.status.success());
 
     let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
