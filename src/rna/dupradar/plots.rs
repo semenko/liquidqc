@@ -8,8 +8,8 @@
 //! All plots are output as both high-resolution PNG and SVG files,
 //! styled to visually match the original R dupRadar package output.
 
-use crate::dupmatrix::DupMatrix;
-use crate::fitting::FitResult;
+use crate::rna::dupradar::dupmatrix::DupMatrix;
+use crate::rna::dupradar::fitting::FitResult;
 use anyhow::Result;
 use plotters::prelude::*;
 use plotters_svg::SVGBackend;

@@ -4,8 +4,8 @@
 //! Each row represents a gene and contains counts, duplication rates, RPK, and RPKM
 //! for both multi-mapper-inclusive and unique-mapper-only counting modes.
 
-use crate::counting::{CountResult, GeneCounts};
 use crate::gtf::Gene;
+use crate::rna::dupradar::counting::{CountResult, GeneCounts};
 use indexmap::IndexMap;
 
 /// A single row in the duplication matrix, corresponding to one gene.

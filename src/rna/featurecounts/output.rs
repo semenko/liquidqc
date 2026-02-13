@@ -6,8 +6,8 @@
 //! - Biotype counts file: counts aggregated by a GTF attribute (e.g. `gene_biotype`)
 //! - MultiQC biotype bargraph file: biotype counts formatted for MultiQC
 
-use crate::counting::CountResult;
 use crate::gtf::Gene;
+use crate::rna::dupradar::counting::CountResult;
 use anyhow::Result;
 use indexmap::IndexMap;
 use std::io::Write;
@@ -245,7 +245,7 @@ pub fn write_biotype_rrna_mqc(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::counting::GeneCounts;
+    use crate::rna::dupradar::counting::GeneCounts;
     use std::collections::HashMap;
 
     fn make_test_gene(gene_id: &str, biotype: Option<&str>) -> Gene {

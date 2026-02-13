@@ -23,6 +23,12 @@ tests/output*/
 *.bam.bai
 *.gtf
 
+# Large RSeQC reference outputs (too big for git)
+inner_distance.inner_distance.txt
+junction_annotation.junction.bed
+junction_annotation.junction.xls
+junction_annotation.junction.Interact.bed
+
 # Session files
 session-*.md
 
