@@ -22,8 +22,9 @@ export const base = import.meta.env.BASE_URL;
       <h1 id="_top">Welcome to RustQC</h1>
       <div class="tagline">
         A blazingly fast reimplementation of{' '}
-        <a href="https://bioconductor.org/packages/dupRadar/">dupRadar</a> and{' '}
-        <a href="https://subread.sourceforge.net/">featureCounts</a> in Rust,
+        <a href="https://bioconductor.org/packages/dupRadar/">dupRadar</a>,{' '}
+        <a href="https://subread.sourceforge.net/">featureCounts</a>, and{' '}
+        <a href="https://rseqc.sourceforge.net/">RSeQC</a> in Rust,
         delivering identical results up to 33x faster.
       </div>
     </div>
@@ -139,7 +140,8 @@ export const base = import.meta.env.BASE_URL;
 
 <CardGrid stagger>
   <Card title="Identical Results" icon="approve-check">
-    Produces bit-for-bit identical output to R's dupRadar and featureCounts.
+    Produces bit-for-bit identical output to R's dupRadar and featureCounts,
+    plus faithful reimplementations of 7 RSeQC tools.
     Over 800,000 values compared with zero mismatches.
   </Card>
   <Card title="Up to 33x Faster" icon="rocket">
@@ -147,8 +149,9 @@ export const base = import.meta.env.BASE_URL;
     equivalent.
   </Card>
   <Card title="All-in-One" icon="puzzle">
-    Combines dupRadar analysis, featureCounts-compatible output, and biotype
-    counting in a single pass — no need to run featureCounts separately.
+    Combines dupRadar analysis, featureCounts-compatible output, biotype
+    counting, and 7 RSeQC metrics in a single pass — no need to run
+    featureCounts or RSeQC separately.
   </Card>
   <Card title="SAM / BAM / CRAM" icon="document">
     Accepts SAM, BAM, and CRAM alignment files. Process multiple files in
@@ -159,7 +162,9 @@ export const base = import.meta.env.BASE_URL;
 ## Credits
 
 RustQC is a reimplementation of the excellent [dupRadar](https://bioconductor.org/packages/dupRadar/)
-Bioconductor package by Sergi Sayols, and uses the same counting approach as
-[Subread featureCounts](https://subread.sourceforge.net/) by Yang Liao and Wei Shi.
+Bioconductor package by Sergi Sayols, uses the same counting approach as
+[Subread featureCounts](https://subread.sourceforge.net/) by Yang Liao and Wei Shi,
+and includes reimplementations of 7 tools from [RSeQC](https://rseqc.sourceforge.net/)
+by Liguo Wang and colleagues.
 
 **If you use RustQC, please cite the original tools** — see the [Credits & Citation](about/credits/) page.

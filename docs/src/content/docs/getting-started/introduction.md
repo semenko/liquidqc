@@ -43,19 +43,19 @@ Given a duplicate-marked BAM file and a GTF annotation:
 
 ### RSeQC tools -- RNA-seq quality control
 
-Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, each available as a top-level subcommand:
+Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis:
 
-| Subcommand | Description |
-|------------|-------------|
-| `rustqc bam-stat` | Basic BAM alignment statistics (total reads, duplicates, mapping quality, etc.) |
-| `rustqc infer-experiment` | Infer library strandedness from read/gene-model strand concordance |
-| `rustqc read-duplication` | Position-based and sequence-based read duplication histograms |
-| `rustqc read-distribution` | Classify reads across genomic features (CDS, UTR, intron, intergenic) |
-| `rustqc junction-annotation` | Classify splice junctions as known, partial novel, or complete novel |
-| `rustqc junction-saturation` | Assess saturation of splice junction detection at increasing read depths |
-| `rustqc inner-distance` | Compute inner distance between paired-end read mates |
+| Tool | Description |
+|------|-------------|
+| bam_stat | Basic BAM alignment statistics (total reads, duplicates, mapping quality, etc.) |
+| infer_experiment | Infer library strandedness from read/gene-model strand concordance |
+| read_duplication | Position-based and sequence-based read duplication histograms |
+| read_distribution | Classify reads across genomic features (CDS, UTR, intron, intergenic) |
+| junction_annotation | Classify splice junctions as known, partial novel, or complete novel |
+| junction_saturation | Assess saturation of splice junction detection at increasing read depths |
+| inner_distance | Compute inner distance between paired-end read mates |
 
-Most RSeQC tools require a BED12 gene model file (`-b`) instead of a GTF. All accept SAM/BAM/CRAM input and support multiple input files.
+Five tools (infer_experiment, read_distribution, junction_annotation, junction_saturation, inner_distance) require a BED12 gene model file via `--bed`. If `--bed` is omitted, these tools are skipped with a warning while the remaining tools still run. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 

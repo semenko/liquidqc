@@ -1,35 +1,22 @@
 ---
 title: CLI Reference
-description: Complete command-line interface reference for RustQC, including all subcommands, options, flags, and usage examples.
+description: Complete command-line interface reference for RustQC, including all options, flags, and usage examples.
 ---
 
-RustQC uses a subcommand-based CLI. Each subcommand provides a specific QC
-analysis tool, all operating on SAM/BAM/CRAM alignment files.
-
-## Available subcommands
-
-| Subcommand | Description | Equivalent to |
-|------------|-------------|---------------|
-| [`rna`](#rna) | RNA-seq duplicate rate analysis with integrated read counting | dupRadar + featureCounts |
-| [`bam-stat`](#bam-stat) | Basic BAM alignment statistics | RSeQC `bam_stat.py` |
-| [`infer-experiment`](#infer-experiment) | Infer library strandedness | RSeQC `infer_experiment.py` |
-| [`read-duplication`](#read-duplication) | Position- and sequence-based duplication histograms | RSeQC `read_duplication.py` |
-| [`read-distribution`](#read-distribution) | Read distribution across genomic features | RSeQC `read_distribution.py` |
-| [`junction-annotation`](#junction-annotation) | Classify splice junctions as known/novel | RSeQC `junction_annotation.py` |
-| [`junction-saturation`](#junction-saturation) | Saturation analysis for splice junctions | RSeQC `junction_saturation.py` |
-| [`inner-distance`](#inner-distance) | Inner distance between paired-end reads | RSeQC `inner_distance.py` |
-
----
+RustQC provides a single `rna` subcommand that runs all RNA-Seq QC analyses in
+one pass over the BAM file.
 
 ## `rna`
 
-RNA-seq duplicate rate analysis (dupRadar equivalent) with integrated
-featureCounts-compatible output and biotype counting.
+RNA-seq quality control: duplicate rate analysis (dupRadar equivalent),
+featureCounts-compatible read counting with biotype summaries, and 7
+RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
+read_distribution, junction_annotation, junction_saturation, inner_distance).
 
 ### Synopsis
 
 ```
-rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
+rustqc rna <INPUT>... --gtf <GTF> [--bed <BED>] [OPTIONS]
 ```
 
 ### Positional arguments
@@ -45,10 +32,10 @@ concurrent jobs.
 
 ```bash
 # Single file
-rustqc rna sample.bam --gtf genes.gtf
+rustqc rna sample.bam --gtf genes.gtf --bed genes.bed
 
 # Multiple files
-rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf
+rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf --bed genes.bed
 ```
 
 ### Required options
@@ -59,7 +46,17 @@ Path to the GTF gene annotation file. Used to define gene models for read
 counting and expression-level calculation. The GTF must contain `exon` features
 with a `gene_id` attribute.
 
-### Optional flags
+### General options
+
+#### `-b, --bed <BED>`
+
+Path to a BED12-format gene model file. Required for 5 of the 7 RSeQC tools
+(infer_experiment, read_distribution, junction_annotation, junction_saturation,
+inner_distance).
+
+If omitted, a warning is printed listing the tools that will be skipped. The
+2 tools that do not need a BED file (bam_stat, read_duplication) still run.
+Individual tools can also be disabled via the [configuration file](/usage/configuration/).
 
 #### `-o, --outdir <DIR>`
 
@@ -94,6 +91,13 @@ of chromosomes with mapped reads.
 
 **Default:** `1`
 
+#### `-q, --mapq <N>`
+
+Minimum mapping quality (MAPQ) threshold used by all RSeQC tools. Reads below
+this threshold are excluded from the "uniquely mapped" counts.
+
+**Default:** `30`
+
 #### `-r, --reference <PATH>`
 
 Path to a reference FASTA file. Required when using **CRAM** input files, as CRAM
@@ -124,382 +128,80 @@ printed and biotype counting is skipped.
 #### `-c, --config <PATH>`
 
 Path to a YAML configuration file for advanced settings such as chromosome name
-mapping and per-output-file toggles. See the
-[Configuration](/usage/configuration/) page for the full reference.
+mapping, per-output-file toggles, and enabling/disabling individual tools. See
+the [Configuration](/usage/configuration/) page for the full reference.
+
+### RSeQC tool options
+
+These flags control parameters for specific RSeQC-equivalent analyses. Each
+tool runs by default as part of `rustqc rna` and can be disabled via the
+[configuration file](/usage/configuration/).
+
+#### infer_experiment
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--infer-experiment-sample-size <N>` | `200000` | Maximum number of reads to sample |
+
+#### junction_annotation / junction_saturation
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--min-intron <N>` | `50` | Minimum intron size to consider (shared by both tools) |
+
+#### junction_saturation
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--junction-saturation-min-coverage <N>` | `1` | Minimum reads for a junction to count as detected |
+| `--junction-saturation-percentile-floor <N>` | `5` | Sampling start percentage |
+| `--junction-saturation-percentile-ceiling <N>` | `100` | Sampling end percentage |
+| `--junction-saturation-percentile-step <N>` | `5` | Sampling step percentage |
+
+#### inner_distance
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--inner-distance-sample-size <N>` | `1000000` | Maximum read pairs to sample |
+| `--inner-distance-lower-bound <N>` | `-250` | Histogram lower bound |
+| `--inner-distance-upper-bound <N>` | `250` | Histogram upper bound |
+| `--inner-distance-step <N>` | `5` | Histogram bin width |
 
 ### Examples
 
 ```bash
-# Basic paired-end analysis
-rustqc rna sample.bam --gtf genes.gtf -p -o results/
+# Basic paired-end analysis (all tools)
+rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p -o results/
 
 # Reverse-stranded library with 8 threads
-rustqc rna sample.bam --gtf genes.gtf -p -s 2 -t 8 -o results/
+rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p -s 2 -t 8 -o results/
+
+# Without BED file (bam_stat + read_duplication only, others skipped)
+rustqc rna sample.bam --gtf genes.gtf -p -o results/
 
 # CRAM input with reference
-rustqc rna sample.cram --gtf genes.gtf -p -r genome.fa -o results/
+rustqc rna sample.cram --gtf genes.gtf --bed genes.bed -p -r genome.fa -o results/
 
 # GENCODE GTF with explicit biotype attribute
-rustqc rna sample.bam --gtf gencode.v46.gtf -p \
+rustqc rna sample.bam --gtf gencode.v46.gtf --bed genes.bed -p \
   --biotype-attribute gene_type -o results/
 
-# Using a YAML config for chromosome name mapping
-rustqc rna sample.bam --gtf genes.gtf -p -c config.yaml -o results/
+# Custom junction saturation sampling range
+rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p \
+  --junction-saturation-percentile-floor 10 \
+  --junction-saturation-percentile-ceiling 100 \
+  --junction-saturation-percentile-step 10 -o results/
+
+# Custom inner distance histogram bounds
+rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -p \
+  --inner-distance-lower-bound -500 --inner-distance-upper-bound 500 \
+  --inner-distance-step 10 -o results/
 
 # Multiple BAM files with parallel processing
-rustqc rna *.bam --gtf genes.gtf -p -t 8 -o results/
+rustqc rna *.bam --gtf genes.gtf --bed genes.bed -p -t 8 -o results/
 ```
 
 ---
-
-## `bam-stat`
-
-Basic BAM alignment statistics. Reimplements [RSeQC](https://rseqc.sourceforge.net/)
-`bam_stat.py`: a single-pass BAM reader that collects fundamental alignment
-metrics (total records, QC-failed, duplicates, mapping quality distribution,
-splice reads, proper pairs, etc.).
-
-### Synopsis
-
-```
-rustqc bam-stat <INPUT>... [OPTIONS]
-```
-
-### Positional arguments
-
-#### `<INPUT>...`
-
-One or more SAM/BAM/CRAM files.
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-q, --mapq <N>` | `30` | Minimum MAPQ for the "uniquely mapped" count |
-| `-o, --outdir <DIR>` | `.` | Output directory |
-| `-r, --reference <PATH>` | -- | Reference FASTA (required for CRAM) |
-
-### Example
-
-```bash
-rustqc bam-stat sample.bam -o results/
-```
-
-### Output
-
-`{sample}.bam_stat.txt` -- A formatted text report matching the RSeQC
-`bam_stat.py` output format. See [RSeQC Outputs](/outputs/rseqc/) for
-details.
-
----
-
-## `infer-experiment`
-
-Infer library strandedness from RNA-seq alignments. Reimplements RSeQC
-`infer_experiment.py`. Samples reads that overlap gene models and determines the
-fraction consistent with each strand protocol.
-
-### Synopsis
-
-```
-rustqc infer-experiment <INPUT>... -b <BED> [OPTIONS]
-```
-
-### Positional arguments
-
-#### `<INPUT>...`
-
-One or more SAM/BAM/CRAM files.
-
-### Required options
-
-#### `-b, --bed <BED>`
-
-BED12-format gene model file. Each line defines a transcript with exon block
-information. Used to determine gene strand for strandedness inference.
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-q, --mapq <N>` | `30` | Minimum MAPQ for reads to sample |
-| `-s, --sample-size <N>` | `200000` | Maximum number of reads to sample |
-| `-o, --outdir <DIR>` | `.` | Output directory |
-| `-r, --reference <PATH>` | -- | Reference FASTA (required for CRAM) |
-
-### Example
-
-```bash
-rustqc infer-experiment sample.bam -b genes.bed -o results/
-```
-
-### Output
-
-`{sample}.infer_experiment.txt` -- Strandedness fractions (fraction failing to
-determine, fraction consistent with forward/reverse protocols). See
-[RSeQC Outputs](/outputs/rseqc/) for interpretation guidance.
-
----
-
-## `read-duplication`
-
-Position-based and sequence-based duplication histograms. Reimplements RSeQC
-`read_duplication.py`. Computes how many reads map to the same position or share
-identical sequences, producing occurrence histograms.
-
-### Synopsis
-
-```
-rustqc read-duplication <INPUT>... [OPTIONS]
-```
-
-### Positional arguments
-
-#### `<INPUT>...`
-
-One or more SAM/BAM/CRAM files.
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-q, --mapq <N>` | `30` | Minimum MAPQ |
-| `-o, --outdir <DIR>` | `.` | Output directory |
-| `-r, --reference <PATH>` | -- | Reference FASTA (required for CRAM) |
-
-### Example
-
-```bash
-rustqc read-duplication sample.bam -o results/
-```
-
-### Output
-
-- `{sample}.pos.DupRate.xls` -- Position-based duplication histogram
-- `{sample}.seq.DupRate.xls` -- Sequence-based duplication histogram
-
-See [RSeQC Outputs](/outputs/rseqc/) for details.
-
----
-
-## `read-distribution`
-
-Read distribution across genomic features. Reimplements RSeQC
-`read_distribution.py`. Classifies BAM read tags into CDS exons, UTRs, introns,
-and intergenic regions using a BED12 gene model.
-
-### Synopsis
-
-```
-rustqc read-distribution <INPUT>... -b <BED> [OPTIONS]
-```
-
-### Positional arguments
-
-#### `<INPUT>...`
-
-One or more SAM/BAM/CRAM files.
-
-### Required options
-
-#### `-b, --bed <BED>`
-
-BED12-format gene model file.
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-o, --outdir <DIR>` | `.` | Output directory |
-| `-r, --reference <PATH>` | -- | Reference FASTA (required for CRAM) |
-
-### Example
-
-```bash
-rustqc read-distribution sample.bam -b genes.bed -o results/
-```
-
-### Output
-
-`{sample}.read_distribution.txt` -- Tabular report with total reads, total
-tags, and per-region breakdown (CDS Exons, 5'UTR, 3'UTR, Introns, TSS/TES
-flanking regions). See [RSeQC Outputs](/outputs/rseqc/) for details.
-
----
-
-## `junction-annotation`
-
-Splice junction annotation and classification. Reimplements RSeQC
-`junction_annotation.py`. Extracts splice junctions from CIGAR N-operations and
-classifies them as known (annotated), partial novel, or complete novel by
-comparing against a BED12 gene model.
-
-### Synopsis
-
-```
-rustqc junction-annotation <INPUT>... -b <BED> [OPTIONS]
-```
-
-### Positional arguments
-
-#### `<INPUT>...`
-
-One or more SAM/BAM/CRAM files.
-
-### Required options
-
-#### `-b, --bed <BED>`
-
-BED12-format gene model file providing reference splice site annotations.
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-m, --min-intron <N>` | `50` | Minimum intron size to consider |
-| `-q, --mapq <N>` | `30` | Minimum MAPQ |
-| `-o, --outdir <DIR>` | `.` | Output directory |
-| `-r, --reference <PATH>` | -- | Reference FASTA (required for CRAM) |
-
-### Example
-
-```bash
-rustqc junction-annotation sample.bam -b genes.bed -o results/
-```
-
-### Output
-
-- `{sample}.junction.xls` -- TSV of all junctions with annotation status
-- `{sample}.junction.bed` -- BED12 with colour-coded junctions (red=known, green=partial novel, blue=novel)
-- `{sample}.junction_plot.r` -- R script for pie chart visualisation
-- `{sample}.junction_annotation.txt` -- Summary counts
-
-See [RSeQC Outputs](/outputs/rseqc/) for details.
-
----
-
-## `junction-saturation`
-
-Saturation analysis for splice junctions. Reimplements RSeQC
-`junction_saturation.py`. Subsamples splice junctions at increasing percentages
-of total reads and reports how many known/novel/total unique junctions are
-detected at each level.
-
-### Synopsis
-
-```
-rustqc junction-saturation <INPUT>... -b <BED> [OPTIONS]
-```
-
-### Positional arguments
-
-#### `<INPUT>...`
-
-One or more SAM/BAM/CRAM files.
-
-### Required options
-
-#### `-b, --bed <BED>`
-
-BED12-format gene model file providing reference splice site annotations.
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-m, --min-intron <N>` | `50` | Minimum intron size |
-| `-v, --min-coverage <N>` | `1` | Minimum reads for a junction to count as known |
-| `-l, --percentile-floor <N>` | `5` | Sampling start percentage |
-| `-u, --percentile-ceiling <N>` | `100` | Sampling end percentage |
-| `-s, --percentile-step <N>` | `5` | Sampling step percentage |
-| `-q, --mapq <N>` | `30` | Minimum MAPQ |
-| `-o, --outdir <DIR>` | `.` | Output directory |
-| `-r, --reference <PATH>` | -- | Reference FASTA (required for CRAM) |
-
-### Example
-
-```bash
-rustqc junction-saturation sample.bam -b genes.bed -o results/
-
-# Custom sampling range
-rustqc junction-saturation sample.bam -b genes.bed -l 10 -u 100 -s 10
-```
-
-### Output
-
-- `{sample}.junctionSaturation_plot.r` -- R script for saturation curve
-- `{sample}.junctionSaturation_summary.txt` -- Tabular data (percentage vs junction counts)
-
-See [RSeQC Outputs](/outputs/rseqc/) for details.
-
----
-
-## `inner-distance`
-
-Inner distance between paired-end reads. Reimplements RSeQC
-`inner_distance.py`. Computes the inner distance between read pairs, classifying
-each pair by gene model overlap and producing a histogram.
-
-### Synopsis
-
-```
-rustqc inner-distance <INPUT>... -b <BED> [OPTIONS]
-```
-
-### Positional arguments
-
-#### `<INPUT>...`
-
-One or more SAM/BAM/CRAM files. Must be paired-end data.
-
-### Required options
-
-#### `-b, --bed <BED>`
-
-BED12-format gene model file.
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-k, --sample-size <N>` | `1000000` | Maximum read pairs to sample |
-| `-l, --lower-bound <N>` | `-250` | Histogram lower bound |
-| `-u, --upper-bound <N>` | `250` | Histogram upper bound |
-| `-s, --step <N>` | `5` | Histogram bin width |
-| `-q, --mapq <N>` | `30` | Minimum MAPQ |
-| `-o, --outdir <DIR>` | `.` | Output directory |
-| `-r, --reference <PATH>` | -- | Reference FASTA (required for CRAM) |
-
-### Example
-
-```bash
-rustqc inner-distance sample.bam -b genes.bed -o results/
-
-# Wider histogram range with larger bins
-rustqc inner-distance sample.bam -b genes.bed -l -500 -u 500 -s 10
-```
-
-### Output
-
-- `{sample}.inner_distance.txt` -- Per-pair detail (read name, distance, classification)
-- `{sample}.inner_distance_freq.txt` -- Histogram (bin start, bin end, count)
-- `{sample}.inner_distance_plot.r` -- R script for histogram and density plot
-- `{sample}.inner_distance_summary.txt` -- Summary counts by classification
-
-See [RSeQC Outputs](/outputs/rseqc/) for details.
-
----
-
-## Common options
-
-Several options appear across most subcommands:
-
-| Option | Description | Subcommands |
-|--------|-------------|-------------|
-| `-o, --outdir` | Output directory | All |
-| `-r, --reference` | Reference FASTA for CRAM | All |
-| `-q, --mapq` | MAPQ cutoff | All except `rna`, `read-distribution` |
-| `-b, --bed` | BED12 gene model | All RSeQC tools except `bam-stat`, `read-duplication` |
 
 ## Exit codes
 

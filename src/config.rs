@@ -1,8 +1,8 @@
 //! Configuration file support for RustQC.
 //!
 //! Supports an optional YAML configuration file that can provide settings
-//! like chromosome name mappings between alignment file and GTF references
-//! and per-tool output configuration.
+//! like chromosome name mappings between alignment file and GTF references,
+//! per-tool output configuration, and tool enable/disable toggles.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -13,7 +13,7 @@ use std::path::Path;
 ///
 /// Designed to be extensible — new sections can be added as optional fields
 /// without breaking existing config files. Tool-specific settings are nested
-/// under their tool name (e.g. `dupradar:`, `featurecounts:`).
+/// under their tool name (e.g. `dupradar:`, `featurecounts:`, `bam_stat:`).
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
@@ -50,7 +50,39 @@ pub struct Config {
     /// featureCounts-compatible output configuration.
     #[serde(default)]
     pub featurecounts: FeatureCountsConfig,
+
+    /// bam_stat tool configuration.
+    #[serde(default)]
+    pub bam_stat: BamStatConfig,
+
+    /// infer_experiment tool configuration.
+    #[serde(default)]
+    pub infer_experiment: InferExperimentConfig,
+
+    /// read_duplication tool configuration.
+    #[serde(default)]
+    pub read_duplication: ReadDuplicationConfig,
+
+    /// read_distribution tool configuration.
+    #[serde(default)]
+    pub read_distribution: ReadDistributionConfig,
+
+    /// junction_annotation tool configuration.
+    #[serde(default)]
+    pub junction_annotation: JunctionAnnotationConfig,
+
+    /// junction_saturation tool configuration.
+    #[serde(default)]
+    pub junction_saturation: JunctionSaturationConfig,
+
+    /// inner_distance tool configuration.
+    #[serde(default)]
+    pub inner_distance: InnerDistanceConfig,
 }
+
+// ============================================================================
+// dupRadar configuration
+// ============================================================================
 
 /// Configuration for dupRadar outputs.
 ///
@@ -107,6 +139,10 @@ impl Default for DupradarConfig {
     }
 }
 
+// ============================================================================
+// featureCounts configuration
+// ============================================================================
+
 /// Configuration for featureCounts-compatible outputs.
 ///
 /// Controls which featureCounts output files are generated and the
@@ -159,6 +195,232 @@ impl Default for FeatureCountsConfig {
         }
     }
 }
+
+// ============================================================================
+// RSeQC tool configurations
+// ============================================================================
+
+/// Configuration for bam_stat output.
+///
+/// Example:
+/// ```yaml
+/// bam_stat:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct BamStatConfig {
+    /// Whether to run bam_stat analysis. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for BamStatConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for infer_experiment output.
+///
+/// Requires a BED file to be provided via `--bed`.
+///
+/// Example:
+/// ```yaml
+/// infer_experiment:
+///   enabled: true
+///   sample_size: 200000
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct InferExperimentConfig {
+    /// Whether to run infer_experiment analysis. Defaults to true.
+    pub enabled: bool,
+
+    /// Maximum number of reads to sample for strandedness inference.
+    /// Can be overridden by `--infer-experiment-sample-size` CLI flag.
+    pub sample_size: Option<u64>,
+}
+
+impl Default for InferExperimentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sample_size: None,
+        }
+    }
+}
+
+/// Configuration for read_duplication output.
+///
+/// Example:
+/// ```yaml
+/// read_duplication:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ReadDuplicationConfig {
+    /// Whether to run read_duplication analysis. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for ReadDuplicationConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for read_distribution output.
+///
+/// Requires a BED file to be provided via `--bed`.
+///
+/// Example:
+/// ```yaml
+/// read_distribution:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ReadDistributionConfig {
+    /// Whether to run read_distribution analysis. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for ReadDistributionConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for junction_annotation output.
+///
+/// Requires a BED file to be provided via `--bed`.
+///
+/// Example:
+/// ```yaml
+/// junction_annotation:
+///   enabled: true
+///   min_intron: 50
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct JunctionAnnotationConfig {
+    /// Whether to run junction_annotation analysis. Defaults to true.
+    pub enabled: bool,
+
+    /// Minimum intron size for junction filtering.
+    /// Can be overridden by `--min-intron` CLI flag.
+    pub min_intron: Option<u64>,
+}
+
+impl Default for JunctionAnnotationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_intron: None,
+        }
+    }
+}
+
+/// Configuration for junction_saturation output.
+///
+/// Requires a BED file to be provided via `--bed`.
+///
+/// Example:
+/// ```yaml
+/// junction_saturation:
+///   enabled: true
+///   min_coverage: 1
+///   percentile_floor: 5
+///   percentile_ceiling: 100
+///   percentile_step: 5
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct JunctionSaturationConfig {
+    /// Whether to run junction_saturation analysis. Defaults to true.
+    pub enabled: bool,
+
+    /// Minimum read coverage to count a known junction.
+    /// Can be overridden by `--junction-saturation-min-coverage` CLI flag.
+    pub min_coverage: Option<u64>,
+
+    /// Sampling start percentage.
+    /// Can be overridden by `--junction-saturation-percentile-floor` CLI flag.
+    pub percentile_floor: Option<u64>,
+
+    /// Sampling end percentage.
+    /// Can be overridden by `--junction-saturation-percentile-ceiling` CLI flag.
+    pub percentile_ceiling: Option<u64>,
+
+    /// Sampling step percentage.
+    /// Can be overridden by `--junction-saturation-percentile-step` CLI flag.
+    pub percentile_step: Option<u64>,
+}
+
+impl Default for JunctionSaturationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_coverage: None,
+            percentile_floor: None,
+            percentile_ceiling: None,
+            percentile_step: None,
+        }
+    }
+}
+
+/// Configuration for inner_distance output.
+///
+/// Requires a BED file to be provided via `--bed`.
+///
+/// Example:
+/// ```yaml
+/// inner_distance:
+///   enabled: true
+///   sample_size: 1000000
+///   lower_bound: -250
+///   upper_bound: 250
+///   step: 5
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct InnerDistanceConfig {
+    /// Whether to run inner_distance analysis. Defaults to true.
+    pub enabled: bool,
+
+    /// Maximum number of read pairs to sample.
+    /// Can be overridden by `--inner-distance-sample-size` CLI flag.
+    pub sample_size: Option<u64>,
+
+    /// Lower bound of the inner distance histogram.
+    /// Can be overridden by `--inner-distance-lower-bound` CLI flag.
+    pub lower_bound: Option<i64>,
+
+    /// Upper bound of the inner distance histogram.
+    /// Can be overridden by `--inner-distance-upper-bound` CLI flag.
+    pub upper_bound: Option<i64>,
+
+    /// Bin width for the inner distance histogram.
+    /// Can be overridden by `--inner-distance-step` CLI flag.
+    pub step: Option<i64>,
+}
+
+impl Default for InnerDistanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sample_size: None,
+            lower_bound: None,
+            upper_bound: None,
+            step: None,
+        }
+    }
+}
+
+// ============================================================================
+// Config implementation
+// ============================================================================
 
 impl Config {
     /// Load configuration from a YAML file.
@@ -216,6 +478,36 @@ impl Config {
             || dr.multiqc_intercept
             || dr.multiqc_curve
     }
+
+    /// Returns true if any RSeQC tool that requires a BED file is enabled.
+    pub fn any_bed_tool_enabled(&self) -> bool {
+        self.infer_experiment.enabled
+            || self.read_distribution.enabled
+            || self.junction_annotation.enabled
+            || self.junction_saturation.enabled
+            || self.inner_distance.enabled
+    }
+
+    /// Returns a list of enabled BED-requiring tool names (for warning messages).
+    pub fn enabled_bed_tools(&self) -> Vec<&'static str> {
+        let mut tools = Vec::new();
+        if self.infer_experiment.enabled {
+            tools.push("infer_experiment");
+        }
+        if self.read_distribution.enabled {
+            tools.push("read_distribution");
+        }
+        if self.junction_annotation.enabled {
+            tools.push("junction_annotation");
+        }
+        if self.junction_saturation.enabled {
+            tools.push("junction_saturation");
+        }
+        if self.inner_distance.enabled {
+            tools.push("inner_distance");
+        }
+        tools
+    }
 }
 
 #[cfg(test)]
@@ -231,6 +523,14 @@ mod tests {
         assert!(config.dupradar.dup_matrix);
         assert!(config.featurecounts.counts_file);
         assert_eq!(config.featurecounts.biotype_attribute, "gene_biotype");
+        // RSeQC tools all enabled by default
+        assert!(config.bam_stat.enabled);
+        assert!(config.infer_experiment.enabled);
+        assert!(config.read_duplication.enabled);
+        assert!(config.read_distribution.enabled);
+        assert!(config.junction_annotation.enabled);
+        assert!(config.junction_saturation.enabled);
+        assert!(config.inner_distance.enabled);
     }
 
     #[test]
@@ -298,5 +598,84 @@ dupradar:
 "#;
         let config: Config = serde_yml::from_str(yaml).unwrap();
         assert!(!config.any_dupradar_output());
+    }
+
+    #[test]
+    fn test_disable_rseqc_tools() {
+        let yaml = r#"
+bam_stat:
+  enabled: false
+infer_experiment:
+  enabled: false
+read_duplication:
+  enabled: false
+read_distribution:
+  enabled: false
+junction_annotation:
+  enabled: false
+junction_saturation:
+  enabled: false
+inner_distance:
+  enabled: false
+"#;
+        let config: Config = serde_yml::from_str(yaml).unwrap();
+        assert!(!config.bam_stat.enabled);
+        assert!(!config.infer_experiment.enabled);
+        assert!(!config.read_duplication.enabled);
+        assert!(!config.read_distribution.enabled);
+        assert!(!config.junction_annotation.enabled);
+        assert!(!config.junction_saturation.enabled);
+        assert!(!config.inner_distance.enabled);
+        assert!(!config.any_bed_tool_enabled());
+    }
+
+    #[test]
+    fn test_rseqc_tool_params() {
+        let yaml = r#"
+infer_experiment:
+  enabled: true
+  sample_size: 500000
+junction_saturation:
+  enabled: true
+  min_coverage: 5
+  percentile_floor: 10
+  percentile_ceiling: 95
+  percentile_step: 10
+inner_distance:
+  enabled: true
+  sample_size: 2000000
+  lower_bound: -500
+  upper_bound: 500
+  step: 10
+"#;
+        let config: Config = serde_yml::from_str(yaml).unwrap();
+        assert_eq!(config.infer_experiment.sample_size, Some(500_000));
+        assert_eq!(config.junction_saturation.min_coverage, Some(5));
+        assert_eq!(config.junction_saturation.percentile_floor, Some(10));
+        assert_eq!(config.junction_saturation.percentile_ceiling, Some(95));
+        assert_eq!(config.junction_saturation.percentile_step, Some(10));
+        assert_eq!(config.inner_distance.sample_size, Some(2_000_000));
+        assert_eq!(config.inner_distance.lower_bound, Some(-500));
+        assert_eq!(config.inner_distance.upper_bound, Some(500));
+        assert_eq!(config.inner_distance.step, Some(10));
+    }
+
+    #[test]
+    fn test_enabled_bed_tools() {
+        let yaml = r#"
+infer_experiment:
+  enabled: false
+read_distribution:
+  enabled: true
+junction_annotation:
+  enabled: false
+"#;
+        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let tools = config.enabled_bed_tools();
+        assert!(tools.contains(&"read_distribution"));
+        assert!(tools.contains(&"junction_saturation"));
+        assert!(tools.contains(&"inner_distance"));
+        assert!(!tools.contains(&"infer_experiment"));
+        assert!(!tools.contains(&"junction_annotation"));
     }
 }

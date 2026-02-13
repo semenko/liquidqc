@@ -1,15 +1,17 @@
 //! Command-line interface definition for RustQC.
 //!
-//! Provides a subcommand-based CLI where each QC tool is a separate subcommand.
-//! The `rna` subcommand provides duplication rate analysis compatible with the
-//! dupRadar R package.
+//! Provides a subcommand-based CLI. The `rna` subcommand runs all RNA-Seq QC
+//! analyses in a single pass: dupRadar duplication rate analysis, featureCounts-
+//! compatible output, and RSeQC-equivalent metrics (bam_stat, infer_experiment,
+//! read_duplication, read_distribution, junction_annotation, junction_saturation,
+//! inner_distance). Individual tools can be disabled via the YAML config file.
 
 use clap::{Parser, Subcommand};
 
 /// Fast quality control tools for sequencing data, written in Rust.
 ///
-/// RustQC provides a collection of QC analysis tools. Use a subcommand to
-/// select the analysis to run.
+/// RustQC runs a comprehensive suite of RNA-Seq QC analyses in a single pass
+/// over your BAM file(s). Use `rustqc rna` to get started.
 #[derive(Parser, Debug)]
 #[command(name = "rustqc", version, about, long_about = None)]
 pub struct Cli {
@@ -20,62 +22,33 @@ pub struct Cli {
 /// Available analysis subcommands.
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Analyze PCR duplicate rates in RNA-Seq data (dupRadar equivalent).
+    /// Run all RNA-Seq QC analyses in a single pass.
     ///
-    /// Analyzes PCR duplicate rates as a function of gene expression level
-    /// in RNA-Seq datasets. A Rust reimplementation of the dupRadar R package.
+    /// Processes BAM/SAM/CRAM files through the complete RNA-Seq QC pipeline:
     ///
-    /// Input alignment files (SAM/BAM/CRAM) must have duplicates marked (SAM flag 0x400)
-    /// but NOT removed. Use tools like Picard MarkDuplicates or samblaster to mark
-    /// duplicates first.
+    /// - dupRadar: PCR duplicate rate analysis as a function of gene expression
+    /// - featureCounts: Gene-level read counting with biotype summaries
+    /// - bam_stat: Basic alignment statistics
+    /// - infer_experiment: Library strandedness inference (requires --bed)
+    /// - read_duplication: Position- and sequence-based duplication histograms
+    /// - read_distribution: Read classification into genomic features (requires --bed)
+    /// - junction_annotation: Splice junction classification (requires --bed)
+    /// - junction_saturation: Junction discovery saturation curves (requires --bed)
+    /// - inner_distance: Insert size estimation for paired-end data (requires --bed)
+    ///
+    /// All tools run by default. Disable individual tools via the YAML config file.
+    /// Tools requiring a BED file are skipped automatically when --bed is not provided.
+    ///
+    /// Input alignment files must have duplicates marked (SAM flag 0x400) but NOT
+    /// removed. Use tools like Picard MarkDuplicates or samblaster first.
     Rna(RnaArgs),
-
-    /// Compute basic alignment statistics (bam_stat.py equivalent).
-    ///
-    /// Produces read-level alignment statistics from a BAM/SAM/CRAM file
-    /// in a single pass. Output is identical to RSeQC's bam_stat.py.
-    BamStat(BamStatArgs),
-
-    /// Infer library strandedness (infer_experiment.py equivalent).
-    ///
-    /// Samples reads overlapping gene models to determine whether the
-    /// library is unstranded, forward-stranded, or reverse-stranded.
-    /// Output is identical to RSeQC's infer_experiment.py.
-    InferExperiment(InferExperimentArgs),
-
-    /// Compute read duplication rates (read_duplication.py equivalent).
-    ///
-    /// Calculates position-based and sequence-based read duplication
-    /// histograms from a BAM/SAM/CRAM file.
-    ReadDuplication(ReadDuplicationArgs),
-
-    /// Classify reads into genomic features (read_distribution.py equivalent).
-    ///
-    /// Classifies read tags into CDS exons, 5'/3' UTRs, introns, and
-    /// intergenic regions using a BED12 gene model. Output is identical
-    /// to RSeQC's read_distribution.py.
-    ReadDistribution(ReadDistributionArgs),
-
-    /// Annotate splice junctions (junction_annotation.py equivalent).
-    ///
-    /// Extracts splice junctions from BAM CIGAR strings and classifies them
-    /// as known (annotated), partial novel, or complete novel by comparing
-    /// against a BED12 gene model.
-    JunctionAnnotation(JunctionAnnotationArgs),
-
-    /// Splice junction saturation analysis (junction_saturation.py equivalent).
-    ///
-    /// Subsamples splice junctions at increasing percentages of total reads
-    /// and reports how many known / novel / total unique junctions are detected
-    /// at each level.
-    JunctionSaturation(JunctionSaturationArgs),
-    /// Compute inner distance (insert size) of paired-end reads using a gene
-    /// model (BED12). Reports fragment sizes as genomic or mRNA-level distances,
-    /// with histogram and R plot output.
-    InnerDistance(InnerDistanceArgs),
 }
 
-/// Arguments for the `rna` (dupRadar) subcommand.
+/// Arguments for the `rna` subcommand.
+///
+/// Runs all RNA-Seq QC analyses in a single pass. Tool-specific parameters
+/// have sensible defaults and can also be set via the YAML config file.
+/// CLI flags override config file settings.
 #[derive(Parser, Debug)]
 pub struct RnaArgs {
     /// Path(s) to duplicate-marked alignment file(s) (SAM/BAM/CRAM)
@@ -85,6 +58,12 @@ pub struct RnaArgs {
     /// Path to the GTF gene annotation file
     #[arg(short, long, value_name = "GTF")]
     pub gtf: String,
+
+    /// Path to a BED12 gene model file (required for infer_experiment,
+    /// read_distribution, junction_annotation, junction_saturation, and
+    /// inner_distance)
+    #[arg(short, long, value_name = "BED")]
+    pub bed: Option<String>,
 
     /// Library strandedness: 0=unstranded, 1=forward, 2=reverse
     #[arg(short, long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=2))]
@@ -125,206 +104,64 @@ pub struct RnaArgs {
     /// running. Use this flag to bypass that check.
     #[arg(long, default_value_t = false)]
     pub skip_dup_check: bool,
-}
 
-/// Arguments for the `bam-stat` subcommand.
-#[derive(Parser, Debug)]
-pub struct BamStatArgs {
-    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
-    pub input: Vec<String>,
-
-    /// MAPQ cutoff for unique/non-unique classification (default 30)
+    // === RSeQC tool-specific parameters ===
+    /// MAPQ cutoff for read quality filtering (used by bam_stat, infer_experiment,
+    /// read_duplication, junction_annotation, junction_saturation, inner_distance)
     #[arg(short = 'q', long = "mapq", default_value_t = 30)]
     pub mapq_cut: u8,
 
-    /// Output directory for results
-    #[arg(short, long, default_value = ".")]
-    pub outdir: String,
+    // --- infer_experiment ---
+    /// Maximum number of reads to sample for strandedness inference
+    #[arg(long = "infer-experiment-sample-size", default_value_t = 200_000)]
+    pub infer_experiment_sample_size: u64,
 
-    /// Path to reference FASTA file (required for CRAM input)
-    #[arg(short, long, value_name = "FASTA")]
-    pub reference: Option<String>,
-}
-
-/// Arguments for the `infer-experiment` subcommand.
-#[derive(Parser, Debug)]
-pub struct InferExperimentArgs {
-    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
-    pub input: Vec<String>,
-
-    /// Path to a BED12 gene model file
-    #[arg(short, long, value_name = "BED")]
-    pub bed: String,
-
-    /// MAPQ cutoff for filtering reads (default 30)
-    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
-    pub mapq_cut: u8,
-
-    /// Maximum number of reads to sample (default 200000)
-    #[arg(short, long, default_value_t = 200000)]
-    pub sample_size: u64,
-
-    /// Output directory for results
-    #[arg(short, long, default_value = ".")]
-    pub outdir: String,
-
-    /// Path to reference FASTA file (required for CRAM input)
-    #[arg(short, long, value_name = "FASTA")]
-    pub reference: Option<String>,
-}
-
-/// Arguments for the `read-duplication` subcommand.
-#[derive(Parser, Debug)]
-pub struct ReadDuplicationArgs {
-    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
-    pub input: Vec<String>,
-
-    /// MAPQ cutoff for filtering reads (default 30)
-    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
-    pub mapq_cut: u8,
-
-    /// Output directory for results
-    #[arg(short, long, default_value = ".")]
-    pub outdir: String,
-
-    /// Path to reference FASTA file (required for CRAM input)
-    #[arg(short, long, value_name = "FASTA")]
-    pub reference: Option<String>,
-}
-
-/// Arguments for the `read-distribution` subcommand.
-#[derive(Parser, Debug)]
-pub struct ReadDistributionArgs {
-    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
-    pub input: Vec<String>,
-
-    /// Path to a BED12 gene model file
-    #[arg(short, long, value_name = "BED")]
-    pub bed: String,
-
-    /// Output directory for results
-    #[arg(short, long, default_value = ".")]
-    pub outdir: String,
-
-    /// Path to reference FASTA file (required for CRAM input)
-    #[arg(short, long, value_name = "FASTA")]
-    pub reference: Option<String>,
-}
-
-/// Arguments for the `junction-annotation` subcommand.
-#[derive(Parser, Debug)]
-pub struct JunctionAnnotationArgs {
-    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
-    pub input: Vec<String>,
-
-    /// Path to a BED12 gene model file
-    #[arg(short, long, value_name = "BED")]
-    pub bed: String,
-
-    /// Minimum intron size to include (default 50)
-    #[arg(short, long, default_value_t = 50)]
+    // --- junction_annotation ---
+    /// Minimum intron size for junction annotation and saturation analysis
+    #[arg(long = "min-intron", default_value_t = 50)]
     pub min_intron: u64,
 
-    /// MAPQ cutoff for filtering reads (default 30)
-    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
-    pub mapq_cut: u8,
+    // --- junction_saturation ---
+    /// Minimum read coverage to count a known junction (junction_saturation)
+    #[arg(long = "junction-saturation-min-coverage", default_value_t = 1)]
+    pub junction_saturation_min_coverage: u64,
 
-    /// Output directory for results
-    #[arg(short, long, default_value = ".")]
-    pub outdir: String,
+    /// Sampling start percentage for junction saturation
+    #[arg(long = "junction-saturation-percentile-floor", default_value_t = 5)]
+    pub junction_saturation_percentile_floor: u64,
 
-    /// Path to reference FASTA file (required for CRAM input)
-    #[arg(short, long, value_name = "FASTA")]
-    pub reference: Option<String>,
-}
+    /// Sampling end percentage for junction saturation
+    #[arg(long = "junction-saturation-percentile-ceiling", default_value_t = 100)]
+    pub junction_saturation_percentile_ceiling: u64,
 
-/// Arguments for the `junction-saturation` subcommand.
-#[derive(Parser, Debug)]
-pub struct JunctionSaturationArgs {
-    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
-    pub input: Vec<String>,
+    /// Sampling step percentage for junction saturation
+    #[arg(long = "junction-saturation-percentile-step", default_value_t = 5)]
+    pub junction_saturation_percentile_step: u64,
 
-    /// Path to a BED12 gene model file
-    #[arg(short, long, value_name = "BED")]
-    pub bed: String,
+    // --- inner_distance ---
+    /// Maximum number of read pairs to sample for inner distance
+    #[arg(long = "inner-distance-sample-size", default_value_t = 1_000_000)]
+    pub inner_distance_sample_size: u64,
 
-    /// Minimum intron size to include (default 50)
-    #[arg(short, long, default_value_t = 50)]
-    pub min_intron: u64,
+    /// Lower bound of inner distance histogram
+    #[arg(long = "inner-distance-lower-bound", default_value_t = -250, allow_hyphen_values = true)]
+    pub inner_distance_lower_bound: i64,
 
-    /// Minimum number of supporting reads to count a known junction (default 1)
-    #[arg(short = 'v', long = "min-coverage", default_value_t = 1)]
-    pub min_coverage: u64,
+    /// Upper bound of inner distance histogram
+    #[arg(
+        long = "inner-distance-upper-bound",
+        default_value_t = 250,
+        allow_hyphen_values = true
+    )]
+    pub inner_distance_upper_bound: i64,
 
-    /// Sampling start percentage (default 5)
-    #[arg(short = 'l', long = "percentile-floor", default_value_t = 5)]
-    pub percentile_floor: u64,
-
-    /// Sampling end percentage (default 100)
-    #[arg(short = 'u', long = "percentile-ceiling", default_value_t = 100)]
-    pub percentile_ceiling: u64,
-
-    /// Sampling step percentage (default 5)
-    #[arg(short = 's', long = "percentile-step", default_value_t = 5)]
-    pub percentile_step: u64,
-
-    /// MAPQ cutoff for filtering reads (default 30)
-    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
-    pub mapq_cut: u8,
-
-    /// Output directory for results
-    #[arg(short, long, default_value = ".")]
-    pub outdir: String,
-
-    /// Path to reference FASTA file (required for CRAM input)
-    #[arg(short, long, value_name = "FASTA")]
-    pub reference: Option<String>,
-}
-
-/// Arguments for the `inner-distance` subcommand.
-#[derive(Parser, Debug)]
-pub struct InnerDistanceArgs {
-    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
-    pub input: Vec<String>,
-
-    /// Path to the reference gene model in BED12 format
-    #[arg(short = 'b', long = "bed", value_name = "BED")]
-    pub bed: String,
-
-    /// Maximum number of read pairs to sample
-    #[arg(short = 'k', long = "sample-size", default_value = "1000000")]
-    pub sample_size: u64,
-
-    /// Lower bound of inner distance for histogram
-    #[arg(short = 'l', long = "lower-bound", default_value = "-250")]
-    pub lower_bound: i64,
-
-    /// Upper bound of inner distance for histogram
-    #[arg(short = 'u', long = "upper-bound", default_value = "250")]
-    pub upper_bound: i64,
-
-    /// Step size (bin width) for histogram
-    #[arg(short = 's', long = "step", default_value = "5")]
-    pub step: i64,
-
-    /// Minimum mapping quality (MAPQ) threshold
-    #[arg(short = 'q', long = "mapq", default_value = "30")]
-    pub mapq_cut: u8,
-
-    /// Output directory
-    #[arg(short = 'o', long = "outdir", default_value = ".")]
-    pub outdir: String,
-
-    /// Reference genome FASTA file (only required for CRAM input)
-    #[arg(short = 'r', long = "reference")]
-    pub reference: Option<String>,
+    /// Step size (bin width) for inner distance histogram
+    #[arg(
+        long = "inner-distance-step",
+        default_value_t = 5,
+        allow_hyphen_values = true
+    )]
+    pub inner_distance_step: i64,
 }
 
 /// Parse command-line arguments and return the Cli struct.
@@ -349,7 +186,13 @@ mod tests {
                 assert_eq!(args.threads, 1);
                 assert_eq!(args.outdir, ".");
                 assert!(args.biotype_attribute.is_none());
+                assert!(args.bed.is_none());
+                assert_eq!(args.mapq_cut, 30);
+                assert_eq!(args.infer_experiment_sample_size, 200_000);
+                assert_eq!(args.min_intron, 50);
+                assert_eq!(args.inner_distance_step, 5);
             }
+            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -371,6 +214,7 @@ mod tests {
                 assert_eq!(args.input, vec!["a.bam", "b.bam", "c.bam"]);
                 assert_eq!(args.gtf, "genes.gtf");
             }
+            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -383,6 +227,8 @@ mod tests {
             "test.bam",
             "--gtf",
             "genes.gtf",
+            "--bed",
+            "model.bed",
             "--stranded",
             "2",
             "--paired",
@@ -392,6 +238,8 @@ mod tests {
             "/tmp/out",
             "--reference",
             "genome.fa",
+            "-q",
+            "20",
         ]);
         match cli.command {
             Commands::Rna(args) => {
@@ -400,33 +248,46 @@ mod tests {
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");
                 assert_eq!(args.reference, Some("genome.fa".to_string()));
+                assert_eq!(args.bed, Some("model.bed".to_string()));
+                assert_eq!(args.mapq_cut, 20);
             }
+            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
 
     #[test]
-    fn test_bam_stat_default_args() {
-        let cli = Cli::parse_from(["rustqc", "bam-stat", "test.bam"]);
+    fn test_rna_rseqc_params() {
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--infer-experiment-sample-size",
+            "500000",
+            "--min-intron",
+            "100",
+            "--junction-saturation-min-coverage",
+            "5",
+            "--inner-distance-lower-bound",
+            "-500",
+            "--inner-distance-upper-bound",
+            "500",
+            "--inner-distance-step",
+            "10",
+        ]);
         match cli.command {
-            Commands::BamStat(args) => {
-                assert_eq!(args.input, vec!["test.bam"]);
-                assert_eq!(args.mapq_cut, 30);
-                assert_eq!(args.outdir, ".");
-                assert!(args.reference.is_none());
+            Commands::Rna(args) => {
+                assert_eq!(args.infer_experiment_sample_size, 500_000);
+                assert_eq!(args.min_intron, 100);
+                assert_eq!(args.junction_saturation_min_coverage, 5);
+                assert_eq!(args.inner_distance_lower_bound, -500);
+                assert_eq!(args.inner_distance_upper_bound, 500);
+                assert_eq!(args.inner_distance_step, 10);
             }
-            _ => panic!("Expected BamStat subcommand"),
-        }
-    }
-
-    #[test]
-    fn test_bam_stat_custom_mapq() {
-        let cli = Cli::parse_from(["rustqc", "bam-stat", "test.bam", "-q", "20"]);
-        match cli.command {
-            Commands::BamStat(args) => {
-                assert_eq!(args.mapq_cut, 20);
-            }
-            _ => panic!("Expected BamStat subcommand"),
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
         }
     }
 }

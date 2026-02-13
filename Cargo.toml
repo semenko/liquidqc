@@ -3,11 +3,11 @@ name = "rustqc"
 version = "0.1.0"
 edition = "2021"
 authors = ["Phil Ewels"]
-description = "Fast quality control tools for sequencing data, written in Rust"
+description = "Fast RNA-seq QC: dupRadar, featureCounts, and RSeQC reimplemented in Rust"
 license = "MIT"
 repository = "https://github.com/ewels/RustQC"
 readme = "README.md"
-keywords = ["bioinformatics", "rna-seq", "duplication", "qc"]
+keywords = ["bioinformatics", "rna-seq", "duplication", "qc", "rseqc"]
 
 [[bin]]
 name = "rustqc"

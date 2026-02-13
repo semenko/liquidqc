@@ -15,9 +15,10 @@ All sections and fields are optional. Missing fields use their default values.
 Unknown fields are silently ignored, so config files remain forward-compatible.
 
 :::note
-The configuration file currently applies only to the `rna` subcommand (dupRadar
-and featureCounts analysis). The RSeQC subcommands are configured entirely via
-their CLI flags.
+Since all analyses run within the `rustqc rna` command, the configuration file
+controls all tools: dupRadar, featureCounts, and all 7 RSeQC tools. Each RSeQC
+tool has an `enabled` toggle and tool-specific parameter overrides.
+CLI flags take precedence over config file values.
 :::
 
 ## Full example
@@ -46,6 +47,33 @@ featurecounts:
   biotype_counts_mqc: true
   biotype_rrna_mqc: true
   biotype_attribute: "gene_biotype"
+
+# RSeQC tool toggles and settings
+bam_stat:
+  enabled: true
+infer_experiment:
+  enabled: true
+  sample_size: 200000
+read_duplication:
+  enabled: true
+read_distribution:
+  enabled: true
+junction_annotation:
+  enabled: true
+  min_intron: 50
+junction_saturation:
+  enabled: true
+  min_intron: 50
+  min_coverage: 1
+  percentile_floor: 5
+  percentile_ceiling: 100
+  percentile_step: 5
+inner_distance:
+  enabled: true
+  sample_size: 1000000
+  lower_bound: -250
+  upper_bound: 250
+  step: 5
 ```
 
 ## Chromosome name mapping
@@ -142,3 +170,90 @@ precedence over the config file value.
 RustQC auto-detects the biotype attribute if the specified one is not found in
 the GTF. If neither `gene_biotype` nor `gene_type` is present, a warning is
 printed and biotype counting is skipped.
+
+## RSeQC tool settings
+
+Each of the 7 RSeQC tools has an `enabled` toggle (default `true`) and
+tool-specific parameter overrides. Disabling a tool here prevents it from
+running even when the required BED file is provided. CLI flags take precedence
+over config file values for all parameters.
+
+### bam_stat
+
+```yaml
+bam_stat:
+  enabled: true    # Set to false to skip bam_stat
+```
+
+No additional parameters. This tool does not require a BED file.
+
+### infer_experiment
+
+```yaml
+infer_experiment:
+  enabled: true
+  sample_size: 200000   # Number of reads to sample (default: 200000)
+```
+
+Requires a BED file (`--bed`). The `sample_size` can also be set via
+`--infer-experiment-sample-size`.
+
+### read_duplication
+
+```yaml
+read_duplication:
+  enabled: true    # Set to false to skip read_duplication
+```
+
+No additional parameters. This tool does not require a BED file.
+
+### read_distribution
+
+```yaml
+read_distribution:
+  enabled: true    # Set to false to skip read_distribution
+```
+
+No additional parameters. Requires a BED file (`--bed`).
+
+### junction_annotation
+
+```yaml
+junction_annotation:
+  enabled: true
+  min_intron: 50   # Minimum intron length in bases (default: 50)
+```
+
+Requires a BED file (`--bed`). The `min_intron` can also be set via `--min-intron`.
+
+### junction_saturation
+
+```yaml
+junction_saturation:
+  enabled: true
+  min_intron: 50           # Minimum intron length in bases (default: 50)
+  min_coverage: 1          # Minimum read count to consider a junction (default: 1)
+  percentile_floor: 5      # Sampling start percentage (default: 5)
+  percentile_ceiling: 100  # Sampling end percentage (default: 100)
+  percentile_step: 5       # Sampling step size (default: 5)
+```
+
+Requires a BED file (`--bed`). These parameters can also be set via CLI flags:
+`--min-intron`, `--junction-saturation-min-coverage`,
+`--junction-saturation-percentile-floor`, `--junction-saturation-percentile-ceiling`,
+`--junction-saturation-percentile-step`.
+
+### inner_distance
+
+```yaml
+inner_distance:
+  enabled: true
+  sample_size: 1000000   # Number of reads to sample (default: 1000000)
+  lower_bound: -250      # Histogram lower bound (default: -250)
+  upper_bound: 250       # Histogram upper bound (default: 250)
+  step: 5                # Histogram bin width (default: 5)
+```
+
+Requires a BED file (`--bed`). These parameters can also be set via CLI flags:
+`--inner-distance-sample-size`, `--inner-distance-lower-bound`,
+`--inner-distance-upper-bound`, `--inner-distance-step`.

@@ -1,15 +1,15 @@
 ---
 title: Combined Benchmark
-description: Overall performance comparison between the traditional R workflow (featureCounts + dupRadar) and RustQC's single-pass approach.
+description: Overall performance comparison between the traditional R workflow (featureCounts + dupRadar + RSeQC) and RustQC's single-pass approach.
 ---
 
-The traditional RNA-seq QC workflow requires two separate tools run sequentially:
-**featureCounts** for gene-level read counting and biotype quantification, then
-**dupRadar** for duplication rate analysis. Biotype counting — essential for
-assessing library quality (rRNA contamination, coding vs. non-coding ratios) —
-is the primary reason pipelines run a standalone featureCounts step rather than
-relying on dupRadar's internal counting alone. RustQC replaces both in a single
-pass, producing read counts, biotype summaries, and duplication metrics together.
+The traditional RNA-seq QC workflow requires multiple separate tools:
+**featureCounts** for gene-level read counting and biotype quantification,
+**dupRadar** for duplication rate analysis, and
+**RSeQC** for a suite of quality control metrics (strandedness, read distribution,
+junction analysis, inner distance, and more). RustQC replaces all three in a single
+pass, producing read counts, biotype summaries, duplication metrics, and RSeQC-equivalent
+outputs together.
 
 ## Traditional workflow vs. RustQC
 
@@ -25,14 +25,16 @@ to GRCh38 (63,086 genes).
 | **Total** | **46m 22s** | **0m 54s** |
 
 RustQC produces all outputs -- dupRadar duplication matrix, model fit, plots,
-featureCounts-compatible counts, assignment summary, biotype counts, and MultiQC
+featureCounts-compatible counts, assignment summary, biotype counts, RSeQC-equivalent
+metrics (bam_stat, infer_experiment, read_duplication, read_distribution,
+junction_annotation, junction_saturation, inner_distance), and MultiQC
 files -- in a single pass over the BAM file.
 
 ## Where the speedup comes from
 
-1. **Single-pass architecture:** The R workflow reads the BAM file twice -- once
-   for featureCounts, once for dupRadar. RustQC reads it once and produces
-   everything in that single pass.
+1. **Single-pass architecture:** The R workflow reads the BAM file multiple times --
+   once for featureCounts, once for dupRadar, and once per RSeQC tool. RustQC reads
+   it once and produces everything in that single pass.
 2. **Compiled Rust vs. interpreted R:** Compiled code with zero-cost abstractions
    and efficient memory management.
 3. **Multi-threaded parallelism:** RustQC parallelizes across chromosomes.

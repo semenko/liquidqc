@@ -1,10 +1,11 @@
 //! RustQC - Fast quality control tools for sequencing data
 //!
 //! A collection of Rust-based QC tools for bioinformatics.
-//! The `rna` subcommand is a reimplementation of the dupRadar Bioconductor
-//! R package, analysing PCR duplicate rates as a function of gene expression
-//! level in RNA-Seq datasets. It also produces featureCounts-compatible output
-//! files and biotype count summaries in a single pass.
+//! The `rna` subcommand runs all RNA-Seq QC analyses in a single pass:
+//! dupRadar duplication rate analysis, featureCounts-compatible output,
+//! and RSeQC-equivalent metrics (bam_stat, infer_experiment, read_duplication,
+//! read_distribution, junction_annotation, junction_saturation, inner_distance).
+//! Individual tools can be disabled via the YAML config file.
 
 mod cli;
 mod config;
@@ -29,13 +30,6 @@ fn main() -> Result<()> {
 
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args),
-        cli::Commands::BamStat(args) => run_bam_stat(args),
-        cli::Commands::InferExperiment(args) => run_infer_experiment(args),
-        cli::Commands::ReadDuplication(args) => run_read_duplication(args),
-        cli::Commands::ReadDistribution(args) => run_read_distribution(args),
-        cli::Commands::JunctionAnnotation(args) => run_junction_annotation(args),
-        cli::Commands::JunctionSaturation(args) => run_junction_saturation(args),
-        cli::Commands::InnerDistance(args) => run_inner_distance(args),
     }
 }
 
@@ -72,6 +66,9 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     if args.skip_dup_check {
         parts.push("--skip-dup-check".to_string());
     }
+    if let Some(ref bed) = args.bed {
+        parts.push(format!("--bed {}", shell_escape(bed)));
+    }
     parts.join(" ")
 }
 
@@ -84,8 +81,7 @@ fn shell_escape(s: &str) -> String {
     }
 }
 
-/// Run the RNA-Seq duplication rate analysis (dupRadar equivalent)
-/// and featureCounts-compatible output generation.
+/// Run the full RNA-Seq QC pipeline: dupRadar + featureCounts + RSeQC analyses.
 ///
 /// When multiple BAM files are provided, they are processed in parallel using
 /// rayon. The GTF annotation is parsed once and shared across all BAM files.
@@ -134,6 +130,9 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         args.input.join(", ")
     );
     info!("GTF file: {}", args.gtf);
+    if let Some(ref bed) = args.bed {
+        info!("BED file: {}", bed);
+    }
     if let Some(ref reference) = args.reference {
         info!("Reference FASTA: {}", reference);
     }
@@ -148,6 +147,27 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     );
     info!("Paired: {}", args.paired);
     info!("Threads: {}", args.threads);
+
+    // Warn if BED file is not provided but BED-requiring tools are enabled
+    if args.bed.is_none() && config.any_bed_tool_enabled() {
+        let tools = config.enabled_bed_tools();
+        warn!(
+            "No --bed file provided. Skipping BED-requiring tools: {}",
+            tools.join(", ")
+        );
+    }
+
+    // Pre-load BED-based gene model for infer_experiment (shared across all BAMs)
+    let gene_model = if let Some(bed_path) = args.bed.as_ref() {
+        if config.infer_experiment.enabled {
+            info!("Loading gene model from BED file for infer_experiment...");
+            Some(rna::rseqc::infer_experiment::GeneModel::from_bed(bed_path)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // Determine biotype attribute name (CLI overrides config, with auto-detection fallback)
     let configured_biotype = args
@@ -262,24 +282,42 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Determine if biotype attribute was found in the GTF
     let biotype_in_gtf = extra_attributes.contains(&biotype_attribute);
 
+    // Build the shared parameters struct for process_single_bam
+    let shared = SharedParams {
+        stranded: args.stranded,
+        paired: args.paired,
+        chrom_mapping: &chrom_mapping,
+        chrom_prefix: chrom_prefix.as_deref(),
+        outdir,
+        reference: args.reference.as_deref(),
+        skip_dup_check: args.skip_dup_check,
+        config: &config,
+        biotype_attribute: &biotype_attribute,
+        biotype_in_gtf,
+        command_line: &command_line,
+        bed: args.bed.as_deref(),
+        gene_model: gene_model.as_ref(),
+        mapq_cut: args.mapq_cut,
+        infer_experiment_sample_size: args.infer_experiment_sample_size,
+        min_intron: args.min_intron,
+        junction_saturation_min_coverage: args.junction_saturation_min_coverage,
+        junction_saturation_percentile_floor: args.junction_saturation_percentile_floor,
+        junction_saturation_percentile_ceiling: args.junction_saturation_percentile_ceiling,
+        junction_saturation_percentile_step: args.junction_saturation_percentile_step,
+        inner_distance_sample_size: args.inner_distance_sample_size,
+        inner_distance_lower_bound: args.inner_distance_lower_bound,
+        inner_distance_upper_bound: args.inner_distance_upper_bound,
+        inner_distance_step: args.inner_distance_step,
+    };
+
     // Step 2: Process all alignment files (in parallel when multiple)
     let bam_results: Vec<Result<()>> = if n_bams == 1 {
         // Single file: use all threads directly, no outer rayon pool needed
         vec![process_single_bam(
             &args.input[0],
             &genes,
-            args.stranded,
-            args.paired,
             args.threads,
-            &chrom_mapping,
-            chrom_prefix.as_deref(),
-            outdir,
-            args.reference.as_deref(),
-            args.skip_dup_check,
-            &config,
-            &biotype_attribute,
-            biotype_in_gtf,
-            &command_line,
+            &shared,
         )]
     } else {
         // Multiple files: process in parallel with a dedicated rayon pool
@@ -288,30 +326,10 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
             .build()
             .context("Failed to create rayon thread pool for parallel BAM processing")?;
 
-        let reference = args.reference.as_deref();
-        let skip_dup_check = args.skip_dup_check;
-
         pool.install(|| {
             args.input
                 .par_iter()
-                .map(|bam_path| {
-                    process_single_bam(
-                        bam_path,
-                        &genes,
-                        args.stranded,
-                        args.paired,
-                        threads_per_bam,
-                        &chrom_mapping,
-                        chrom_prefix.as_deref(),
-                        outdir,
-                        reference,
-                        skip_dup_check,
-                        &config,
-                        &biotype_attribute,
-                        biotype_in_gtf,
-                        &command_line,
-                    )
-                })
+                .map(|bam_path| process_single_bam(bam_path, &genes, threads_per_bam, &shared))
                 .collect()
         })
     };
@@ -345,43 +363,87 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     Ok(())
 }
 
+// ============================================================================
+// Shared parameters
+// ============================================================================
+
+/// Parameters shared across all BAM files in a run.
+///
+/// Bundles the read-only configuration, annotation data, and tool parameters
+/// that are computed once in `run_rna()` and passed to each `process_single_bam()`.
+/// This avoids a long parameter list on the processing function.
+struct SharedParams<'a> {
+    /// Library strandedness (0/1/2).
+    stranded: u8,
+    /// Whether the library is paired-end.
+    paired: bool,
+    /// Alignment-to-GTF chromosome name mapping.
+    chrom_mapping: &'a HashMap<String, String>,
+    /// Optional chromosome name prefix.
+    chrom_prefix: Option<&'a str>,
+    /// Output directory for results.
+    outdir: &'a Path,
+    /// Optional reference FASTA for CRAM files.
+    reference: Option<&'a str>,
+    /// Whether to skip duplicate-marking validation.
+    skip_dup_check: bool,
+    /// Configuration for conditional outputs.
+    config: &'a config::Config,
+    /// GTF attribute name for biotype counting.
+    biotype_attribute: &'a str,
+    /// Whether the biotype attribute was found in the GTF.
+    biotype_in_gtf: bool,
+    /// Reconstructed command line for featureCounts header.
+    command_line: &'a str,
+    /// Optional BED file path for RSeQC tools.
+    bed: Option<&'a str>,
+    /// Pre-loaded gene model for infer_experiment.
+    gene_model: Option<&'a rna::rseqc::infer_experiment::GeneModel>,
+    /// MAPQ cutoff for read quality filtering.
+    mapq_cut: u8,
+    /// Maximum reads to sample for strandedness inference.
+    infer_experiment_sample_size: u64,
+    /// Minimum intron size for junction filtering.
+    min_intron: u64,
+    /// Minimum coverage for junction saturation.
+    junction_saturation_min_coverage: u64,
+    /// Sampling start percentage for junction saturation.
+    junction_saturation_percentile_floor: u64,
+    /// Sampling end percentage for junction saturation.
+    junction_saturation_percentile_ceiling: u64,
+    /// Sampling step percentage for junction saturation.
+    junction_saturation_percentile_step: u64,
+    /// Maximum read pairs to sample for inner distance.
+    inner_distance_sample_size: u64,
+    /// Lower bound of inner distance histogram.
+    inner_distance_lower_bound: i64,
+    /// Upper bound of inner distance histogram.
+    inner_distance_upper_bound: i64,
+    /// Bin width for inner distance histogram.
+    inner_distance_step: i64,
+}
+
+// ============================================================================
+// Per-BAM processing
+// ============================================================================
+
 /// Process a single alignment file through the full analysis pipeline.
 ///
 /// This runs the complete analysis for one file: counting, featureCounts output,
-/// biotype counting, duplication matrix, model fitting, plotting, and MultiQC output.
+/// biotype counting, duplication matrix, model fitting, plotting, MultiQC output,
+/// and all enabled RSeQC analyses.
 ///
 /// # Arguments
 ///
 /// * `bam_path` - Path to the duplicate-marked alignment file (SAM/BAM/CRAM)
 /// * `genes` - Parsed GTF gene annotations (shared, read-only)
-/// * `stranded` - Library strandedness (0/1/2)
-/// * `paired` - Whether the library is paired-end
 /// * `threads` - Number of threads for this file's read counting
-/// * `chrom_mapping` - Alignment-to-GTF chromosome name mapping
-/// * `chrom_prefix` - Optional chromosome name prefix
-/// * `outdir` - Output directory for results
-/// * `reference` - Optional reference FASTA for CRAM files
-/// * `skip_dup_check` - Whether to skip duplicate-marking validation
-/// * `config` - Configuration for conditional outputs
-/// * `biotype_attribute` - GTF attribute name for biotype counting
-/// * `biotype_in_gtf` - Whether the biotype attribute was found in the GTF
-/// * `command_line` - Reconstructed command line for featureCounts header
-#[allow(clippy::too_many_arguments)]
+/// * `params` - Shared parameters (config, annotations, tool settings)
 fn process_single_bam(
     bam_path: &str,
     genes: &IndexMap<String, gtf::Gene>,
-    stranded: u8,
-    paired: bool,
     threads: usize,
-    chrom_mapping: &HashMap<String, String>,
-    chrom_prefix: Option<&str>,
-    outdir: &Path,
-    reference: Option<&str>,
-    skip_dup_check: bool,
-    config: &config::Config,
-    biotype_attribute: &str,
-    biotype_in_gtf: bool,
-    command_line: &str,
+    params: &SharedParams,
 ) -> Result<()> {
     let bam_stem = Path::new(bam_path)
         .file_stem()
@@ -390,19 +452,23 @@ fn process_single_bam(
         .context("Input filename is not valid UTF-8")?;
 
     let bam_start = Instant::now();
+    let config = params.config;
+    let outdir = params.outdir;
+
+    // === dupRadar counting ===
     info!("[{}] Counting reads across 4 modes...", bam_stem);
     let count_start = Instant::now();
     let count_result = rna::dupradar::counting::count_reads(
         bam_path,
         genes,
-        stranded,
-        paired,
+        params.stranded,
+        params.paired,
         threads,
-        chrom_mapping,
-        chrom_prefix,
-        reference,
-        skip_dup_check,
-        biotype_attribute,
+        params.chrom_mapping,
+        params.chrom_prefix,
+        params.reference,
+        params.skip_dup_check,
+        params.biotype_attribute,
     )?;
     info!(
         "[{}] Counting complete in {:.2}s",
@@ -436,7 +502,7 @@ fn process_single_bam(
                 genes,
                 &count_result,
                 bam_path,
-                command_line,
+                params.command_line,
             )?;
             info!(
                 "[{}] Counts file written to {}",
@@ -456,11 +522,11 @@ fn process_single_bam(
         }
 
         // Biotype outputs (only if attribute was found in GTF)
-        if biotype_in_gtf && config.any_biotype_output() {
+        if params.biotype_in_gtf && config.any_biotype_output() {
             let biotype_counts = rna::featurecounts::output::aggregate_biotype_counts(
                 genes,
                 &count_result,
-                biotype_attribute,
+                params.biotype_attribute,
             );
             info!(
                 "[{}] Biotype counting: {} biotypes found",
@@ -699,6 +765,9 @@ fn process_single_bam(
         );
     }
 
+    // === RSeQC analyses ===
+    run_rseqc_tools(bam_path, bam_stem, params)?;
+
     info!(
         "[{}] Completed in {:.2}s",
         bam_stem,
@@ -709,371 +778,199 @@ fn process_single_bam(
 }
 
 // ============================================================================
-// bam-stat subcommand
+// RSeQC tool orchestration
 // ============================================================================
 
-/// Run the bam-stat analysis for one or more BAM files.
-fn run_bam_stat(args: cli::BamStatArgs) -> Result<()> {
-    let start = Instant::now();
-    let outdir = Path::new(&args.outdir);
-    std::fs::create_dir_all(outdir)
-        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+/// Run all enabled RSeQC analyses for a single BAM file.
+///
+/// Each tool is run independently and writes its own output files. Tools that
+/// require a BED file are skipped when no `--bed` is provided. Individual tools
+/// can be disabled via the config file.
+fn run_rseqc_tools(bam_path: &str, bam_stem: &str, params: &SharedParams) -> Result<()> {
+    let config = params.config;
+    let outdir = params.outdir;
+    let reference = params.reference;
 
-    for bam_path in &args.input {
-        let bam_start = Instant::now();
-        let bam_stem = Path::new(bam_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
-
+    // --- bam_stat ---
+    if config.bam_stat.enabled {
         info!("[{}] Running bam_stat analysis...", bam_stem);
-
-        let result =
-            rna::rseqc::bam_stat::bam_stat(bam_path, args.mapq_cut, args.reference.as_deref())?;
-
+        let tool_start = Instant::now();
+        let result = rna::rseqc::bam_stat::bam_stat(bam_path, params.mapq_cut, reference)?;
         let output_path = outdir.join(format!("{}.bam_stat.txt", bam_stem));
         rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
-
         info!(
             "[{}] bam_stat completed in {:.2}s",
             bam_stem,
-            bam_start.elapsed().as_secs_f64()
+            tool_start.elapsed().as_secs_f64()
         );
     }
 
-    if args.input.len() > 1 {
-        info!(
-            "All BAM files processed in {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-    }
-
-    Ok(())
-}
-
-// ============================================================================
-
-/// Run the infer-experiment analysis for one or more BAM files.
-fn run_infer_experiment(args: cli::InferExperimentArgs) -> Result<()> {
-    let start = Instant::now();
-    let outdir = Path::new(&args.outdir);
-    std::fs::create_dir_all(outdir)
-        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
-
-    info!("Loading gene model from BED file: {}", args.bed);
-    let gene_model = rna::rseqc::infer_experiment::GeneModel::from_bed(&args.bed)?;
-
-    for bam_path in &args.input {
-        let bam_start = Instant::now();
-        let bam_stem = Path::new(bam_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
-
-        info!("[{}] Running infer_experiment analysis...", bam_stem);
-
-        let result = rna::rseqc::infer_experiment::infer_experiment(
-            bam_path,
-            &gene_model,
-            args.mapq_cut,
-            args.sample_size,
-            args.reference.as_deref(),
-        )?;
-
-        let output_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
-        rna::rseqc::infer_experiment::write_infer_experiment(&result, &output_path)?;
-
-        info!(
-            "[{}] Total {} usable reads were sampled",
-            bam_stem, result.total_sampled
-        );
-        info!(
-            "[{}] infer_experiment completed in {:.2}s",
-            bam_stem,
-            bam_start.elapsed().as_secs_f64()
-        );
-    }
-
-    if args.input.len() > 1 {
-        info!(
-            "All BAM files processed in {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-    }
-
-    Ok(())
-}
-
-/// Run read duplication analysis for one or more BAM files.
-fn run_read_duplication(args: cli::ReadDuplicationArgs) -> Result<()> {
-    let start = Instant::now();
-    let outdir = Path::new(&args.outdir);
-    std::fs::create_dir_all(outdir).context("Failed to create output directory")?;
-
-    for bam_path in &args.input {
-        let bam_start = Instant::now();
-        let bam_stem = Path::new(bam_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output")
-            .to_string();
-
-        info!("[{}] Running read duplication analysis...", bam_stem);
-
-        let result = rna::rseqc::read_duplication::read_duplication(
-            bam_path,
-            args.mapq_cut,
-            args.reference.as_deref(),
-        )?;
-
-        rna::rseqc::read_duplication::write_read_duplication(&result, outdir, &bam_stem)?;
-
+    // --- read_duplication ---
+    if config.read_duplication.enabled {
+        info!("[{}] Running read_duplication analysis...", bam_stem);
+        let tool_start = Instant::now();
+        let result =
+            rna::rseqc::read_duplication::read_duplication(bam_path, params.mapq_cut, reference)?;
+        rna::rseqc::read_duplication::write_read_duplication(&result, outdir, bam_stem)?;
         info!(
             "[{}] read_duplication completed in {:.2}s",
             bam_stem,
-            bam_start.elapsed().as_secs_f64()
+            tool_start.elapsed().as_secs_f64()
         );
     }
 
-    if args.input.len() > 1 {
-        info!(
-            "All BAM files processed in {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-    }
+    // --- BED-requiring tools (only if --bed was provided) ---
+    if let Some(bed_path) = params.bed {
+        // --- infer_experiment ---
+        if config.infer_experiment.enabled {
+            if let Some(gene_model) = params.gene_model {
+                info!("[{}] Running infer_experiment analysis...", bam_stem);
+                let tool_start = Instant::now();
+                let result = rna::rseqc::infer_experiment::infer_experiment(
+                    bam_path,
+                    gene_model,
+                    params.mapq_cut,
+                    params.infer_experiment_sample_size,
+                    reference,
+                )?;
+                let output_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
+                rna::rseqc::infer_experiment::write_infer_experiment(&result, &output_path)?;
+                info!(
+                    "[{}] Total {} usable reads were sampled",
+                    bam_stem, result.total_sampled
+                );
+                info!(
+                    "[{}] infer_experiment completed in {:.2}s",
+                    bam_stem,
+                    tool_start.elapsed().as_secs_f64()
+                );
+            }
+        }
 
-    Ok(())
-}
+        // --- read_distribution ---
+        if config.read_distribution.enabled {
+            info!("[{}] Running read_distribution analysis...", bam_stem);
+            let tool_start = Instant::now();
+            let result =
+                rna::rseqc::read_distribution::read_distribution(bam_path, bed_path, reference)?;
+            let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
+            rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
+            info!(
+                "[{}] Total {} reads, {} tags ({} assigned)",
+                bam_stem,
+                result.total_reads,
+                result.total_tags,
+                result.total_tags - result.unassigned_tags
+            );
+            info!(
+                "[{}] read_distribution completed in {:.2}s",
+                bam_stem,
+                tool_start.elapsed().as_secs_f64()
+            );
+        }
 
-// ============================================================================
-// read-distribution subcommand
-// ============================================================================
+        // --- junction_annotation ---
+        if config.junction_annotation.enabled {
+            info!("[{}] Running junction_annotation analysis...", bam_stem);
+            let tool_start = Instant::now();
+            let results = rna::rseqc::junction_annotation::junction_annotation(
+                bam_path,
+                bed_path,
+                params.min_intron,
+                params.mapq_cut,
+                reference,
+            )?;
 
-/// Run read distribution analysis for one or more BAM files.
-fn run_read_distribution(args: cli::ReadDistributionArgs) -> Result<()> {
-    let start = Instant::now();
-    let outdir = Path::new(&args.outdir);
-    std::fs::create_dir_all(outdir)
-        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+            let xls_path = outdir.join(format!("{}.junction.xls", bam_stem));
+            rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
 
-    for bam_path in &args.input {
-        let bam_start = Instant::now();
-        let bam_stem = Path::new(bam_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
+            let bed_out_path = outdir.join(format!("{}.junction.bed", bam_stem));
+            rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_out_path)?;
 
-        info!("[{}] Running read_distribution analysis...", bam_stem);
+            let r_path = outdir.join(format!("{}.junction_plot.r", bam_stem));
+            let r_prefix = outdir.join(bam_stem).to_string_lossy().to_string();
+            rna::rseqc::junction_annotation::write_junction_plot_r(&results, &r_prefix, &r_path)?;
 
-        let result = rna::rseqc::read_distribution::read_distribution(
-            bam_path,
-            &args.bed,
-            args.reference.as_deref(),
-        )?;
+            let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
+            rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
 
-        let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
-        rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
+            rna::rseqc::junction_annotation::print_summary(&results);
 
-        info!(
-            "[{}] Total {} reads, {} tags ({} assigned)",
-            bam_stem,
-            result.total_reads,
-            result.total_tags,
-            result.total_tags - result.unassigned_tags
-        );
-        info!(
-            "[{}] read_distribution completed in {:.2}s",
-            bam_stem,
-            bam_start.elapsed().as_secs_f64()
-        );
-    }
+            info!(
+                "[{}] junction_annotation completed in {:.2}s",
+                bam_stem,
+                tool_start.elapsed().as_secs_f64()
+            );
+        }
 
-    if args.input.len() > 1 {
-        info!(
-            "All BAM files processed in {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-    }
+        // --- junction_saturation ---
+        if config.junction_saturation.enabled {
+            info!("[{}] Running junction_saturation analysis...", bam_stem);
+            let tool_start = Instant::now();
+            let results = rna::rseqc::junction_saturation::junction_saturation(
+                bam_path,
+                bed_path,
+                params.min_intron,
+                params.mapq_cut,
+                params.junction_saturation_min_coverage as u32,
+                params.junction_saturation_percentile_floor as u32,
+                params.junction_saturation_percentile_ceiling as u32,
+                params.junction_saturation_percentile_step as u32,
+                reference,
+            )?;
 
-    Ok(())
-}
+            let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
+            rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
+            let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
+            rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;
 
-// ============================================================================
-// junction-annotation subcommand
-// ============================================================================
+            info!(
+                "[{}] junction_saturation completed in {:.2}s",
+                bam_stem,
+                tool_start.elapsed().as_secs_f64()
+            );
+        }
 
-/// Run junction annotation analysis for one or more BAM files.
-fn run_junction_annotation(args: cli::JunctionAnnotationArgs) -> Result<()> {
-    let start = Instant::now();
-    let outdir = Path::new(&args.outdir);
-    std::fs::create_dir_all(outdir)
-        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+        // --- inner_distance ---
+        if config.inner_distance.enabled {
+            info!("[{}] Running inner_distance analysis...", bam_stem);
+            let tool_start = Instant::now();
+            let results = rna::rseqc::inner_distance::inner_distance(
+                bam_path,
+                bed_path,
+                params.inner_distance_sample_size,
+                params.mapq_cut,
+                params.inner_distance_lower_bound,
+                params.inner_distance_upper_bound,
+                params.inner_distance_step,
+                reference,
+            )?;
 
-    for bam_path in &args.input {
-        let bam_start = Instant::now();
-        let bam_stem = Path::new(bam_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
+            let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
+            let detail_path = format!("{prefix}.inner_distance.txt");
+            rna::rseqc::inner_distance::write_detail_file(&results, &detail_path)?;
 
-        info!("[{}] Running junction_annotation analysis...", bam_stem);
+            let freq_path = format!("{prefix}.inner_distance_freq.txt");
+            rna::rseqc::inner_distance::write_freq_file(&results, &freq_path)?;
 
-        let results = rna::rseqc::junction_annotation::junction_annotation(
-            bam_path,
-            &args.bed,
-            args.min_intron,
-            args.mapq_cut,
-            args.reference.as_deref(),
-        )?;
+            let r_path = format!("{prefix}.inner_distance_plot.r");
+            rna::rseqc::inner_distance::write_r_script(
+                &results,
+                &prefix,
+                &r_path,
+                params.inner_distance_step,
+            )?;
 
-        // Write output files
-        let xls_path = outdir.join(format!("{}.junction.xls", bam_stem));
-        rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
+            let summary_path = format!("{prefix}.inner_distance_summary.txt");
+            rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
 
-        let bed_path = outdir.join(format!("{}.junction.bed", bam_stem));
-        rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_path)?;
-
-        let r_path = outdir.join(format!("{}.junction_plot.r", bam_stem));
-        let r_prefix = outdir.join(bam_stem).to_string_lossy().to_string();
-        rna::rseqc::junction_annotation::write_junction_plot_r(&results, &r_prefix, &r_path)?;
-
-        let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
-        rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
-
-        // Print summary to stderr
-        rna::rseqc::junction_annotation::print_summary(&results);
-
-        info!(
-            "[{}] junction_annotation completed in {:.2}s",
-            bam_stem,
-            bam_start.elapsed().as_secs_f64()
-        );
-    }
-
-    if args.input.len() > 1 {
-        info!(
-            "All BAM files processed in {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-    }
-
-    Ok(())
-}
-
-// ============================================================================
-// junction-saturation subcommand
-// ============================================================================
-
-/// Run the junction_saturation analysis on one or more BAM files.
-fn run_junction_saturation(args: cli::JunctionSaturationArgs) -> Result<()> {
-    let start = Instant::now();
-    let outdir = Path::new(&args.outdir);
-    std::fs::create_dir_all(outdir)
-        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
-
-    for bam_path in &args.input {
-        let bam_start = Instant::now();
-        let bam_stem = Path::new(bam_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
-
-        info!("[{}] Running junction_saturation analysis...", bam_stem);
-
-        let results = rna::rseqc::junction_saturation::junction_saturation(
-            bam_path,
-            &args.bed,
-            args.min_intron,
-            args.mapq_cut,
-            args.min_coverage as u32,
-            args.percentile_floor as u32,
-            args.percentile_ceiling as u32,
-            args.percentile_step as u32,
-            args.reference.as_deref(),
-        )?;
-
-        // Write R script and summary
-        let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
-        rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
-        let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
-        rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;
-
-        info!(
-            "[{}] junction_saturation completed in {:.2}s",
-            bam_stem,
-            bam_start.elapsed().as_secs_f64()
-        );
-    }
-
-    if args.input.len() > 1 {
-        info!(
-            "All BAM files processed in {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-    }
-
-    Ok(())
-}
-
-// ===================================================================
-// Inner Distance
-// ===================================================================
-
-/// Run the inner_distance subcommand.
-fn run_inner_distance(args: cli::InnerDistanceArgs) -> Result<()> {
-    let start = Instant::now();
-    let outdir = &args.outdir;
-    std::fs::create_dir_all(outdir)
-        .with_context(|| format!("Failed to create output directory: {}", outdir))?;
-
-    for bam_path in &args.input {
-        let bam_start = Instant::now();
-        let bam_stem = Path::new(bam_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
-
-        let results = rna::rseqc::inner_distance::inner_distance(
-            bam_path,
-            &args.bed,
-            args.sample_size,
-            args.mapq_cut,
-            args.lower_bound,
-            args.upper_bound,
-            args.step,
-            args.reference.as_deref(),
-        )?;
-
-        // Write output files
-        let prefix = Path::new(outdir)
-            .join(bam_stem)
-            .to_string_lossy()
-            .to_string();
-        let detail_path = format!("{prefix}.inner_distance.txt");
-        rna::rseqc::inner_distance::write_detail_file(&results, &detail_path)?;
-
-        let freq_path = format!("{prefix}.inner_distance_freq.txt");
-        rna::rseqc::inner_distance::write_freq_file(&results, &freq_path)?;
-
-        let r_path = format!("{prefix}.inner_distance_plot.r");
-        rna::rseqc::inner_distance::write_r_script(&results, &prefix, &r_path, args.step)?;
-
-        let summary_path = format!("{prefix}.inner_distance_summary.txt");
-        rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
-
-        info!(
-            "[{}] inner_distance completed in {:.2}s — {} read pairs processed",
-            bam_stem,
-            bam_start.elapsed().as_secs_f64(),
-            results.total_pairs
-        );
-    }
-
-    if args.input.len() > 1 {
-        info!(
-            "All BAM files processed in {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
+            info!(
+                "[{}] inner_distance completed in {:.2}s — {} read pairs processed",
+                bam_stem,
+                tool_start.elapsed().as_secs_f64(),
+                results.total_pairs
+            );
+        }
     }
 
     Ok(())

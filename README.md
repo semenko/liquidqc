@@ -12,8 +12,7 @@
 
 **RustQC** is a growing suite of fast QC tools for sequencing data, compiled to a single static binary with no runtime dependencies. It currently includes:
 
-- **`rustqc rna`** -- A reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets, with built-in [featureCounts](http://subread.sourceforge.net/)-compatible output and biotype counting.
-- **7 RSeQC reimplementations** -- Fast Rust equivalents of the most widely-used [RSeQC](https://rseqc.sourceforge.net/) Python tools: `bam-stat`, `infer-experiment`, `read-duplication`, `read-distribution`, `junction-annotation`, `junction-saturation`, and `inner-distance`.
+- **`rustqc rna`** -- A single-command RNA-Seq QC pipeline that runs all analyses in one pass: [dupRadar](https://github.com/ssayols/dupRadar) duplicate rate analysis, [featureCounts](http://subread.sourceforge.net/)-compatible read counting with biotype summaries, and 7 [RSeQC](https://rseqc.sourceforge.net/) quality control tools (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance).
 
 All tools accept SAM/BAM/CRAM input and support processing multiple files in a single command.
 
@@ -24,13 +23,13 @@ All tools accept SAM/BAM/CRAM input and support processing multiple files in a s
 </picture>
 </p>
 
-<p align="center"><em>Run time for a 10 GB paired-end BAM (dupRadar + featureCounts)</em></p>
+<p align="center"><em>Run time for a 10 GB paired-end BAM (dupRadar + featureCounts + RSeQC)</em></p>
 
 ## Available tools
 
-### `rustqc rna` -- Duplicate rate analysis + read counting
+### `rustqc rna` -- RNA-Seq quality control
 
-Performs dupRadar-equivalent analysis and featureCounts-compatible read counting in a single pass. Given a duplicate-marked BAM and GTF annotation, it computes per-gene duplication rates, fits a logistic regression model, generates diagnostic plots, and produces gene-level count files with biotype summaries.
+Performs dupRadar-equivalent duplicate rate analysis, featureCounts-compatible read counting, and 7 RSeQC-equivalent QC analyses in a single pass. Given a duplicate-marked BAM, GTF annotation, and optional BED12 gene model, it computes per-gene duplication rates, fits a logistic regression model, generates diagnostic plots, produces gene-level count files with biotype summaries, and runs comprehensive QC metrics (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance).
 
 | Feature | dupRadar (R) | RustQC |
 |---------|-------------|--------|
@@ -43,21 +42,21 @@ Performs dupRadar-equivalent analysis and featureCounts-compatible read counting
 
 All gene counts match **exactly** across all 63,086 genes. Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**. See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupradar/) for detailed results.
 
-### RSeQC tools
+### RSeQC tools (integrated)
 
-Reimplementations of popular [RSeQC](https://rseqc.sourceforge.net/) Python QC tools, producing output compatible with the originals:
+The `rustqc rna` command also includes reimplementations of 7 popular [RSeQC](https://rseqc.sourceforge.net/) Python QC tools, all running in the same pipeline:
 
-| Subcommand | RSeQC equivalent | Description |
-|------------|-----------------|-------------|
-| `rustqc bam-stat` | `bam_stat.py` | Basic alignment statistics (total reads, duplicates, mapping quality, splice reads, etc.) |
-| `rustqc infer-experiment` | `infer_experiment.py` | Infer library strandedness from read/gene-model overlap |
-| `rustqc read-duplication` | `read_duplication.py` | Position-based and sequence-based duplication histograms |
-| `rustqc read-distribution` | `read_distribution.py` | Read distribution across genomic features (CDS, UTR, intron, intergenic) |
-| `rustqc junction-annotation` | `junction_annotation.py` | Classify splice junctions as known, partial novel, or complete novel |
-| `rustqc junction-saturation` | `junction_saturation.py` | Saturation analysis of detected splice junctions |
-| `rustqc inner-distance` | `inner_distance.py` | Inner distance distribution for paired-end reads |
+| Tool | RSeQC equivalent | Description |
+|------|-----------------|-------------|
+| bam_stat | `bam_stat.py` | Basic alignment statistics (total reads, duplicates, mapping quality, splice reads, etc.) |
+| infer_experiment | `infer_experiment.py` | Infer library strandedness from read/gene-model overlap |
+| read_duplication | `read_duplication.py` | Position-based and sequence-based duplication histograms |
+| read_distribution | `read_distribution.py` | Read distribution across genomic features (CDS, UTR, intron, intergenic) |
+| junction_annotation | `junction_annotation.py` | Classify splice junctions as known, partial novel, or complete novel |
+| junction_saturation | `junction_saturation.py` | Saturation analysis of detected splice junctions |
+| inner_distance | `inner_distance.py` | Inner distance distribution for paired-end reads |
 
-All RSeQC tools require a BED12 gene model file (`-b`/`--bed`). Most accept a MAPQ cutoff (`-q`, default 30) and support multiple input files.
+All RSeQC tools run by default. Five of the seven tools require a BED12 gene model file (`--bed`); if `--bed` is not provided, those tools are skipped with a warning. Individual tools can be disabled via the [configuration file](#configuration).
 
 ## Density scatter plots
 
@@ -185,39 +184,26 @@ rustqc rna sample.markdup.bam --gtf gencode.gtf --paired --biotype-attribute gen
 
 ### RSeQC tools
 
-All RSeQC tools share a common pattern: one or more input alignment files, a BED12 gene model (`-b`), and an output directory (`-o`).
+The RSeQC tools are integrated into `rustqc rna` and run automatically. To enable the tools that require a BED12 gene model (infer_experiment, read_distribution, junction_annotation, junction_saturation, inner_distance), pass `--bed`:
 
 ```bash
-# Basic alignment statistics
-rustqc bam-stat sample.bam -o results/
+# Run everything: dupRadar + featureCounts + all 7 RSeQC tools
+rustqc rna sample.markdup.bam --gtf genes.gtf --bed genes.bed --outdir results/
 
-# Infer library strandedness
-rustqc infer-experiment sample.bam -b genes.bed -o results/
-
-# Read duplication histograms (position-based and sequence-based)
-rustqc read-duplication sample.bam -o results/
-
-# Read distribution across genomic features
-rustqc read-distribution sample.bam -b genes.bed -o results/
-
-# Splice junction annotation (known / partial novel / complete novel)
-rustqc junction-annotation sample.bam -b genes.bed -o results/
-
-# Junction saturation analysis
-rustqc junction-saturation sample.bam -b genes.bed -o results/
-
-# Inner distance distribution for paired-end reads
-rustqc inner-distance sample.bam -b genes.bed -o results/
+# Without --bed: dupRadar + featureCounts + bam_stat + read_duplication only
+rustqc rna sample.markdup.bam --gtf genes.gtf --outdir results/
 ```
 
-Common options across RSeQC tools:
+RSeQC-specific options:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-o` / `--outdir` | `.` | Output directory |
-| `-q` / `--mapq` | `30` | Minimum mapping quality |
-| `-r` / `--reference` | none | Reference FASTA (for CRAM) |
-| `-b` / `--bed` | -- | BED12 gene model (required for most tools) |
+| `--bed <BED>` | none | BED12 gene model (enables 5 additional RSeQC tools) |
+| `-q` / `--mapq <N>` | `30` | Minimum mapping quality for RSeQC tools |
+| `--infer-experiment-sample-size <N>` | `200000` | Max reads to sample for strandedness inference |
+| `--min-intron <N>` | `50` | Minimum intron size for junction tools |
+| `--inner-distance-lower-bound <N>` | `-250` | Inner distance histogram lower bound |
+| `--inner-distance-upper-bound <N>` | `250` | Inner distance histogram upper bound |
 
 #### Duplicate marking
 
@@ -227,7 +213,7 @@ Before processing, RustQC checks the BAM `@PG` header lines for known duplicate-
 
 If you are confident that your BAM file has duplicates correctly flagged despite the header check failing, you can bypass the verification with `--skip-dup-check`.
 
-The RSeQC tools do not require duplicate marking.
+The RSeQC analyses within `rustqc rna` do not require duplicate marking -- only the dupRadar component does.
 
 ## Configuration
 
@@ -330,17 +316,17 @@ For an input file named `sample.bam`, the following files are generated. All out
 | `sample.biotype_counts_mqc.tsv` | MultiQC bargraph format for biotype counts |
 | `sample.biotype_counts_rrna_mqc.tsv` | MultiQC general stats with rRNA percentage |
 
-### RSeQC outputs
+### RSeQC outputs (`rustqc rna`)
 
-| Subcommand | Output files | Description |
-|------------|-------------|-------------|
-| `bam-stat` | `sample.bam_stat.txt` | Text report with alignment statistics |
-| `infer-experiment` | `sample.infer_experiment.txt` | Strandedness fractions |
-| `read-duplication` | `sample.pos.DupRate.xls`, `sample.seq.DupRate.xls` | Position-based and sequence-based duplication histograms |
-| `read-distribution` | `sample.read_distribution.txt` | Per-region read distribution table |
-| `junction-annotation` | `sample.junction.xls`, `sample.junction.bed`, `sample.junction_plot.r`, `sample.junction_annotation.txt` | Junction classifications and summary |
-| `junction-saturation` | `sample.junctionSaturation_plot.r`, `sample.junctionSaturation_summary.txt` | Saturation curve data |
-| `inner-distance` | `sample.inner_distance.txt`, `sample.inner_distance_freq.txt`, `sample.inner_distance_plot.r`, `sample.inner_distance_summary.txt` | Per-pair distances, histogram, and summary |
+| Tool | Output files | Description |
+|------|-------------|-------------|
+| bam_stat | `sample.bam_stat.txt` | Text report with alignment statistics |
+| infer_experiment | `sample.infer_experiment.txt` | Strandedness fractions |
+| read_duplication | `sample.pos.DupRate.xls`, `sample.seq.DupRate.xls` | Position-based and sequence-based duplication histograms |
+| read_distribution | `sample.read_distribution.txt` | Per-region read distribution table |
+| junction_annotation | `sample.junction.xls`, `sample.junction.bed`, `sample.junction_plot.r`, `sample.junction_annotation.txt` | Junction classifications and summary |
+| junction_saturation | `sample.junctionSaturation_plot.r`, `sample.junctionSaturation_summary.txt` | Saturation curve data |
+| inner_distance | `sample.inner_distance.txt`, `sample.inner_distance_freq.txt`, `sample.inner_distance_plot.r`, `sample.inner_distance_summary.txt` | Per-pair distances, histogram, and summary |
 
 ### Duplication matrix columns
 
@@ -410,13 +396,13 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 
 Each RSeQC tool is a single-pass BAM reader that processes the alignment file and produces output compatible with the original Python tools. They use a BED12 gene model for genomic feature annotation. Key implementation details:
 
-- **bam-stat**: Flag-based read classification in a single pass (duplicates, mapping quality, splice events, proper pairs).
-- **infer-experiment**: Samples reads overlapping gene intervals and determines strand protocol fractions.
-- **read-duplication**: Builds position-based and sequence-based occurrence histograms.
-- **read-distribution**: Classifies read tags by midpoint overlap with CDS, UTR, intron, and intergenic regions.
-- **junction-annotation**: Extracts CIGAR N-operations and classifies against known splice sites from the gene model.
-- **junction-saturation**: Subsamples junctions at increasing fractions to build a saturation curve.
-- **inner-distance**: Computes mRNA-level or genomic inner distance between paired-end reads with transcript-aware classification.
+- **bam_stat**: Flag-based read classification in a single pass (duplicates, mapping quality, splice events, proper pairs).
+- **infer_experiment**: Samples reads overlapping gene intervals and determines strand protocol fractions.
+- **read_duplication**: Builds position-based and sequence-based occurrence histograms.
+- **read_distribution**: Classifies read tags by midpoint overlap with CDS, UTR, intron, and intergenic regions.
+- **junction_annotation**: Extracts CIGAR N-operations and classifies against known splice sites from the gene model.
+- **junction_saturation**: Subsamples junctions at increasing fractions to build a saturation curve.
+- **inner_distance**: Computes mRNA-level or genomic inner distance between paired-end reads with transcript-aware classification.
 
 ## Interpreting the results
 

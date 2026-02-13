@@ -1,12 +1,13 @@
 # AGENTS.md — RustQC
 
-> Fast quality control tools for sequencing data, written in Rust. Includes:
-> - **`rna`** subcommand: RNA-Seq duplicate rate analysis (reimplementation of
->   [dupRadar](https://github.com/ssayols/dupRadar)), with featureCounts-compatible
->   output and biotype counting.
-> - **7 RSeQC subcommands**: Rust reimplementations of [RSeQC](https://rseqc.sourceforge.net/)
->   Python tools (`bam-stat`, `infer-experiment`, `read-duplication`, `read-distribution`,
->   `junction-annotation`, `junction-saturation`, `inner-distance`).
+> Fast quality control tools for sequencing data, written in Rust. The
+> **`rustqc rna`** command runs all RNA-Seq QC analyses in a single pass:
+> - **dupRadar** duplicate rate analysis (reimplementation of
+>   [dupRadar](https://github.com/ssayols/dupRadar))
+> - **featureCounts**-compatible gene-level read counting with biotype summaries
+> - **7 RSeQC tools** integrated as built-in analyses: bam_stat, infer_experiment,
+>   read_duplication, read_distribution, junction_annotation, junction_saturation,
+>   inner_distance (reimplementations of [RSeQC](https://rseqc.sourceforge.net/))
 >
 > Binary crate (`rustqc`), Rust edition 2021.
 
@@ -81,18 +82,25 @@ Nested module structure — top-level modules (`cli`, `config`, `gtf`, `rna`) de
 in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool group.
 Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
 
-The CLI uses clap subcommands with 8 variants:
-- `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]` — dupRadar + featureCounts analysis
-- `rustqc bam-stat <BAM>... [OPTIONS]` — alignment statistics
-- `rustqc infer-experiment <BAM>... --bed <BED> [OPTIONS]` — strandedness inference
-- `rustqc read-duplication <BAM>... [OPTIONS]` — duplication histograms
-- `rustqc read-distribution <BAM>... --bed <BED> [OPTIONS]` — feature distribution
-- `rustqc junction-annotation <BAM>... --bed <BED> [OPTIONS]` — splice junction classification
-- `rustqc junction-saturation <BAM>... --bed <BED> [OPTIONS]` — junction saturation curves
-- `rustqc inner-distance <BAM>... --bed <BED> [OPTIONS]` — insert size estimation
+The CLI uses a single subcommand:
+- `rustqc rna <BAM>... --gtf <GTF> [--bed <BED>] [OPTIONS]`
+
+This runs all analyses in a single pass: dupRadar duplicate rate analysis,
+featureCounts-compatible gene counting, and all 7 RSeQC-equivalent tools
+(bam_stat, infer_experiment, read_duplication, read_distribution,
+junction_annotation, junction_saturation, inner_distance).
+
+The `--bed` flag is optional. If omitted, a warning is printed and the 5 tools
+that require a BED12 gene model (infer_experiment, read_distribution,
+junction_annotation, junction_saturation, inner_distance) are skipped.
+The 2 tools that don't need a BED file (bam_stat, read_duplication) still run.
+
+Individual tools can be disabled via the YAML config file (each has an `enabled`
+toggle). Tool-specific parameters (e.g., `--min-intron`, `--inner-distance-lower-bound`)
+are available as CLI flags and in the config file.
 
 Multiple BAM files can be passed as positional arguments and are processed sequentially.
-The `rna` subcommand supports parallel processing via `--threads`.
+Parallel processing is supported via `--threads`.
 
 ## Code Style
 
@@ -229,6 +237,10 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   These documents must always accurately reflect the latest benchmark data.
 - The YAML config nests output toggles under `dupradar:` and `featurecounts:` keys.
   Each output file can be individually enabled/disabled (all default to `true`).
+- The YAML config also has sections for each of the 7 RSeQC tools (`bam_stat:`,
+  `infer_experiment:`, `read_duplication:`, `read_distribution:`, `junction_annotation:`,
+  `junction_saturation:`, `inner_distance:`). Each has an `enabled: bool` toggle
+  and tool-specific parameter overrides. CLI flags take precedence over config values.
 - The `featurecounts.rs` module produces featureCounts-compatible output files (counts TSV,
   summary, biotype counts, and MultiQC files). These are generated in the same pass as
   the dupRadar analysis — no separate featureCounts run is needed.

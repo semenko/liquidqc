@@ -156,23 +156,24 @@ cargo build --release
 
 ### 5. Run RSeQC tools (RustQC reimplementations)
 
-```bash
-# Small — all tools
-./target/release/rustqc bam-stat benchmark/input/small/test.bam -o benchmark/RustQC/small
-./target/release/rustqc infer-experiment benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
-./target/release/rustqc read-duplication benchmark/input/small/test.bam -o benchmark/RustQC/small
-./target/release/rustqc read-distribution benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
-./target/release/rustqc junction-annotation benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
-./target/release/rustqc junction-saturation benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
-./target/release/rustqc inner-distance benchmark/input/small/test.bam -b benchmark/input/small/chr6.bed -o benchmark/RustQC/small
+The RSeQC tools are integrated into `rustqc rna` and run automatically when a
+`--bed` file is provided. To include all 7 RSeQC tools in the analysis, add
+`--bed` to the command:
 
-# Large — same commands with large BAM + BED
-./target/release/rustqc bam-stat benchmark/input/large/GM12878_REP1.markdup.sorted.bam -o benchmark/RustQC/large
-./target/release/rustqc infer-experiment benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
-./target/release/rustqc read-distribution benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
-./target/release/rustqc junction-annotation benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
-./target/release/rustqc junction-saturation benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
-./target/release/rustqc inner-distance benchmark/input/large/GM12878_REP1.markdup.sorted.bam -b benchmark/input/large/genes.bed -o benchmark/RustQC/large
+```bash
+# Small — all analyses including RSeQC tools
+./target/release/rustqc rna benchmark/input/small/test.bam \
+  --gtf benchmark/input/small/chr6.gtf -p --skip-dup-check \
+  --bed benchmark/input/small/chr6.bed \
+  -o benchmark/RustQC/small
+
+# Large — all analyses including RSeQC tools
+./target/release/rustqc rna benchmark/input/large/GM12878_REP1.markdup.sorted.bam \
+  --gtf benchmark/input/large/genes.gtf -p -t 10 \
+  --bed benchmark/input/large/genes.bed \
+  -o benchmark/RustQC/large \
+  -c benchmark/input/large/config.yaml \
+  --biotype-attribute gene_type
 ```
 
 ### 6. Generate RSeQC Python reference outputs

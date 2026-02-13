@@ -7,11 +7,12 @@ RustQC reimplements seven tools from the [RSeQC](https://rseqc.sourceforge.net/)
 package. Each tool produces output files that match the format and content of the
 original Python implementation.
 
-All RSeQC tools use the input filename stem as a prefix for output files. For
-example, `rustqc bam-stat sample.bam -o results/` produces
-`results/sample.bam_stat.txt`.
+All RSeQC tools run automatically as part of the `rustqc rna` command and use
+the input filename stem as a prefix for output files. For example,
+`rustqc rna sample.bam --gtf genes.gtf --bed genes.bed -o results/` produces
+RSeQC output files like `results/sample.bam_stat.txt`.
 
-## bam-stat
+## bam_stat
 
 Basic alignment statistics from a single-pass BAM scan.
 
@@ -29,7 +30,7 @@ headings and number formatting. Key metrics include:
 - Proper pair and paired-on-different-chromosome counts
 - MAPQ distribution histogram
 
-## infer-experiment
+## infer_experiment
 
 Library strandedness inference by sampling reads overlapping gene models.
 
@@ -51,7 +52,7 @@ For paired-end data, the labels are `PairEnd` with `1++,1--,2+-,2-+` and
 - First fraction near 100% = forward stranded (e.g., Ligation protocol)
 - Second fraction near 100% = reverse stranded (e.g., dUTP protocol, most common)
 
-## read-duplication
+## read_duplication
 
 Position-based and sequence-based duplication rate histograms.
 
@@ -71,7 +72,7 @@ Position-based deduplication groups reads by alignment position (chromosome,
 start, CIGAR-derived exon blocks). Sequence-based deduplication groups reads by
 the actual read sequence.
 
-## read-distribution
+## read_distribution
 
 Classification of reads across genomic feature types.
 
@@ -86,7 +87,7 @@ The output includes:
 - Regions: CDS_Exons, 5'UTR_Exons, 3'UTR_Exons, Introns, TSS_up_1kb, TSS_up_5kb, TSS_up_10kb, TES_down_1kb, TES_down_5kb, TES_down_10kb
 - Tags assigned to each region (with priority: CDS > UTR > Intron > Intergenic)
 
-## junction-annotation
+## junction_annotation
 
 Splice junction classification against a reference gene model.
 
@@ -104,7 +105,7 @@ against the reference BED12 gene model:
 - **Partial novel** -- one splice site matches, the other is novel
 - **Complete novel** -- neither splice site matches any known intron
 
-## junction-saturation
+## junction_saturation
 
 Splice junction discovery rate at increasing sequencing depths.
 
@@ -142,8 +143,8 @@ Pairs are classified as:
 - **sameChrom=No** -- reads on different chromosomes
 - **unknownChromosome** -- chromosome not in the gene model
 
-The histogram bins are configurable via `--lower-bound`, `--upper-bound`, and
-`--step` (defaults: -250 to 250, step 5).
+The histogram bins are configurable via `--inner-distance-lower-bound`,
+`--inner-distance-upper-bound`, and `--inner-distance-step` (defaults: -250 to 250, step 5).
 
 ## Compatibility with RSeQC
 

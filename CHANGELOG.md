@@ -21,17 +21,18 @@ PCR duplicate rates in RNA-Seq datasets, with identical numerical output to the 
 
 ### RSeQC
 
-Seven subcommands reimplementing the most widely-used
-[RSeQC](https://rseqc.sourceforge.net/) Python tools as fast, single-pass Rust equivalents.
-Output formats are compatible with the Python originals.
+Seven [RSeQC](https://rseqc.sourceforge.net/) tools integrated into the
+`rustqc rna` command, running automatically in the same single-pass analysis.
+Output formats are compatible with the Python originals. Individual tools can
+be disabled via the YAML config file.
 
-- `bam-stat` -- alignment statistics
-- `infer-experiment` -- library strandedness inference
-- `read-duplication` -- position-based and sequence-based duplication histograms
-- `read-distribution` -- read distribution across genomic features
-- `junction-annotation` -- splice junction classification
-- `junction-saturation` -- junction saturation curves
-- `inner-distance` -- insert size estimation for paired-end reads
+- bam_stat -- alignment statistics
+- infer_experiment -- library strandedness inference
+- read_duplication -- position-based and sequence-based duplication histograms
+- read_distribution -- read distribution across genomic features (requires `--bed`)
+- junction_annotation -- splice junction classification (requires `--bed`)
+- junction_saturation -- junction saturation curves (requires `--bed`)
+- inner_distance -- insert size estimation for paired-end reads (requires `--bed`)
 
 ### General
 
