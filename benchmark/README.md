@@ -12,10 +12,14 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 
 | Metric | dupRadar (R) | RustQC |
 | --- | --- | --- |
-| **Intercept** | 0.03 | 0.03 |
-| **Slope** | 1.60 | 1.60 |
+| **Runtime** | 2.50s | 0.25s (**10x**) |
+| **Intercept** | 0.03186 | 0.03186 |
+| **Slope** | 1.60189 | 1.60189 |
 | **Genes total** | 2,905 | 2,905 |
 | **Genes with reads** | 636 | 636 |
+| **Genes with duplicates** | 201 | 201 |
+| **Total values compared** | 37,765 | 37,765 |
+| **Value mismatches** | — | **0** |
 
 #### Count comparison
 
@@ -33,7 +37,7 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 Rscript benchmark/small/run_dupRadar_R.R
 
 # RustQC (dupRadar + featureCounts outputs)
-cargo run --release -- rna benchmark/small/test.bam --gtf benchmark/small/chr6.gtf -p -o benchmark/small/RustQC
+cargo run --release -- rna benchmark/small/test.bam --gtf benchmark/small/chr6.gtf -p --skip-dup-check -o benchmark/small/RustQC
 ```
 
 The GTF for the small benchmark uses `gene_biotype` (Ensembl convention), so biotype counts are generated automatically.
@@ -54,13 +58,16 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 
 | Metric | dupRadar (R) | RustQC (1 thread) | RustQC (8 threads) | RustQC (10 threads) |
 | --- | --- | --- | --- | --- |
-| **Runtime** | 23m 48s | 3m 20s (~7x) | 1m 04s (~22x) | 0m 53s (~27x) |
-| **Speedup** | — | **~7x** | **~22x** | **~27x** |
+| **Runtime** | 29m 56s | 3m 16s (~9x) | 1m 03s (~28x) | 0m 54s (~33x) |
+| **Speedup** | — | **~9x** | **~28x** | **~33x** |
+| **Max RSS** | N/A (Docker) | 503 MB | 893 MB | 1.3 GB |
 | **Intercept** | 0.8245 | 0.8245 | 0.8245 | 0.8245 |
 | **Slope** | 1.6774 | 1.6774 | 1.6774 | 1.6774 |
 | **Genes total** | 63,086 | 63,086 | 63,086 | 63,086 |
 | **Genes with reads (unique)** | 23,597 | 23,597 | 23,597 | 23,597 |
 | **Genes with reads (multi)** | 24,719 | 24,719 | 24,719 | 24,719 |
+| **Total values compared** | 820,118 | 820,118 | 820,118 | 820,118 |
+| **Value mismatches** | — | **0** | **0** | **0** |
 
 ### Count comparison
 
@@ -71,7 +78,7 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 | **allCountsMulti** | 16,089,488 | 16,089,488 | **100%** |
 | **filteredCountsMulti** | 4,503,920 | 4,503,920 | **100%** |
 
-All four count columns match exactly across all 63,086 genes — both unique-mapper and multi-mapper counts.
+All four count columns match exactly across all 63,086 genes — both unique-mapper and multi-mapper counts. A cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches** (relative tolerance 1e-6).
 
 Model fit parameters (**intercept** and **slope**) match to the displayed precision.
 
@@ -141,6 +148,6 @@ cargo build --release
 
 ### Known differences
 
-Both benchmarks achieve **100% exact match** across all four count columns (unique and multi-mapper) and all genes. Model fit parameters match to at least 10 significant digits.
+Both benchmarks achieve **100% exact match** across all four count columns (unique and multi-mapper) and all genes. A cell-by-cell comparison of the full duplication matrix shows **zero mismatches** across all 820,118 values (37,765 for the small benchmark). Model fit parameters match to at least 10 significant digits.
 
-Runtime may vary depending on hardware — the times above were measured on a single machine (10-core Apple Silicon) for relative comparison. Multi-threaded scaling depends on the number of chromosomes with mapped reads and the evenness of their read distribution.
+Runtime may vary depending on hardware — the times above were measured on a single machine (10-core Apple Silicon) for relative comparison. The R dupRadar benchmark was run via Docker (x86 emulation on ARM Mac), so the R timings include container overhead and emulation penalties. Multi-threaded scaling depends on the number of chromosomes with mapped reads and the evenness of their read distribution.

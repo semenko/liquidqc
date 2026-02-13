@@ -21,7 +21,7 @@ It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene 
 | Language | R | Rust |
 | Dependencies | R, Bioconductor, Rsubread | None (static binary) |
 | Read counting | 4 separate featureCounts calls | Single-pass alignment reading |
-| Speed | ~24 min for 10 GB BAM | ~1 min for 10 GB BAM (with `--threads 8`) |
+| Speed | ~30 min for 10 GB BAM | ~1 min for 10 GB BAM (with `--threads 8`) |
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
 
@@ -29,11 +29,11 @@ It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene 
 
 | Metric | dupRadar (R) | RustQC (1 thread) | RustQC (8 threads) | RustQC (10 threads) |
 | --- | --- | --- | --- | --- |
-| **Runtime** | 23m 48s | 3m 20s (~7x) | 1m 04s (~22x) | 0m 53s (~27x) |
+| **Runtime** | 29m 56s | 3m 16s (~9x) | 1m 03s (~28x) | 0m 54s (~33x) |
 | **Intercept** | 0.8245 | 0.8245 | 0.8245 | 0.8245 |
 | **Slope** | 1.6774 | 1.6774 | 1.6774 | 1.6774 |
 
-All gene counts — unique and multi-mapper — match **exactly** across all 63,086 genes (100%).
+All gene counts — unique and multi-mapper — match **exactly** across all 63,086 genes (100%). Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**.
 
 See the [benchmark README](benchmark/README.md) for full results and replication instructions.
 

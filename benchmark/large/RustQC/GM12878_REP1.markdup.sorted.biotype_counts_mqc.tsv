@@ -1,0 +1,48 @@
+# id: 'biotype_counts'
+# section_name: 'Biotype Counts'
+# description: "shows reads overlapping genomic features of different biotypes,"
+# plot_type: 'bargraph'
+# anchor: 'featurecounts_biotype'
+# pconfig:
+#     id: "featurecounts_biotype_plot"
+#     title: "featureCounts: Biotypes"
+#     xlab: "# Reads"
+#     cpswitch_counts_label: "Number of Reads"
+protein_coding	11899993
+lncRNA	1889211
+processed_pseudogene	374956
+unprocessed_pseudogene	120112
+misc_RNA	86898
+IG_V_pseudogene	75996
+TEC	47160
+transcribed_processed_pseudogene	43432
+transcribed_unprocessed_pseudogene	32183
+ribozyme	14902
+miRNA	14760
+snRNA	14477
+rRNA_pseudogene	11435
+snoRNA	9307
+TR_V_gene	5316
+transcribed_unitary_pseudogene	4745
+unitary_pseudogene	3475
+IG_C_gene	1390
+IG_V_gene	1232
+TR_C_gene	819
+rRNA	725
+IG_D_gene	641
+scaRNA	480
+TR_J_gene	443
+IG_J_gene	209
+IG_C_pseudogene	175
+TR_V_pseudogene	90
+IG_J_pseudogene	10
+vault_RNA	4
+translated_processed_pseudogene	3
+scRNA	0
+sRNA	0
+TR_D_gene	0
+TR_J_pseudogene	0
+IG_pseudogene	0
+artifact	0
+Mt_tRNA	0
+Mt_rRNA	0
