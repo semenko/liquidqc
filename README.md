@@ -1,6 +1,14 @@
-<h1 align="center"><img src="RustQC_logo.svg" height=100> RustQC</h1>
+<h1 align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/RustQC-logo-darkbg.svg">
+  <source media="(prefers-color-scheme: light)" srcset="img/RustQC-logo.svg">
+  <img width="500" src="img/RustQC-logo.svg" alt="RustQC">
+</picture>
+</h1>
 
-<h4 align="center">Fast quality control tools for sequencing data, written in Rust.</h4>
+<h4 align="center">Fast genomics quality control tools for sequencing data, written in Rust.</h4>
+
+---
 
 **RustQC** is a suite of fast QC tools for sequencing data. Currently it includes the `rna` subcommand — a reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
 
