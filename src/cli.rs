@@ -35,6 +35,13 @@ pub enum Commands {
     /// Produces read-level alignment statistics from a BAM/SAM/CRAM file
     /// in a single pass. Output is identical to RSeQC's bam_stat.py.
     BamStat(BamStatArgs),
+
+    /// Infer library strandedness (infer_experiment.py equivalent).
+    ///
+    /// Samples reads overlapping gene models to determine whether the
+    /// library is unstranded, forward-stranded, or reverse-stranded.
+    /// Output is identical to RSeQC's infer_experiment.py.
+    InferExperiment(InferExperimentArgs),
 }
 
 /// Arguments for the `rna` (dupRadar) subcommand.
@@ -99,6 +106,34 @@ pub struct BamStatArgs {
     /// MAPQ cutoff for unique/non-unique classification (default 30)
     #[arg(short = 'q', long = "mapq", default_value_t = 30)]
     pub mapq_cut: u8,
+
+    /// Output directory for results
+    #[arg(short, long, default_value = ".")]
+    pub outdir: String,
+
+    /// Path to reference FASTA file (required for CRAM input)
+    #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+}
+
+/// Arguments for the `infer-experiment` subcommand.
+#[derive(Parser, Debug)]
+pub struct InferExperimentArgs {
+    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
+
+    /// Path to a BED12 gene model file
+    #[arg(short, long, value_name = "BED")]
+    pub bed: String,
+
+    /// MAPQ cutoff for filtering reads (default 30)
+    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
+    pub mapq_cut: u8,
+
+    /// Maximum number of reads to sample (default 200000)
+    #[arg(short, long, default_value_t = 200000)]
+    pub sample_size: u64,
 
     /// Output directory for results
     #[arg(short, long, default_value = ".")]

@@ -14,6 +14,7 @@ mod dupmatrix;
 mod featurecounts;
 mod fitting;
 mod gtf;
+mod infer_experiment;
 mod plots;
 
 use anyhow::{ensure, Context, Result};
@@ -35,6 +36,7 @@ fn main() -> Result<()> {
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args),
         cli::Commands::BamStat(args) => run_bam_stat(args),
+        cli::Commands::InferExperiment(args) => run_infer_experiment(args),
     }
 }
 
@@ -715,6 +717,59 @@ fn run_bam_stat(args: cli::BamStatArgs) -> Result<()> {
 
         info!(
             "[{}] bam_stat completed in {:.2}s",
+            bam_stem,
+            bam_start.elapsed().as_secs_f64()
+        );
+    }
+
+    if args.input.len() > 1 {
+        info!(
+            "All BAM files processed in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+
+/// Run the infer-experiment analysis for one or more BAM files.
+fn run_infer_experiment(args: cli::InferExperimentArgs) -> Result<()> {
+    let start = Instant::now();
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+
+    info!("Loading gene model from BED file: {}", args.bed);
+    let gene_model = infer_experiment::GeneModel::from_bed(&args.bed)?;
+
+    for bam_path in &args.input {
+        let bam_start = Instant::now();
+        let bam_stem = Path::new(bam_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        info!("[{}] Running infer_experiment analysis...", bam_stem);
+
+        let result = infer_experiment::infer_experiment(
+            bam_path,
+            &gene_model,
+            args.mapq_cut,
+            args.sample_size,
+            args.reference.as_deref(),
+        )?;
+
+        let output_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
+        infer_experiment::write_infer_experiment(&result, &output_path)?;
+
+        info!(
+            "[{}] Total {} usable reads were sampled",
+            bam_stem, result.total_sampled
+        );
+        info!(
+            "[{}] infer_experiment completed in {:.2}s",
             bam_stem,
             bam_start.elapsed().as_secs_f64()
         );
