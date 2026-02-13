@@ -19,7 +19,7 @@ use std::collections::HashMap;
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Resolution scale factor for PNG output. Base dimensions (520×520) are
+/// Resolution scale factor for PNG output. Base dimensions (480×480) are
 /// multiplied by this value to produce high-resolution images.
 const SCALE: u32 = 4;
 
@@ -742,7 +742,7 @@ pub fn density_scatter_plot(
 ) -> Result<()> {
     // PNG (high-res)
     let png_path = output_path.with_extension("png");
-    let root = BitMapBackend::new(&png_path, (s(480), s(520))).into_drawing_area();
+    let root = BitMapBackend::new(&png_path, (s(480), s(480))).into_drawing_area();
     render_density_scatter(
         root,
         dm,
@@ -755,7 +755,7 @@ pub fn density_scatter_plot(
 
     // SVG
     let svg_path = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg_path, (480, 520)).into_drawing_area();
+    let root = SVGBackend::new(&svg_path, (480, 480)).into_drawing_area();
     render_density_scatter(root, dm, fit, rpkm_threshold, rpkm_value, title, 1.0)?;
 
     Ok(())
@@ -983,11 +983,11 @@ where
 /// The `title` is drawn centered at the top of the plot.
 pub fn duprate_boxplot(dm: &DupMatrix, title: &str, output_path: &std::path::Path) -> Result<()> {
     // PNG
-    let root = BitMapBackend::new(output_path, (s(480), s(560))).into_drawing_area();
+    let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
     render_boxplot(root, dm, title, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg, (480, 560)).into_drawing_area();
+    let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
     render_boxplot(root, dm, title, 1.0)?;
     Ok(())
 }
@@ -1135,11 +1135,11 @@ pub fn expression_histogram(
     output_path: &std::path::Path,
 ) -> Result<()> {
     // PNG
-    let root = BitMapBackend::new(output_path, (s(480), s(520))).into_drawing_area();
+    let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
     render_histogram(root, dm, title, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg, (480, 520)).into_drawing_area();
+    let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
     render_histogram(root, dm, title, 1.0)?;
     Ok(())
 }
