@@ -5,8 +5,8 @@ import catppuccin from "@catppuccin/starlight";
 
 // https://astro.build/config
 export default defineConfig({
-  site: "https://ewels.github.io",
-  base: "/RustQC",
+  site: process.env.SITE_URL || "https://ewels.github.io",
+  base: process.env.BASE_PATH || "/RustQC",
   integrations: [
     starlight({
       expressiveCode: {
