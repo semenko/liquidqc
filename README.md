@@ -1,4 +1,4 @@
-# ![RustQC](RustQC_logo.png)
+<h1 align="center"><img src="RustQC_logo.svg" height=100> RustQC</h1>
 
 <h4 align="center">Fast quality control tools for sequencing data, written in Rust.</h4>
 
