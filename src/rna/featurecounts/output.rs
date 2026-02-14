@@ -329,6 +329,7 @@ mod tests {
             fc_no_features: 10,
             fc_multimapping: 0,
             fc_unmapped: 0,
+            rseqc: None,
         };
 
         let biotypes = aggregate_biotype_counts(&genes, &count_result, "gene_biotype");

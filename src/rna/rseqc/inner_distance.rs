@@ -6,9 +6,8 @@
 
 use crate::gtf::Gene;
 use anyhow::{Context, Result};
+use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
-use log::info;
-use rust_htslib::bam::{self, Read as BamRead};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
 
@@ -159,12 +158,12 @@ impl ExonBitset {
     }
 
     /// Check if a chromosome exists in the bitset.
-    fn has_chrom(&self, chrom: &str) -> bool {
+    pub fn has_chrom(&self, chrom: &str) -> bool {
         self.intervals.contains_key(chrom)
     }
 
     /// Count exonic bases in the range [start, end).
-    fn count_exonic_bases(&self, chrom: &str, start: u64, end: u64) -> u64 {
+    pub fn count_exonic_bases(&self, chrom: &str, start: u64, end: u64) -> u64 {
         let intervals = match self.intervals.get(chrom) {
             Some(iv) => iv,
             None => return 0,
@@ -197,11 +196,16 @@ impl ExonBitset {
     }
 }
 
-/// Transcript interval tree: maps chromosome to sorted transcript ranges.
-#[derive(Debug, Default)]
+/// Transcript interval tree: maps chromosome to a cache-oblivious interval tree
+/// for fast overlap queries. Replaces the previous linear-scan implementation.
+#[derive(Default)]
 pub struct TranscriptTree {
-    /// Per-chromosome sorted list of (start, end, name)
-    pub transcripts: HashMap<String, Vec<(u64, u64, String)>>,
+    /// Per-chromosome COITree with transcript name index as metadata.
+    trees: HashMap<String, COITree<u32, u32>>,
+    /// All transcript names, indexed by the metadata stored in the tree.
+    names: Vec<String>,
+    /// Temporary builder: per-chromosome interval list (only used during construction).
+    pending: HashMap<String, Vec<(u64, u64, String)>>,
 }
 
 impl TranscriptTree {
@@ -227,7 +231,7 @@ impl TranscriptTree {
                 tree.add(&chrom, start, end, &name);
             }
         }
-        tree.sort();
+        tree.build();
         tree
     }
 
@@ -271,34 +275,48 @@ impl TranscriptTree {
             tree.add(&chrom, tx_start, tx_end, &tx_name);
         }
 
-        tree.sort();
+        tree.build();
         Ok(tree)
     }
 
-    /// Add a transcript range.
+    /// Add a transcript range to the pending list (must call `build()` after).
     pub fn add(&mut self, chrom: &str, start: u64, end: u64, name: &str) {
-        self.transcripts
+        self.pending
             .entry(chrom.to_string())
             .or_default()
             .push((start, end, name.to_string()));
     }
 
-    /// Sort intervals for efficient querying.
-    pub fn sort(&mut self) {
-        for transcripts in self.transcripts.values_mut() {
-            transcripts.sort_by_key(|&(s, _, _)| s);
+    /// Build the COITrees from accumulated pending intervals.
+    /// Must be called once after all `add()` calls and before any `find_overlapping()`.
+    pub fn build(&mut self) {
+        let pending = std::mem::take(&mut self.pending);
+        for (chrom, intervals) in pending {
+            let coitree_intervals: Vec<Interval<u32>> = intervals
+                .into_iter()
+                .map(|(start, end, name)| {
+                    let idx = self.names.len() as u32;
+                    self.names.push(name);
+                    // COITree uses end-inclusive i32 coordinates: [start, end-1]
+                    Interval::new(start as i32, (end.saturating_sub(1)) as i32, idx)
+                })
+                .collect();
+            self.trees.insert(chrom, COITree::new(&coitree_intervals));
         }
     }
 
-    /// Find transcript names that overlap a point.
+    /// Find transcript names that overlap a point. Uses O(log T + hits) interval
+    /// tree query instead of the previous O(T) linear scan.
     pub fn find_overlapping(&self, chrom: &str, point: u64) -> HashSet<String> {
         let mut result = HashSet::new();
-        if let Some(transcripts) = self.transcripts.get(chrom) {
-            for &(start, end, ref name) in transcripts {
-                if start <= point && point < end {
-                    result.insert(name.clone());
+        if let Some(tree) = self.trees.get(chrom) {
+            let p = point as i32;
+            tree.query(p, p, |node| {
+                let idx = *node.metadata as usize;
+                if idx < self.names.len() {
+                    result.insert(self.names[idx].clone());
                 }
-            }
+            });
         }
         result
     }
@@ -307,244 +325,11 @@ impl TranscriptTree {
 // (BED12 parsing moved to ExonBitset::from_bed and TranscriptTree::from_bed)
 
 // ============================================================================
-// CIGAR Helpers
-// ============================================================================
-
-/// Extract exon blocks from CIGAR (M operations).
-/// Matches RSeQC's `bam_cigar.fetch_exon()`: S operations DO advance position.
-fn fetch_exon_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
-    let mut exons = Vec::new();
-    let mut chrom_st = record.pos() as u64;
-
-    for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
-        match op {
-            Match(len) => {
-                let start = chrom_st;
-                chrom_st += *len as u64;
-                exons.push((start, chrom_st));
-            }
-            Ins(_) => {}
-            Del(len) => chrom_st += *len as u64,
-            RefSkip(len) => chrom_st += *len as u64,
-            SoftClip(len) => chrom_st += *len as u64, // Advances in fetch_exon (RSeQC bug)
-            _ => {}
-        }
-    }
-
-    exons
-}
-
-// ============================================================================
-// Main Analysis Function
-// ============================================================================
-
-/// Compute inner distances for paired-end reads in a BAM file.
-///
-/// # Arguments
-/// * `bam_path` - Path to the BAM file
-/// * `exon_bitset` - Pre-built exon bitset for exonic base counting
-/// * `transcript_tree` - Pre-built transcript tree for membership queries
-/// * `sample_size` - Maximum number of read pairs to process
-/// * `mapq_cut` - Minimum MAPQ threshold
-/// * `lower_bound` - Lower bound for histogram
-/// * `upper_bound` - Upper bound for histogram
-/// * `step` - Histogram bin width
-///
-/// # Returns
-/// An `InnerDistanceResult` with per-pair details and histogram data.
-#[allow(clippy::too_many_arguments)]
-pub fn inner_distance(
-    bam_path: &str,
-    exon_bitset: &ExonBitset,
-    transcript_tree: &TranscriptTree,
-    sample_size: u64,
-    mapq_cut: u8,
-    lower_bound: i64,
-    upper_bound: i64,
-    step: i64,
-    reference: Option<&str>,
-) -> Result<InnerDistanceResult> {
-    info!("Processing inner distance for: {}", bam_path);
-
-    // Open BAM/CRAM file
-    let mut bam = if let Some(ref_path) = reference {
-        let mut reader = bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
-        reader.set_reference(ref_path)?;
-        reader
-    } else {
-        bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?
-    };
-    // Build tid -> chromosome name mapping (uppercased)
-    let tid_to_chrom: HashMap<i32, String> = {
-        let header_view = bam.header();
-        let mut map = HashMap::new();
-        for (tid, name_bytes) in header_view.target_names().iter().enumerate() {
-            let name = String::from_utf8_lossy(name_bytes).to_uppercase();
-            map.insert(tid as i32, name);
-        }
-        map
-    };
-
-    let mut pairs: Vec<PairRecord> = Vec::new();
-    let mut distances: Vec<i64> = Vec::new(); // for histogram
-    let mut pair_num: u64 = 0;
-
-    for result in bam.records() {
-        let record = result.context("Failed to read BAM record")?;
-
-        // Flag filtering (matches RSeQC exactly)
-        if record.flags() & 0x200 != 0 {
-            continue; // QC fail
-        }
-        if record.flags() & 0x400 != 0 {
-            continue; // Duplicate
-        }
-        if record.flags() & 0x100 != 0 {
-            continue; // Secondary
-        }
-        if record.is_unmapped() {
-            continue;
-        }
-        if !record.is_paired() {
-            continue; // Single-end reads
-        }
-        if record.is_mate_unmapped() {
-            continue;
-        }
-        if record.mapq() < mapq_cut {
-            continue;
-        }
-
-        let read1_start = record.pos() as u64;
-        let read2_start = record.mpos() as u64;
-
-        // Skip if mate has lower position (already processed)
-        if (record.mpos() as u64) < read1_start {
-            continue;
-        }
-
-        // Skip if same position and this is read1
-        if read2_start == read1_start && record.is_first_in_template() {
-            continue;
-        }
-
-        pair_num += 1;
-        if pair_num > sample_size {
-            break;
-        }
-
-        let read_name = String::from_utf8_lossy(record.qname()).to_string();
-
-        // Check for different chromosomes
-        let read1_tid = record.tid();
-        let read2_tid = record.mtid();
-        if read1_tid != read2_tid {
-            pairs.push(PairRecord {
-                name: read_name,
-                distance: None,
-                classification: "sameChrom=No".to_string(),
-            });
-            continue;
-        }
-
-        let chrom = match tid_to_chrom.get(&read1_tid) {
-            Some(c) => c.clone(),
-            None => continue,
-        };
-
-        // Compute read1_end from CIGAR end position (accurate reference end).
-        // RSeQC uses pos + qlen + intron_size, but cigar end_pos is more accurate
-        // as it properly accounts for D/I operations.
-        let read1_end = record.cigar().end_pos() as u64;
-
-        // Step 1: Compute inner distance
-        let inner_dist: i64 = if read2_start >= read1_end {
-            // No overlap: positive or zero inner distance
-            (read2_start - read1_end) as i64
-        } else {
-            // Overlap: negative inner distance
-            // Count exonic positions of read1 in overlap region [read2_start, read1_end)
-            let exon_blocks = fetch_exon_blocks(&record);
-            let mut overlap_count: i64 = 0;
-            for (ex_start, ex_end) in &exon_blocks {
-                let ov_start = (*ex_start).max(read2_start);
-                let ov_end = (*ex_end).min(read1_end);
-                if ov_start < ov_end {
-                    overlap_count += (ov_end - ov_start) as i64;
-                }
-            }
-            -overlap_count
-        };
-
-        // Step 2: Check transcript membership (always, regardless of distance sign)
-        // RSeQC uses find(read1_end-1, read1_end) for read1 and find(read2_start, read2_start+1)
-        let read1_genes = transcript_tree.find_overlapping(&chrom, read1_end.saturating_sub(1));
-        let read2_genes = transcript_tree.find_overlapping(&chrom, read2_start);
-        let common_genes: HashSet<_> = read1_genes.intersection(&read2_genes).collect();
-
-        let classification: String;
-
-        if common_genes.is_empty() {
-            // Different transcripts — use genomic distance (even if negative)
-            classification = "sameTranscript=No,dist=genomic".to_string();
-        } else if inner_dist > 0 {
-            // Same transcript, positive distance: detailed exon analysis
-            if !exon_bitset.has_chrom(&chrom) {
-                classification = "unknownChromosome,dist=genomic".to_string();
-            } else {
-                let exonic_bases = exon_bitset.count_exonic_bases(&chrom, read1_end, read2_start);
-
-                if exonic_bases as i64 == inner_dist {
-                    classification = "sameTranscript=Yes,sameExon=Yes,dist=mRNA".to_string();
-                } else if exonic_bases > 0 {
-                    classification = "sameTranscript=Yes,sameExon=No,dist=mRNA".to_string();
-                    // Use mRNA distance instead of genomic
-                    let mrna_dist = exonic_bases as i64;
-                    pairs.push(PairRecord {
-                        name: read_name,
-                        distance: Some(mrna_dist),
-                        classification,
-                    });
-                    distances.push(mrna_dist);
-                    continue;
-                } else {
-                    classification = "sameTranscript=Yes,nonExonic=Yes,dist=genomic".to_string();
-                }
-            }
-        } else {
-            // Same transcript, inner_distance <= 0: overlap
-            classification = "readPairOverlap".to_string();
-        }
-
-        pairs.push(PairRecord {
-            name: read_name,
-            distance: Some(inner_dist),
-            classification,
-        });
-        distances.push(inner_dist);
-    }
-
-    info!("Total read pairs processed: {}", pair_num);
-
-    // Build histogram
-    let histogram = build_histogram(&distances, lower_bound, upper_bound, step);
-
-    Ok(InnerDistanceResult {
-        pairs,
-        histogram,
-        total_pairs: pair_num,
-    })
-}
-
-// ============================================================================
 // Histogram
 // ============================================================================
 
 /// Build histogram bins for inner distances.
-fn build_histogram(
+pub fn build_histogram(
     distances: &[i64],
     lower_bound: i64,
     upper_bound: i64,
@@ -764,7 +549,7 @@ mod tests {
         let mut tree = TranscriptTree::default();
         tree.add("CHR1", 100, 200, "gene1"); // First transcript per chrom
         tree.add("CHR1", 150, 300, "gene2"); // Second transcript
-        tree.sort();
+        tree.build();
 
         let genes = tree.find_overlapping("CHR1", 175);
         assert!(genes.contains("gene1")); // First gene is now included (bug fixed)

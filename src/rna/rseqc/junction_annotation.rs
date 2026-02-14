@@ -10,10 +10,6 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use log::{debug, info};
-use rust_htslib::bam::{self, Read as BamRead};
-
-use super::common::{self, ReferenceJunctions};
 
 // ===================================================================
 // Data types
@@ -111,190 +107,6 @@ impl JunctionResults {
             total: known + partial_novel + novel,
         }
     }
-}
-
-// ===================================================================
-// Junction classification
-// ===================================================================
-
-/// Classify a junction as annotated, partial novel, or complete novel.
-fn classify_junction(
-    chrom: &str,
-    intron_start: u64,
-    intron_end: u64,
-    reference: &ReferenceJunctions,
-) -> JunctionClass {
-    let start_known = reference
-        .intron_starts
-        .get(chrom)
-        .is_some_and(|s| s.contains(&intron_start));
-    let end_known = reference
-        .intron_ends
-        .get(chrom)
-        .is_some_and(|s| s.contains(&intron_end));
-
-    match (start_known, end_known) {
-        (true, true) => JunctionClass::Annotated,
-        (false, false) => JunctionClass::CompleteNovel,
-        _ => JunctionClass::PartialNovel,
-    }
-}
-
-// ===================================================================
-// Main analysis
-// ===================================================================
-
-/// Run junction annotation analysis on a BAM file.
-///
-/// # Arguments
-/// * `bam_path` - Path to input BAM file.
-/// * `ref_junctions` - Pre-built reference junction data (from BED12 or GTF).
-/// * `min_intron` - Minimum intron size to include (default 50).
-/// * `mapq_cut` - Minimum mapping quality (default 30).
-/// * `reference` - Optional path to reference FASTA (required for CRAM).
-///
-/// # Returns
-/// `JunctionResults` containing all junction classifications and summary counts.
-pub fn junction_annotation(
-    bam_path: &str,
-    ref_junctions: &ReferenceJunctions,
-    min_intron: u64,
-    mapq_cut: u8,
-    reference: Option<&str>,
-) -> Result<JunctionResults> {
-    info!("Processing BAM file: {}", bam_path);
-    let mut bam = if let Some(ref_path) = reference {
-        let mut r = bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
-        r.set_reference(ref_path)
-            .with_context(|| format!("Failed to set reference: {}", ref_path))?;
-        r
-    } else {
-        bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?
-    };
-    // Build tid -> uppercase chrom name mapping
-    let tid_to_chrom: HashMap<i32, String> = {
-        let header_view = bam.header();
-        let mut map = HashMap::new();
-        for tid in 0..header_view.target_count() {
-            if let Ok(name) = std::str::from_utf8(header_view.tid2name(tid)) {
-                map.insert(tid as i32, name.to_uppercase());
-            }
-        }
-        map
-    };
-
-    // Counters
-    let mut total_events: u64 = 0;
-    let mut known_events: u64 = 0;
-    let mut partial_novel_events: u64 = 0;
-    let mut complete_novel_events: u64 = 0;
-    let mut filtered_events: u64 = 0;
-
-    // Splicing events per unique junction
-    let mut junction_counts: HashMap<Junction, u64> = HashMap::new();
-
-    let mut total_reads: u64 = 0;
-    let mut skipped_qcfail: u64 = 0;
-    let mut skipped_dup: u64 = 0;
-    let mut skipped_secondary: u64 = 0;
-    let mut skipped_unmapped: u64 = 0;
-    let mut skipped_mapq: u64 = 0;
-
-    for result in bam.records() {
-        let record = result.context("Failed to read BAM record")?;
-        total_reads += 1;
-
-        // Flag filtering — same order as RSeQC
-        let flags = record.flags();
-        if flags & 0x200 != 0 {
-            skipped_qcfail += 1;
-            continue;
-        }
-        if flags & 0x400 != 0 {
-            skipped_dup += 1;
-            continue;
-        }
-        if flags & 0x100 != 0 {
-            skipped_secondary += 1;
-            continue;
-        }
-        if record.is_unmapped() {
-            skipped_unmapped += 1;
-            continue;
-        }
-        if record.mapq() < mapq_cut {
-            skipped_mapq += 1;
-            continue;
-        }
-
-        let tid = record.tid();
-        if tid < 0 {
-            continue;
-        }
-
-        let chrom = match tid_to_chrom.get(&tid) {
-            Some(c) => c,
-            None => continue,
-        };
-
-        let start_pos = record.pos() as u64;
-        let cigar = record.cigar();
-        let introns = common::fetch_introns(start_pos, cigar.as_ref());
-
-        for (intron_start, intron_end) in introns {
-            total_events += 1;
-
-            // Filter by minimum intron size (after counting toward total_events)
-            let intron_size = intron_end.saturating_sub(intron_start);
-            if intron_size < min_intron {
-                filtered_events += 1;
-                continue;
-            }
-
-            let class = classify_junction(chrom, intron_start, intron_end, ref_junctions);
-
-            match class {
-                JunctionClass::Annotated => known_events += 1,
-                JunctionClass::PartialNovel => partial_novel_events += 1,
-                JunctionClass::CompleteNovel => complete_novel_events += 1,
-            }
-
-            let junction = Junction {
-                chrom: chrom.clone(),
-                intron_start,
-                intron_end,
-            };
-            *junction_counts.entry(junction).or_insert(0) += 1;
-        }
-    }
-
-    debug!(
-        "Processed {} reads: {} qcfail, {} dup, {} secondary, {} unmapped, {} low mapq",
-        total_reads, skipped_qcfail, skipped_dup, skipped_secondary, skipped_unmapped, skipped_mapq
-    );
-
-    // Classify each unique junction
-    let mut junctions: HashMap<Junction, (u64, JunctionClass)> = HashMap::new();
-    for (junction, count) in &junction_counts {
-        let class = classify_junction(
-            &junction.chrom,
-            junction.intron_start,
-            junction.intron_end,
-            ref_junctions,
-        );
-        junctions.insert(junction.clone(), (*count, class));
-    }
-
-    Ok(JunctionResults {
-        junctions,
-        total_events,
-        known_events,
-        partial_novel_events,
-        complete_novel_events,
-        filtered_events,
-    })
 }
 
 // ===================================================================
@@ -530,7 +342,32 @@ pub fn print_summary(results: &JunctionResults) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rna::rseqc::common::ReferenceJunctions;
     use std::collections::HashSet;
+
+    /// Classify a junction as annotated, partial novel, or complete novel.
+    /// Kept in test module — production classification is in accumulators.rs.
+    fn classify_junction(
+        chrom: &str,
+        intron_start: u64,
+        intron_end: u64,
+        reference: &ReferenceJunctions,
+    ) -> JunctionClass {
+        let start_known = reference
+            .intron_starts
+            .get(chrom)
+            .is_some_and(|s| s.contains(&intron_start));
+        let end_known = reference
+            .intron_ends
+            .get(chrom)
+            .is_some_and(|s| s.contains(&intron_end));
+
+        match (start_known, end_known) {
+            (true, true) => JunctionClass::Annotated,
+            (false, false) => JunctionClass::CompleteNovel,
+            _ => JunctionClass::PartialNovel,
+        }
+    }
 
     #[test]
     fn test_classify_junction_annotated() {

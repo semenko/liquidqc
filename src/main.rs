@@ -21,6 +21,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
+use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
+
 fn main() -> Result<()> {
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
@@ -536,9 +538,66 @@ fn process_single_bam(
     let config = params.config;
     let outdir = params.outdir;
 
+    // === Build RSeQC config and annotations ===
+    let ref_chroms: HashSet<String> = params
+        .known_junctions
+        .map(|kj| {
+            kj.junctions
+                .iter()
+                .map(|s| s.split(':').next().unwrap_or("").to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let rseqc_config = RseqcConfig {
+        mapq_cut: params.mapq_cut,
+        infer_experiment_sample_size: params.infer_experiment_sample_size,
+        min_intron: params.min_intron,
+        junction_saturation_min_coverage: params.junction_saturation_min_coverage as u32,
+        junction_saturation_sample_start: params.junction_saturation_percentile_floor as u32,
+        junction_saturation_sample_end: params.junction_saturation_percentile_ceiling as u32,
+        junction_saturation_sample_step: params.junction_saturation_percentile_step as u32,
+        inner_distance_sample_size: params.inner_distance_sample_size,
+        inner_distance_lower_bound: params.inner_distance_lower_bound,
+        inner_distance_upper_bound: params.inner_distance_upper_bound,
+        inner_distance_step: params.inner_distance_step,
+        bam_stat_enabled: config.bam_stat.enabled,
+        infer_experiment_enabled: config.infer_experiment.enabled && params.gene_model.is_some(),
+        read_duplication_enabled: config.read_duplication.enabled,
+        read_distribution_enabled: config.read_distribution.enabled && params.rd_regions.is_some(),
+        junction_annotation_enabled: config.junction_annotation.enabled
+            && params.ref_junctions.is_some(),
+        junction_saturation_enabled: config.junction_saturation.enabled
+            && params.known_junctions.is_some(),
+        inner_distance_enabled: config.inner_distance.enabled
+            && params.exon_bitset.is_some()
+            && params.transcript_tree.is_some(),
+    };
+
+    let rseqc_annotations = RseqcAnnotations {
+        gene_model: params.gene_model,
+        ref_junctions: params.ref_junctions,
+        known_junctions: params.known_junctions,
+        rd_regions: params.rd_regions,
+        exon_bitset: params.exon_bitset,
+        transcript_tree: params.transcript_tree,
+        ref_chroms: Some(&ref_chroms),
+    };
+
+    let any_rseqc_enabled = rseqc_config.bam_stat_enabled
+        || rseqc_config.infer_experiment_enabled
+        || rseqc_config.read_duplication_enabled
+        || rseqc_config.read_distribution_enabled
+        || rseqc_config.junction_annotation_enabled
+        || rseqc_config.junction_saturation_enabled
+        || rseqc_config.inner_distance_enabled;
+
     // === dupRadar counting (requires GTF) ===
-    let count_result = if let Some(genes) = genes {
-        info!("[{}] Counting reads across 4 modes...", bam_stem);
+    let mut count_result = if let Some(genes) = genes {
+        info!(
+            "[{}] Counting reads (dupRadar + featureCounts + RSeQC)...",
+            bam_stem
+        );
         let count_start = Instant::now();
         let result = rna::dupradar::counting::count_reads(
             bam_path,
@@ -551,6 +610,16 @@ fn process_single_bam(
             params.reference,
             params.skip_dup_check,
             params.biotype_attribute,
+            if any_rseqc_enabled {
+                Some(&rseqc_config)
+            } else {
+                None
+            },
+            if any_rseqc_enabled {
+                Some(&rseqc_annotations)
+            } else {
+                None
+            },
         )?;
         info!(
             "[{}] Counting complete in {:.2}s",
@@ -561,6 +630,10 @@ fn process_single_bam(
     } else {
         None
     };
+
+    // Extract RSeQC accumulators from count_result (available in GTF mode).
+    // In BED-only mode, we'll run a separate single-pass below.
+    let rseqc_accums = count_result.as_mut().and_then(|cr| cr.rseqc.take());
 
     // === dupRadar + featureCounts outputs (GTF-only mode) ===
     // When genes are available (GTF mode), we have count_result and can produce
@@ -870,8 +943,18 @@ fn process_single_bam(
         }
     } // end if let Some(count_result) — GTF-only outputs
 
-    // === RSeQC analyses ===
-    run_rseqc_tools(bam_path, bam_stem, params)?;
+    // === RSeQC analyses (post-processing of single-pass accumulators) ===
+    let rseqc_accums = if let Some(accums) = rseqc_accums {
+        accums
+    } else if genes.is_none() {
+        // BED-only mode: run a standalone single-pass for RSeQC
+        run_rseqc_single_pass(bam_path, bam_stem, params, threads)?
+    } else {
+        // No RSeQC tools enabled — skip
+        info!("[{}] No RSeQC tools enabled, skipping", bam_stem);
+        RseqcAccumulators::empty()
+    };
+    write_rseqc_outputs(bam_path, bam_stem, params, rseqc_accums)?;
 
     info!(
         "[{}] Completed in {:.2}s",
@@ -883,228 +966,247 @@ fn process_single_bam(
 }
 
 // ============================================================================
-// RSeQC tool orchestration
+// RSeQC output writing (post-processing of single-pass accumulators)
 // ============================================================================
 
-/// Run all enabled RSeQC analyses for a single BAM file.
+/// Write all RSeQC outputs from the single-pass accumulators.
 ///
-/// Each tool is run independently and writes its own output files. Tools that
-/// require annotation data (from GTF or BED) are skipped when the relevant
-/// pre-built data structures are not available. Individual tools can be
-/// disabled via the config file.
-fn run_rseqc_tools(bam_path: &str, bam_stem: &str, params: &SharedParams) -> Result<()> {
-    let config = params.config;
+/// Converts accumulated data to tool-specific result types and writes all
+/// output files, plots, and summaries.
+fn write_rseqc_outputs(
+    _bam_path: &str,
+    bam_stem: &str,
+    params: &SharedParams,
+    accums: RseqcAccumulators,
+) -> Result<()> {
     let outdir = params.outdir;
-    let reference = params.reference;
+    let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
 
     // --- bam_stat ---
-    if config.bam_stat.enabled {
-        info!("[{}] Running bam_stat analysis...", bam_stem);
-        let tool_start = Instant::now();
-        let result = rna::rseqc::bam_stat::bam_stat(bam_path, params.mapq_cut, reference)?;
+    if let Some(accum) = accums.bam_stat {
+        info!("[{}] Writing bam_stat results...", bam_stem);
+        let result = accum.into_result();
         let output_path = outdir.join(format!("{}.bam_stat.txt", bam_stem));
         rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
-        info!(
-            "[{}] bam_stat completed in {:.2}s",
-            bam_stem,
-            tool_start.elapsed().as_secs_f64()
-        );
     }
 
     // --- read_duplication ---
-    if config.read_duplication.enabled {
-        info!("[{}] Running read_duplication analysis...", bam_stem);
-        let tool_start = Instant::now();
-        let result =
-            rna::rseqc::read_duplication::read_duplication(bam_path, params.mapq_cut, reference)?;
+    if let Some(accum) = accums.read_dup {
+        info!("[{}] Writing read_duplication results...", bam_stem);
+        let result = accum.into_result();
         rna::rseqc::read_duplication::write_read_duplication(&result, outdir, bam_stem)?;
-
         let plot_path = outdir.join(format!("{}.DupRate_plot.png", bam_stem));
         rna::rseqc::plots::read_duplication_plot(&result, &plot_path)?;
+    }
 
+    // --- infer_experiment ---
+    if let Some(accum) = accums.infer_exp {
+        info!("[{}] Writing infer_experiment results...", bam_stem);
+        let result = accum.into_result();
+        let output_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
+        rna::rseqc::infer_experiment::write_infer_experiment(&result, &output_path)?;
         info!(
-            "[{}] read_duplication completed in {:.2}s",
-            bam_stem,
-            tool_start.elapsed().as_secs_f64()
+            "[{}] Total {} usable reads were sampled",
+            bam_stem, result.total_sampled
         );
     }
 
-    // --- Annotation-requiring tools (use pre-built data from GTF or BED) ---
-
-    // --- infer_experiment ---
-    if config.infer_experiment.enabled {
-        if let Some(gene_model) = params.gene_model {
-            info!("[{}] Running infer_experiment analysis...", bam_stem);
-            let tool_start = Instant::now();
-            let result = rna::rseqc::infer_experiment::infer_experiment(
-                bam_path,
-                gene_model,
-                params.mapq_cut,
-                params.infer_experiment_sample_size,
-                reference,
-            )?;
-            let output_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
-            rna::rseqc::infer_experiment::write_infer_experiment(&result, &output_path)?;
-            info!(
-                "[{}] Total {} usable reads were sampled",
-                bam_stem, result.total_sampled
-            );
-            info!(
-                "[{}] infer_experiment completed in {:.2}s",
-                bam_stem,
-                tool_start.elapsed().as_secs_f64()
-            );
-        }
-    }
-
     // --- read_distribution ---
-    if config.read_distribution.enabled {
-        if let Some(rd_regions) = params.rd_regions {
-            info!("[{}] Running read_distribution analysis...", bam_stem);
-            let tool_start = Instant::now();
-            let result =
-                rna::rseqc::read_distribution::read_distribution(bam_path, rd_regions, reference)?;
-            let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
-            rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
-            info!(
-                "[{}] Total {} reads, {} tags ({} assigned)",
-                bam_stem,
-                result.total_reads,
-                result.total_tags,
-                result.total_tags - result.unassigned_tags
-            );
-            info!(
-                "[{}] read_distribution completed in {:.2}s",
-                bam_stem,
-                tool_start.elapsed().as_secs_f64()
-            );
-        }
+    if let Some(accum) = accums.read_dist {
+        info!("[{}] Writing read_distribution results...", bam_stem);
+        let result = accum.into_result(params.rd_regions.unwrap());
+        let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
+        rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
+        info!(
+            "[{}] Total {} reads, {} tags ({} assigned)",
+            bam_stem,
+            result.total_reads,
+            result.total_tags,
+            result.total_tags - result.unassigned_tags
+        );
     }
 
     // --- junction_annotation ---
-    if config.junction_annotation.enabled {
-        if let Some(ref_junctions) = params.ref_junctions {
-            info!("[{}] Running junction_annotation analysis...", bam_stem);
-            let tool_start = Instant::now();
-            let results = rna::rseqc::junction_annotation::junction_annotation(
-                bam_path,
-                ref_junctions,
-                params.min_intron,
-                params.mapq_cut,
-                reference,
-            )?;
+    if let Some(accum) = accums.junc_annot {
+        info!("[{}] Writing junction_annotation results...", bam_stem);
+        let results = accum.into_result();
 
-            let xls_path = outdir.join(format!("{}.junction.xls", bam_stem));
-            rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
+        let xls_path = outdir.join(format!("{}.junction.xls", bam_stem));
+        rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
 
-            let bed_out_path = outdir.join(format!("{}.junction.bed", bam_stem));
-            rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_out_path)?;
+        let bed_out_path = outdir.join(format!("{}.junction.bed", bam_stem));
+        rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_out_path)?;
 
-            let r_path = outdir.join(format!("{}.junction_plot.r", bam_stem));
-            let r_prefix = outdir.join(bam_stem).to_string_lossy().to_string();
-            rna::rseqc::junction_annotation::write_junction_plot_r(&results, &r_prefix, &r_path)?;
+        let r_path = outdir.join(format!("{}.junction_plot.r", bam_stem));
+        rna::rseqc::junction_annotation::write_junction_plot_r(&results, &prefix, &r_path)?;
 
-            rna::rseqc::plots::junction_annotation_plot(&results, &r_prefix)?;
+        rna::rseqc::plots::junction_annotation_plot(&results, &prefix)?;
 
-            let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
-            rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
+        let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
+        rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
 
-            rna::rseqc::junction_annotation::print_summary(&results);
-
-            info!(
-                "[{}] junction_annotation completed in {:.2}s",
-                bam_stem,
-                tool_start.elapsed().as_secs_f64()
-            );
-        }
+        rna::rseqc::junction_annotation::print_summary(&results);
     }
 
     // --- junction_saturation ---
-    if config.junction_saturation.enabled {
-        if let Some(known_junctions) = params.known_junctions {
-            info!("[{}] Running junction_saturation analysis...", bam_stem);
-            let tool_start = Instant::now();
-            let results = rna::rseqc::junction_saturation::junction_saturation(
-                bam_path,
-                known_junctions,
-                params.min_intron,
-                params.mapq_cut,
-                params.junction_saturation_min_coverage as u32,
-                params.junction_saturation_percentile_floor as u32,
-                params.junction_saturation_percentile_ceiling as u32,
-                params.junction_saturation_percentile_step as u32,
-                reference,
-            )?;
+    if let Some(accum) = accums.junc_sat {
+        info!("[{}] Writing junction_saturation results...", bam_stem);
+        let results = accum.into_result(
+            params.known_junctions.unwrap(),
+            params.junction_saturation_percentile_floor as u32,
+            params.junction_saturation_percentile_ceiling as u32,
+            params.junction_saturation_percentile_step as u32,
+            params.junction_saturation_min_coverage as u32,
+        );
 
-            let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
-            rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
+        rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
 
-            let plot_path = outdir.join(format!("{}.junctionSaturation_plot.png", bam_stem));
-            rna::rseqc::plots::junction_saturation_plot(&results, &plot_path)?;
+        let plot_path = outdir.join(format!("{}.junctionSaturation_plot.png", bam_stem));
+        rna::rseqc::plots::junction_saturation_plot(&results, &plot_path)?;
 
-            let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
-            rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;
-
-            info!(
-                "[{}] junction_saturation completed in {:.2}s",
-                bam_stem,
-                tool_start.elapsed().as_secs_f64()
-            );
-        }
+        let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
+        rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;
     }
 
     // --- inner_distance ---
-    if config.inner_distance.enabled {
-        if let (Some(exon_bitset), Some(transcript_tree)) =
-            (params.exon_bitset, params.transcript_tree)
-        {
-            info!("[{}] Running inner_distance analysis...", bam_stem);
-            let tool_start = Instant::now();
-            let results = rna::rseqc::inner_distance::inner_distance(
-                bam_path,
-                exon_bitset,
-                transcript_tree,
-                params.inner_distance_sample_size,
-                params.mapq_cut,
-                params.inner_distance_lower_bound,
-                params.inner_distance_upper_bound,
-                params.inner_distance_step,
-                reference,
-            )?;
+    if let Some(accum) = accums.inner_dist {
+        info!("[{}] Writing inner_distance results...", bam_stem);
+        let results = accum.into_result(
+            params.inner_distance_lower_bound,
+            params.inner_distance_upper_bound,
+            params.inner_distance_step,
+        );
 
-            let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
-            let detail_path = format!("{prefix}.inner_distance.txt");
-            rna::rseqc::inner_distance::write_detail_file(&results, &detail_path)?;
+        let detail_path = format!("{prefix}.inner_distance.txt");
+        rna::rseqc::inner_distance::write_detail_file(&results, &detail_path)?;
 
-            let freq_path = format!("{prefix}.inner_distance_freq.txt");
-            rna::rseqc::inner_distance::write_freq_file(&results, &freq_path)?;
+        let freq_path = format!("{prefix}.inner_distance_freq.txt");
+        rna::rseqc::inner_distance::write_freq_file(&results, &freq_path)?;
 
-            let r_path = format!("{prefix}.inner_distance_plot.r");
-            rna::rseqc::inner_distance::write_r_script(
-                &results,
-                &prefix,
-                &r_path,
-                params.inner_distance_step,
-            )?;
+        let r_path = format!("{prefix}.inner_distance_plot.r");
+        rna::rseqc::inner_distance::write_r_script(
+            &results,
+            &prefix,
+            &r_path,
+            params.inner_distance_step,
+        )?;
 
-            let plot_path = outdir.join(format!("{}.inner_distance_plot.png", bam_stem));
-            rna::rseqc::plots::inner_distance_plot(
-                &results,
-                params.inner_distance_step,
-                &plot_path,
-            )?;
+        let plot_path = outdir.join(format!("{}.inner_distance_plot.png", bam_stem));
+        rna::rseqc::plots::inner_distance_plot(&results, params.inner_distance_step, &plot_path)?;
 
-            let summary_path = format!("{prefix}.inner_distance_summary.txt");
-            rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
+        let summary_path = format!("{prefix}.inner_distance_summary.txt");
+        rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
 
-            info!(
-                "[{}] inner_distance completed in {:.2}s — {} read pairs processed",
-                bam_stem,
-                tool_start.elapsed().as_secs_f64(),
-                results.total_pairs
-            );
-        }
+        info!(
+            "[{}] inner_distance: {} read pairs processed",
+            bam_stem, results.total_pairs
+        );
     }
 
     Ok(())
+}
+
+// ============================================================================
+// BED-only mode: standalone single-pass for RSeQC
+// ============================================================================
+
+/// Run RSeQC analyses via a standalone single-pass BAM read (BED-only mode).
+///
+/// When no GTF is provided, dupRadar/featureCounts are skipped but RSeQC tools
+/// still need to run. This function does a single sequential BAM pass using the
+/// accumulator infrastructure, then returns the results for output writing.
+fn run_rseqc_single_pass(
+    bam_path: &str,
+    bam_stem: &str,
+    params: &SharedParams,
+    threads: usize,
+) -> Result<RseqcAccumulators> {
+    use rust_htslib::bam::{self, Read as BamRead};
+
+    info!("[{}] Running RSeQC single-pass (BED mode)...", bam_stem);
+    let pass_start = Instant::now();
+
+    // Build config and annotations
+    let ref_chroms: Option<std::collections::HashSet<String>> = params.known_junctions.map(|kj| {
+        kj.junctions
+            .iter()
+            .map(|j| j.split(':').next().unwrap_or("").to_string())
+            .collect()
+    });
+
+    let rseqc_config = RseqcConfig {
+        mapq_cut: params.mapq_cut,
+        min_intron: params.min_intron,
+        infer_experiment_sample_size: params.infer_experiment_sample_size,
+        junction_saturation_min_coverage: params.junction_saturation_min_coverage as u32,
+        junction_saturation_sample_start: params.junction_saturation_percentile_floor as u32,
+        junction_saturation_sample_end: params.junction_saturation_percentile_ceiling as u32,
+        junction_saturation_sample_step: params.junction_saturation_percentile_step as u32,
+        inner_distance_sample_size: params.inner_distance_sample_size,
+        inner_distance_lower_bound: params.inner_distance_lower_bound,
+        inner_distance_upper_bound: params.inner_distance_upper_bound,
+        inner_distance_step: params.inner_distance_step,
+        bam_stat_enabled: params.config.bam_stat.enabled,
+        infer_experiment_enabled: params.config.infer_experiment.enabled
+            && params.gene_model.is_some(),
+        read_duplication_enabled: params.config.read_duplication.enabled,
+        read_distribution_enabled: params.config.read_distribution.enabled
+            && params.rd_regions.is_some(),
+        junction_annotation_enabled: params.config.junction_annotation.enabled
+            && params.ref_junctions.is_some(),
+        junction_saturation_enabled: params.config.junction_saturation.enabled
+            && params.known_junctions.is_some(),
+        inner_distance_enabled: params.config.inner_distance.enabled
+            && params.exon_bitset.is_some()
+            && params.transcript_tree.is_some(),
+    };
+
+    let annotations = RseqcAnnotations {
+        gene_model: params.gene_model,
+        ref_junctions: params.ref_junctions,
+        known_junctions: params.known_junctions,
+        rd_regions: params.rd_regions,
+        exon_bitset: params.exon_bitset,
+        transcript_tree: params.transcript_tree,
+        ref_chroms: ref_chroms.as_ref(),
+    };
+
+    let mut accums = RseqcAccumulators::new(&rseqc_config);
+
+    // Open BAM reader
+    let mut bam = bam::Reader::from_path(bam_path)
+        .with_context(|| format!("Failed to open BAM file: {bam_path}"))?;
+    if let Some(ref_path) = params.reference {
+        bam.set_reference(ref_path)
+            .with_context(|| format!("Failed to set reference: {ref_path}"))?;
+    }
+    // Use all available threads for decompression in single-pass mode
+    let _ = bam.set_threads(threads);
+
+    let header = bam.header().clone();
+    let tid_to_name: Vec<String> = (0..header.target_count())
+        .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
+        .collect();
+
+    let mut record = bam::Record::new();
+    while let Some(read_result) = bam.read(&mut record) {
+        read_result.context("Error reading BAM record")?;
+        let tid = record.tid();
+        if tid < 0 {
+            // Process unmapped reads through accumulators (bam_stat wants them)
+            accums.process_read(&record, "", "", &annotations, &rseqc_config);
+            continue;
+        }
+        let chrom = &tid_to_name[tid as usize];
+        let chrom_upper = chrom.to_uppercase();
+        accums.process_read(&record, chrom, &chrom_upper, &annotations, &rseqc_config);
+    }
+
+    info!(
+        "[{}] RSeQC single-pass completed in {:.2}s",
+        bam_stem,
+        pass_start.elapsed().as_secs_f64()
+    );
+
+    Ok(accums)
 }

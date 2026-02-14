@@ -3,6 +3,7 @@
 //! Standalone reimplementations of selected RSeQC Python quality control scripts
 //! for RNA-Seq data analysis.
 
+pub mod accumulators;
 pub mod common;
 pub mod plots;
 

@@ -10,6 +10,7 @@
 //! This implements a simplified featureCounts-compatible counting strategy.
 
 use crate::gtf::Gene;
+use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
@@ -246,7 +247,8 @@ fn assign_fragment_to_gene(
 /// Result of the counting step, including per-gene counts and assignment statistics.
 ///
 /// Contains everything needed to produce both dupRadar outputs and
-/// featureCounts-compatible output files.
+/// featureCounts-compatible output files, plus optional RSeQC accumulator results
+/// collected during the same BAM pass.
 #[derive(Debug)]
 pub struct CountResult {
     /// Per-gene counts indexed by gene_id
@@ -281,6 +283,10 @@ pub struct CountResult {
     pub fc_multimapping: u64,
     /// Per-read: unmapped reads
     pub fc_unmapped: u64,
+
+    // --- RSeQC results (collected during the same BAM pass) ---
+    /// Accumulated RSeQC tool results, if RSeQC tools were enabled
+    pub rseqc: Option<RseqcAccumulators>,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -594,7 +600,8 @@ fn classify_read_fc(
 /// Process a batch of chromosomes from an alignment file, counting reads against gene annotations.
 ///
 /// Opens its own indexed reader and seeks to each chromosome in the batch.
-/// Returns accumulated results for all chromosomes in the batch.
+/// Returns accumulated results for all chromosomes in the batch, plus optional
+/// RSeQC accumulator results collected during the same pass.
 #[allow(clippy::too_many_arguments)]
 fn process_chromosome_batch(
     bam_path: &str,
@@ -609,8 +616,12 @@ fn process_chromosome_batch(
     global_read_counter: &AtomicU64,
     reference: Option<&str>,
     gene_biotype_ids: &[u16],
-) -> Result<ChromResult> {
+    rseqc_config: Option<&RseqcConfig>,
+    rseqc_annotations: Option<&RseqcAnnotations>,
+    htslib_threads: usize,
+) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes);
+    let mut rseqc_accums = rseqc_config.map(RseqcAccumulators::new);
 
     // Open an indexed reader for this thread (supports BAM with .bai/.csi and CRAM with .crai)
     let mut bam = bam::IndexedReader::from_path(bam_path)
@@ -618,6 +629,10 @@ fn process_chromosome_batch(
     if let Some(ref_path) = reference {
         bam.set_reference(ref_path)
             .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+    }
+    if htslib_threads > 0 {
+        bam.set_threads(htslib_threads)
+            .context("Failed to set htslib decompression threads")?;
     }
 
     // Reusable buffers
@@ -639,6 +654,23 @@ fn process_chromosome_batch(
             let prev = global_read_counter.fetch_add(1, Ordering::Relaxed);
             if (prev + 1).is_multiple_of(5_000_000) {
                 debug!("Processed ~{} reads...", prev + 1);
+            }
+
+            // --- RSeQC per-read dispatch (before counting filters) ---
+            // RSeQC tools apply their own filter logic internally.
+            // bam_stat and read_duplication need to see records that
+            // counting.rs filters out (QC-fail, secondary, etc.).
+            if let (Some(ref mut accums), Some(annots), Some(cfg)) =
+                (&mut rseqc_accums, rseqc_annotations, rseqc_config)
+            {
+                let rec_tid = record.tid();
+                let chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_name.len() {
+                    tid_to_name[rec_tid as usize].as_str()
+                } else {
+                    ""
+                };
+                let chrom_upper = chrom.to_uppercase();
+                accums.process_read(&record, chrom, &chrom_upper, annots, cfg);
             }
 
             let flags = record.flags();
@@ -857,7 +889,7 @@ fn process_chromosome_batch(
 
     // Move unmatched mates into the result for cross-chromosome reconciliation
     result.unmatched_mates = mate_buffer;
-    Ok(result)
+    Ok((result, rseqc_accums))
 }
 
 /// Count reads from an alignment file (SAM/BAM/CRAM) and assign them to genes.
@@ -898,6 +930,8 @@ pub fn count_reads(
     reference: Option<&str>,
     skip_dup_check: bool,
     biotype_attribute: &str,
+    rseqc_config: Option<&RseqcConfig>,
+    rseqc_annotations: Option<&RseqcAnnotations>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
     let interner = GeneIdInterner::from_genes(genes);
@@ -972,7 +1006,7 @@ pub fn count_reads(
         ids
     };
 
-    let mut merged = if use_parallel {
+    let (mut merged, merged_rseqc) = if use_parallel {
         // --- Parallel chromosome processing ---
         //
         // Divide chromosomes into batches (one per thread) and process each
@@ -1002,8 +1036,15 @@ pub fn count_reads(
             num_chroms, num_workers
         );
 
+        // Calculate htslib decompression threads per worker
+        let htslib_threads = if num_workers > 0 {
+            (threads.saturating_sub(num_workers)) / num_workers
+        } else {
+            0
+        };
+
         // Process chromosome batches in parallel
-        let results: Vec<Result<ChromResult>> = pool.install(|| {
+        let results: Vec<Result<(ChromResult, Option<RseqcAccumulators>)>> = pool.install(|| {
             batches
                 .par_iter()
                 .map(|batch| {
@@ -1020,17 +1061,26 @@ pub fn count_reads(
                         &global_read_counter,
                         reference,
                         &gene_biotype_ids,
+                        rseqc_config,
+                        rseqc_annotations,
+                        htslib_threads,
                     )
                 })
                 .collect()
         });
 
-        // Merge all chromosome results
+        // Merge all chromosome results (both dupRadar and RSeQC)
         let mut merged = ChromResult::new(interner.len());
+        let mut merged_rseqc: Option<RseqcAccumulators> = rseqc_config.map(RseqcAccumulators::new);
         for result in results {
-            merged.merge(result?);
+            let (chrom_result, rseqc_result) = result?;
+            merged.merge(chrom_result);
+            if let (Some(ref mut merged_acc), Some(worker_acc)) = (&mut merged_rseqc, rseqc_result)
+            {
+                merged_acc.merge(worker_acc);
+            }
         }
-        merged
+        (merged, merged_rseqc)
     } else {
         // --- Single-threaded fallback (no index or threads=1) ---
         //
@@ -1038,12 +1088,18 @@ pub fn count_reads(
         // This avoids the need for an index file.
         let global_read_counter = AtomicU64::new(0);
         let mut result = ChromResult::new(interner.len());
+        let mut rseqc_accums: Option<RseqcAccumulators> = rseqc_config.map(RseqcAccumulators::new);
 
         let mut bam = bam::Reader::from_path(bam_path)
             .with_context(|| format!("Failed to open alignment file: {}", bam_path))?;
         if let Some(ref_path) = reference {
             bam.set_reference(ref_path)
                 .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+        }
+        // Enable htslib multi-threaded decompression for the single-threaded path
+        if threads > 1 {
+            bam.set_threads(threads.saturating_sub(1))
+                .context("Failed to set htslib decompression threads")?;
         }
 
         // Reusable buffers
@@ -1062,6 +1118,27 @@ pub fn count_reads(
             }
 
             let flags = record.flags();
+
+            // --- RSeQC per-read dispatch (before counting filters) ---
+            // bam_stat needs to see ALL records including QC-fail/dup/secondary
+            if let (Some(ref mut accums), Some(annotations)) =
+                (&mut rseqc_accums, rseqc_annotations)
+            {
+                let tid = record.tid();
+                let chrom = if tid >= 0 && (tid as usize) < tid_to_name.len() {
+                    &tid_to_name[tid as usize]
+                } else {
+                    ""
+                };
+                let chrom_upper = chrom.to_uppercase();
+                accums.process_read(
+                    &record,
+                    chrom,
+                    &chrom_upper,
+                    annotations,
+                    rseqc_config.unwrap(),
+                );
+            }
 
             if flags & BAM_FUNMAP != 0 {
                 result.fc_unmapped += 1;
@@ -1260,7 +1337,7 @@ pub fn count_reads(
         }
 
         result.unmatched_mates = mate_buffer;
-        result
+        (result, rseqc_accums)
     };
 
     // --- Cross-chromosome mate reconciliation ---
@@ -1451,6 +1528,7 @@ pub fn count_reads(
         fc_no_features: merged.fc_no_features,
         fc_multimapping: merged.fc_multimapping,
         fc_unmapped: merged.fc_unmapped,
+        rseqc: merged_rseqc,
     })
 }
 

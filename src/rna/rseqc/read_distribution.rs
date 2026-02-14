@@ -5,14 +5,12 @@
 //! gene model. Tags (CIGAR M-blocks) are classified by midpoint with priority
 //! CDS > UTR > Intron > Intergenic.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use log::debug;
-use rust_htslib::bam::{self, Read as BamRead};
 
 use crate::gtf::Gene;
 
@@ -29,7 +27,7 @@ struct Interval {
 
 /// Merged intervals for a single chromosome, sorted and non-overlapping.
 #[derive(Debug, Clone, Default)]
-struct ChromIntervals {
+pub struct ChromIntervals {
     intervals: Vec<Interval>,
 }
 
@@ -95,7 +93,7 @@ impl ChromIntervals {
     }
 
     /// Total bases covered by these intervals.
-    fn total_bases(&self) -> u64 {
+    pub fn total_bases(&self) -> u64 {
         self.intervals.iter().map(|i| i.end - i.start).sum()
     }
 
@@ -104,7 +102,7 @@ impl ChromIntervals {
     /// bx-python `Intersecter.find(mid, mid)` which checks
     /// `(self.start < end) and (self.end > start)` with start==end==mid,
     /// i.e. `self.start < mid and self.end > mid`.
-    fn contains(&self, point: u64) -> bool {
+    pub fn contains(&self, point: u64) -> bool {
         self.intervals
             .binary_search_by(|iv| {
                 if point <= iv.start {
@@ -125,16 +123,16 @@ impl ChromIntervals {
 /// built from either a BED12 file or from GTF gene annotations.
 #[derive(Debug, Default)]
 pub struct RegionSets {
-    cds_exon: HashMap<String, ChromIntervals>,
-    utr_5: HashMap<String, ChromIntervals>,
-    utr_3: HashMap<String, ChromIntervals>,
-    intron: HashMap<String, ChromIntervals>,
-    tss_up_1kb: HashMap<String, ChromIntervals>,
-    tss_up_5kb: HashMap<String, ChromIntervals>,
-    tss_up_10kb: HashMap<String, ChromIntervals>,
-    tes_down_1kb: HashMap<String, ChromIntervals>,
-    tes_down_5kb: HashMap<String, ChromIntervals>,
-    tes_down_10kb: HashMap<String, ChromIntervals>,
+    pub cds_exon: HashMap<String, ChromIntervals>,
+    pub utr_5: HashMap<String, ChromIntervals>,
+    pub utr_3: HashMap<String, ChromIntervals>,
+    pub intron: HashMap<String, ChromIntervals>,
+    pub tss_up_1kb: HashMap<String, ChromIntervals>,
+    pub tss_up_5kb: HashMap<String, ChromIntervals>,
+    pub tss_up_10kb: HashMap<String, ChromIntervals>,
+    pub tes_down_1kb: HashMap<String, ChromIntervals>,
+    pub tes_down_5kb: HashMap<String, ChromIntervals>,
+    pub tes_down_10kb: HashMap<String, ChromIntervals>,
 }
 
 // ===================================================================
@@ -600,55 +598,6 @@ fn subtract_regions(
     }
 }
 
-/// Sum total bases across all chromosomes for a region set.
-fn sum_bases(map: &HashMap<String, ChromIntervals>) -> u64 {
-    map.values().map(|ci| ci.total_bases()).sum()
-}
-
-/// Check if a point on a chromosome falls within a region set.
-fn point_in_region(map: &HashMap<String, ChromIntervals>, chrom: &str, point: u64) -> bool {
-    map.get(chrom).map(|ci| ci.contains(point)).unwrap_or(false)
-}
-
-// ===================================================================
-// BAM processing
-// ===================================================================
-
-/// Extract aligned blocks (M-operations) from CIGAR, returning (start, end) pairs.
-/// Matches RSeQC's `fetch_exon()` behavior exactly:
-/// - Only M (op 0) creates exon blocks
-/// - D (op 2) and N (op 3) advance position without creating blocks
-/// - S (op 4) advances position (bug in RSeQC, but replicated for compatibility)
-/// - I (op 1), H (op 5), P (op 6) don't advance position
-/// - = (op 7) and X (op 8) fall through to else branch in RSeQC's Python code,
-///   which means they neither create blocks nor advance position (a known bug)
-fn fetch_exon_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
-    let mut blocks = Vec::new();
-    let mut pos = record.pos() as u64;
-    for op in record.cigar().iter() {
-        match op {
-            rust_htslib::bam::record::Cigar::Match(len) => {
-                let len = *len as u64;
-                blocks.push((pos, pos + len));
-                pos += len;
-            }
-            rust_htslib::bam::record::Cigar::Del(len)
-            | rust_htslib::bam::record::Cigar::RefSkip(len) => {
-                pos += *len as u64;
-            }
-            rust_htslib::bam::record::Cigar::SoftClip(len) => {
-                // RSeQC's fetch_exon() advances position for soft clips.
-                // This is arguably a bug, but we replicate the behavior.
-                pos += *len as u64;
-            }
-            // RSeQC's fetch_exon() ignores = (SeqMatch), X (Diff), I (Ins),
-            // H (HardClip), P (Pad) — none advance position or create blocks.
-            _ => {}
-        }
-    }
-    blocks
-}
-
 /// Result of read distribution analysis.
 #[derive(Debug)]
 pub struct ReadDistributionResult {
@@ -660,175 +609,6 @@ pub struct ReadDistributionResult {
     pub regions: Vec<(String, u64, u64)>,
     /// Number of tags not assigned to any region.
     pub unassigned_tags: u64,
-}
-
-/// Run read distribution analysis on a BAM file.
-///
-/// # Arguments
-/// * `bam_path` - Path to the BAM/CRAM file
-/// * `regions` - Pre-built region sets (from BED or GTF)
-/// * `reference` - Optional path to reference FASTA (required for CRAM)
-pub fn read_distribution(
-    bam_path: &str,
-    regions: &RegionSets,
-    reference: Option<&str>,
-) -> Result<ReadDistributionResult> {
-    // Compute total bases for each region
-    let cds_bases = sum_bases(&regions.cds_exon);
-    let utr5_bases = sum_bases(&regions.utr_5);
-    let utr3_bases = sum_bases(&regions.utr_3);
-    let intron_bases = sum_bases(&regions.intron);
-    let tss_1k_bases = sum_bases(&regions.tss_up_1kb);
-    let tss_5k_bases = sum_bases(&regions.tss_up_5kb);
-    let tss_10k_bases = sum_bases(&regions.tss_up_10kb);
-    let tes_1k_bases = sum_bases(&regions.tes_down_1kb);
-    let tes_5k_bases = sum_bases(&regions.tes_down_5kb);
-    let tes_10k_bases = sum_bases(&regions.tes_down_10kb);
-
-    debug!(
-        "Region bases — CDS: {}, 5'UTR: {}, 3'UTR: {}, Intron: {}",
-        cds_bases, utr5_bases, utr3_bases, intron_bases
-    );
-
-    // Iterate BAM and classify tags
-    let mut bam = if let Some(ref_path) = reference {
-        let mut r = bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
-        r.set_reference(ref_path)
-            .with_context(|| format!("Failed to set reference: {}", ref_path))?;
-        r
-    } else {
-        bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?
-    };
-
-    // Build tid -> uppercase chrom name mapping
-    let header = bam.header().clone();
-    let tid_to_chrom: BTreeMap<u32, String> = (0..header.target_count())
-        .filter_map(|tid| {
-            let name = std::str::from_utf8(header.tid2name(tid)).ok()?;
-            Some((tid, name.to_uppercase()))
-        })
-        .collect();
-
-    let mut total_reads: u64 = 0;
-    let mut total_tags: u64 = 0;
-    let mut cds_tags: u64 = 0;
-    let mut utr5_tags: u64 = 0;
-    let mut utr3_tags: u64 = 0;
-    let mut intron_tags: u64 = 0;
-    let mut tss_1k_tags: u64 = 0;
-    let mut tss_5k_tags: u64 = 0;
-    let mut tss_10k_tags: u64 = 0;
-    let mut tes_1k_tags: u64 = 0;
-    let mut tes_5k_tags: u64 = 0;
-    let mut tes_10k_tags: u64 = 0;
-    let mut unassigned: u64 = 0;
-
-    let mut record = bam::Record::new();
-    while let Some(result) = bam.read(&mut record) {
-        result.with_context(|| "Error reading BAM record")?;
-
-        let flags = record.flags();
-        // Skip: qc_fail, duplicate, secondary, unmapped
-        if flags & 0x200 != 0 {
-            continue;
-        }
-        if flags & 0x400 != 0 {
-            continue;
-        }
-        if flags & 0x100 != 0 {
-            continue;
-        }
-        if record.is_unmapped() {
-            continue;
-        }
-
-        let tid = record.tid();
-        if tid < 0 {
-            continue;
-        }
-        let chrom = match tid_to_chrom.get(&(tid as u32)) {
-            Some(c) => c.as_str(),
-            None => continue,
-        };
-
-        let blocks = fetch_exon_blocks(&record);
-        total_reads += 1;
-        total_tags += blocks.len() as u64;
-
-        for (block_start, block_end) in &blocks {
-            let mid = block_start + (block_end - block_start) / 2;
-
-            // Priority classification cascade
-            if point_in_region(&regions.cds_exon, chrom, mid) {
-                cds_tags += 1;
-            } else {
-                let in_utr5 = point_in_region(&regions.utr_5, chrom, mid);
-                let in_utr3 = point_in_region(&regions.utr_3, chrom, mid);
-
-                if in_utr5 && !in_utr3 {
-                    utr5_tags += 1;
-                } else if in_utr3 && !in_utr5 {
-                    utr3_tags += 1;
-                } else if in_utr5 && in_utr3 {
-                    // Both UTRs — unassigned
-                    unassigned += 1;
-                } else if point_in_region(&regions.intron, chrom, mid) {
-                    intron_tags += 1;
-                } else {
-                    // Intergenic classification
-                    let in_tss_10k = point_in_region(&regions.tss_up_10kb, chrom, mid);
-                    let in_tes_10k = point_in_region(&regions.tes_down_10kb, chrom, mid);
-
-                    if in_tss_10k && in_tes_10k {
-                        // Ambiguous intergenic — unassigned
-                        unassigned += 1;
-                    } else if in_tss_10k {
-                        // Cumulative TSS counting
-                        tss_10k_tags += 1;
-                        if point_in_region(&regions.tss_up_5kb, chrom, mid) {
-                            tss_5k_tags += 1;
-                            if point_in_region(&regions.tss_up_1kb, chrom, mid) {
-                                tss_1k_tags += 1;
-                            }
-                        }
-                    } else if in_tes_10k {
-                        // Cumulative TES counting
-                        tes_10k_tags += 1;
-                        if point_in_region(&regions.tes_down_5kb, chrom, mid) {
-                            tes_5k_tags += 1;
-                            if point_in_region(&regions.tes_down_1kb, chrom, mid) {
-                                tes_1k_tags += 1;
-                            }
-                        }
-                    } else {
-                        unassigned += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    let result_regions = vec![
-        ("CDS_Exons".to_string(), cds_bases, cds_tags),
-        ("5'UTR_Exons".to_string(), utr5_bases, utr5_tags),
-        ("3'UTR_Exons".to_string(), utr3_bases, utr3_tags),
-        ("Introns".to_string(), intron_bases, intron_tags),
-        ("TSS_up_1kb".to_string(), tss_1k_bases, tss_1k_tags),
-        ("TSS_up_5kb".to_string(), tss_5k_bases, tss_5k_tags),
-        ("TSS_up_10kb".to_string(), tss_10k_bases, tss_10k_tags),
-        ("TES_down_1kb".to_string(), tes_1k_bases, tes_1k_tags),
-        ("TES_down_5kb".to_string(), tes_5k_bases, tes_5k_tags),
-        ("TES_down_10kb".to_string(), tes_10k_bases, tes_10k_tags),
-    ];
-
-    Ok(ReadDistributionResult {
-        total_reads,
-        total_tags,
-        regions: result_regions,
-        unassigned_tags: unassigned,
-    })
 }
 
 /// Write read distribution results to a file in RSeQC-compatible format.
