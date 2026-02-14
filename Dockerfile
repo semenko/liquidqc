@@ -29,4 +29,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /build/target/release/rustqc /usr/local/bin/rustqc
 
-ENTRYPOINT ["rustqc"]
+CMD ["rustqc"]
