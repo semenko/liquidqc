@@ -3,6 +3,8 @@ title: dupRadar Benchmark
 description: Performance comparison between RustQC and R dupRadar, with zero output mismatches across all values.
 ---
 
+export const base = import.meta.env.BASE_URL;
+
 RustQC produces output **identical** to the R dupRadar package. Every value in the duplication matrix, every count, and the fitted model parameters match exactly. The benchmarks below quantify the performance difference on real RNA-seq data.
 
 ## Small benchmark
@@ -69,39 +71,39 @@ The plots below compare the R dupRadar output (left) with RustQC output (right) 
 
 #### Density scatter plot
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <figure style="margin: 0; text-align: center;">
-    <img src="/benchmarks/large/dupRadar/duprateExpDens.png" alt="dupRadar (R) density scatter plot" style="width: 100%;" />
+<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "1rem 0"}}>
+  <figure style={{margin: 0, textAlign: "center"}}>
+    <img src={`${base}benchmarks/large/dupRadar/duprateExpDens.png`} alt="dupRadar (R) density scatter plot" style={{width: "100%"}} />
     <figcaption>dupRadar (R)</figcaption>
   </figure>
-  <figure style="margin: 0; text-align: center;">
-    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png" alt="RustQC density scatter plot" style="width: 100%;" />
+  <figure style={{margin: 0, textAlign: "center"}}>
+    <img src={`${base}benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png`} alt="RustQC density scatter plot" style={{width: "100%"}} />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
 
 #### Duplication rate boxplot
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <figure style="margin: 0; text-align: center;">
-    <img src="/benchmarks/large/dupRadar/duprateExpBoxplot.png" alt="dupRadar (R) duplication rate boxplot" style="width: 100%;" />
+<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "1rem 0"}}>
+  <figure style={{margin: 0, textAlign: "center"}}>
+    <img src={`${base}benchmarks/large/dupRadar/duprateExpBoxplot.png`} alt="dupRadar (R) duplication rate boxplot" style={{width: "100%"}} />
     <figcaption>dupRadar (R)</figcaption>
   </figure>
-  <figure style="margin: 0; text-align: center;">
-    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" alt="RustQC duplication rate boxplot" style="width: 100%;" />
+  <figure style={{margin: 0, textAlign: "center"}}>
+    <img src={`${base}benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png`} alt="RustQC duplication rate boxplot" style={{width: "100%"}} />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
 
 #### Expression histogram
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <figure style="margin: 0; text-align: center;">
-    <img src="/benchmarks/large/dupRadar/expressionHist.png" alt="dupRadar (R) expression histogram" style="width: 100%;" />
+<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "1rem 0"}}>
+  <figure style={{margin: 0, textAlign: "center"}}>
+    <img src={`${base}benchmarks/large/dupRadar/expressionHist.png`} alt="dupRadar (R) expression histogram" style={{width: "100%"}} />
     <figcaption>dupRadar (R)</figcaption>
   </figure>
-  <figure style="margin: 0; text-align: center;">
-    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png" alt="RustQC expression histogram" style="width: 100%;" />
+  <figure style={{margin: 0, textAlign: "center"}}>
+    <img src={`${base}benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png`} alt="RustQC expression histogram" style={{width: "100%"}} />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
