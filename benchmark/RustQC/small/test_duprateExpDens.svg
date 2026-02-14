@@ -346,8 +346,8 @@ expression (reads/kbp)
 <circle cx="138" cy="429" r="1" opacity="1" fill="#0081FF" stroke="none" stroke-width="1"/>
 <circle cx="302" cy="429" r="1" opacity="1" fill="#0080FF" stroke="none" stroke-width="1"/>
 <circle cx="301" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
-<circle cx="139" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
 <circle cx="140" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
+<circle cx="139" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
 <circle cx="300" cy="429" r="1" opacity="1" fill="#0071FF" stroke="none" stroke-width="1"/>
 <circle cx="142" cy="429" r="1" opacity="1" fill="#006BFF" stroke="none" stroke-width="1"/>
 <circle cx="287" cy="429" r="1" opacity="1" fill="#006AFF" stroke="none" stroke-width="1"/>
@@ -455,8 +455,8 @@ expression (reads/kbp)
 <circle cx="224" cy="429" r="1" opacity="1" fill="#FFA700" stroke="none" stroke-width="1"/>
 <circle cx="210" cy="429" r="1" opacity="1" fill="#FFA700" stroke="none" stroke-width="1"/>
 <circle cx="211" cy="429" r="1" opacity="1" fill="#FFA400" stroke="none" stroke-width="1"/>
-<circle cx="216" cy="429" r="1" opacity="1" fill="#FFA300" stroke="none" stroke-width="1"/>
 <circle cx="215" cy="429" r="1" opacity="1" fill="#FFA300" stroke="none" stroke-width="1"/>
+<circle cx="216" cy="429" r="1" opacity="1" fill="#FFA300" stroke="none" stroke-width="1"/>
 <circle cx="212" cy="429" r="1" opacity="1" fill="#FFA000" stroke="none" stroke-width="1"/>
 <circle cx="214" cy="429" r="1" opacity="1" fill="#FF9F00" stroke="none" stroke-width="1"/>
 <circle cx="213" cy="429" r="1" opacity="1" fill="#FF9F00" stroke="none" stroke-width="1"/>

@@ -28,8 +28,8 @@ to GRCh38 (63,086 genes).
 | junction_saturation (RSeQC) | 6m 32s | -- |
 | inner_distance (RSeQC) | 1m 09s | -- |
 | Biotype summaries | Additional scripting | -- |
-| **All outputs, single pass** | -- | **16m 11s** |
-| **Total** | **~1h 25m** | **16m 11s** |
+| **All outputs, single pass** | -- | **3m 56s** |
+| **Total** | **~1h 25m** | **3m 56s** |
 
 RustQC produces all outputs -- dupRadar duplication matrix, model fit, plots,
 featureCounts-compatible counts, assignment summary, biotype counts, RSeQC-equivalent

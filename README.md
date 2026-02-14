@@ -19,7 +19,7 @@ All tools accept SAM/BAM/CRAM input and support processing multiple files in a s
 <p align="center">
 <picture>
    <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.svg">
-   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 16m 11s vs traditional tools ~1h 25m (dupRadar + featureCounts + 7 RSeQC tools)" width="600">
+   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m (dupRadar + featureCounts + 7 RSeQC tools)" width="600">
 </picture>
 </p>
 
@@ -36,7 +36,7 @@ Performs dupRadar-equivalent duplicate rate analysis, featureCounts-compatible r
 | Language | R | Rust |
 | Dependencies | R, Bioconductor, Rsubread | None (static binary) |
 | Read counting | 4 separate featureCounts calls | Single-pass alignment reading |
-| Speed | ~30 min for 10 GB BAM | ~16 min for 10 GB BAM (all tools) |
+| Speed | ~30 min for 10 GB BAM | ~4 min for 10 GB BAM (all tools) |
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
 
