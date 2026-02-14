@@ -21,7 +21,7 @@ clap = { version = "4", features = ["derive"] }
 rust-htslib = { version = "0.47", features = ["static"] }
 
 # Plotting
-plotters = "0.3"
+plotters = { version = "0.3", features = ["fontconfig-dlopen"] }
 plotters-backend = "0.3"
 plotters-svg = "0.3"
 
