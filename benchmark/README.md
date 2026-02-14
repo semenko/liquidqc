@@ -29,7 +29,7 @@ Mac. Upstream tools run via Docker with x86 emulation; RustQC runs natively.
 | junction_saturation (RSeQC) | 6m 32s |
 | inner_distance (RSeQC) | 1m 09s |
 | **Traditional total** | **1h 25m** |
-| **RustQC (10 threads)** | **16m 11s** |
+| **RustQC (10 threads)** | **3m 56s** |
 
 > **Note:** Docker x86 emulation on ARM inflates the upstream tool timings.
 > The key takeaway is that RustQC replaces 9 separate tool invocations

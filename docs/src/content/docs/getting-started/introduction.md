@@ -14,14 +14,14 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 RNA-seq quality control typically involves running multiple tools written in R and Python, each with their own dependencies, interpreters, and runtime overhead. RustQC consolidates these into a single fast binary.
 
 <div class="benchmark-chart">
-  <img class="only-dark" src="/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
-  <img class="only-light" src="/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
-  <p align="center"><em>Run time for dupRadar + featureCounts analysis on a 10 GB paired-end BAM</em></p>
+  <img class="only-dark" src="/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m" />
+  <img class="only-light" src="/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m" />
+  <p align="center"><em>Run time for a 10 GB paired-end BAM (dupRadar + featureCounts + RSeQC)</em></p>
 </div>
 
 Key advantages:
 
-- **Speed**: Up to 33x faster than the R/Python implementations
+- **Speed**: Up to 21x faster than the traditional R/Python workflow
 - **Single binary**: No runtime dependencies -- no R, Python, or Bioconductor installation required
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
 - **Identical output**: Produces bit-for-bit identical results to the original tools (verified across 820,000+ values with zero mismatches for dupRadar)

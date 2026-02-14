@@ -25,12 +25,12 @@ export const base = import.meta.env.BASE_URL;
         <a href="https://bioconductor.org/packages/dupRadar/">dupRadar</a>,{' '}
         <a href="https://subread.sourceforge.net/">featureCounts</a>, and{' '}
         <a href="https://rseqc.sourceforge.net/">RSeQC</a> in Rust,
-        delivering identical results up to 33x faster.
+        delivering identical results up to 21x faster.
       </div>
     </div>
     <div class="benchmark-chart">
-      <img class="only-dark" src={`${base}benchmarks/benchmark_dark.svg`} alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
-      <img class="only-light" src={`${base}benchmarks/benchmark_light.svg`} alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+      <img class="only-dark" src={`${base}benchmarks/benchmark_dark.svg`} alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m" />
+      <img class="only-light" src={`${base}benchmarks/benchmark_light.svg`} alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m" />
       <p><em>Run time for a 10 GB paired-end BAM</em></p>
     </div>
     <div class="sl-flex actions not-content">
@@ -144,9 +144,9 @@ export const base = import.meta.env.BASE_URL;
     plus faithful reimplementations of 7 RSeQC tools.
     Over 800,000 values compared with zero mismatches.
   </Card>
-  <Card title="Up to 33x Faster" icon="rocket">
-    Processes a 10 GB BAM file in under 1 minute vs ~30 minutes for the R
-    equivalent.
+  <Card title="Up to 21x Faster" icon="rocket">
+    Processes a 10 GB BAM file in under 4 minutes vs ~1h 25m for the
+    equivalent tools — saving over 80 minutes per sample for the same results.
   </Card>
   <Card title="All-in-One" icon="puzzle">
     Combines dupRadar analysis, featureCounts-compatible output, biotype
