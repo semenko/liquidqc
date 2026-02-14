@@ -623,6 +623,9 @@ fn process_chromosome_batch(
     let mut result = ChromResult::new(num_genes);
     let mut rseqc_accums = rseqc_config.map(RseqcAccumulators::new);
 
+    // Pre-compute uppercased chromosome names to avoid per-read allocation
+    let tid_to_name_upper: Vec<String> = tid_to_name.iter().map(|s| s.to_uppercase()).collect();
+
     // Open an indexed reader for this thread (supports BAM with .bai/.csi and CRAM with .crai)
     let mut bam = bam::IndexedReader::from_path(bam_path)
         .with_context(|| format!("Failed to open indexed alignment file: {}", bam_path))?;
@@ -664,13 +667,16 @@ fn process_chromosome_batch(
                 (&mut rseqc_accums, rseqc_annotations, rseqc_config)
             {
                 let rec_tid = record.tid();
-                let chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_name.len() {
-                    tid_to_name[rec_tid as usize].as_str()
+                let (chrom, chrom_upper) = if rec_tid >= 0 && (rec_tid as usize) < tid_to_name.len()
+                {
+                    (
+                        tid_to_name[rec_tid as usize].as_str(),
+                        tid_to_name_upper[rec_tid as usize].as_str(),
+                    )
                 } else {
-                    ""
+                    ("", "")
                 };
-                let chrom_upper = chrom.to_uppercase();
-                accums.process_read(&record, chrom, &chrom_upper, annots, cfg);
+                accums.process_read(&record, chrom, chrom_upper, annots, cfg);
             }
 
             let flags = record.flags();
@@ -1090,6 +1096,9 @@ pub fn count_reads(
         let mut result = ChromResult::new(interner.len());
         let mut rseqc_accums: Option<RseqcAccumulators> = rseqc_config.map(RseqcAccumulators::new);
 
+        // Pre-compute uppercased chromosome names to avoid per-read allocation
+        let tid_to_name_upper: Vec<String> = tid_to_name.iter().map(|s| s.to_uppercase()).collect();
+
         let mut bam = bam::Reader::from_path(bam_path)
             .with_context(|| format!("Failed to open alignment file: {}", bam_path))?;
         if let Some(ref_path) = reference {
@@ -1121,23 +1130,19 @@ pub fn count_reads(
 
             // --- RSeQC per-read dispatch (before counting filters) ---
             // bam_stat needs to see ALL records including QC-fail/dup/secondary
-            if let (Some(ref mut accums), Some(annotations)) =
-                (&mut rseqc_accums, rseqc_annotations)
+            if let (Some(ref mut accums), Some(annots), Some(cfg)) =
+                (&mut rseqc_accums, rseqc_annotations, rseqc_config)
             {
                 let tid = record.tid();
-                let chrom = if tid >= 0 && (tid as usize) < tid_to_name.len() {
-                    &tid_to_name[tid as usize]
+                let (chrom, chrom_upper) = if tid >= 0 && (tid as usize) < tid_to_name.len() {
+                    (
+                        tid_to_name[tid as usize].as_str(),
+                        tid_to_name_upper[tid as usize].as_str(),
+                    )
                 } else {
-                    ""
+                    ("", "")
                 };
-                let chrom_upper = chrom.to_uppercase();
-                accums.process_read(
-                    &record,
-                    chrom,
-                    &chrom_upper,
-                    annotations,
-                    rseqc_config.unwrap(),
-                );
+                accums.process_read(&record, chrom, chrom_upper, annots, cfg);
             }
 
             if flags & BAM_FUNMAP != 0 {

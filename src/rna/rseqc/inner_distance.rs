@@ -298,6 +298,10 @@ impl TranscriptTree {
                     let idx = self.names.len() as u32;
                     self.names.push(name);
                     // COITree uses end-inclusive i32 coordinates: [start, end-1]
+                    debug_assert!(
+                        start <= i32::MAX as u64 && end <= i32::MAX as u64,
+                        "Coordinate overflow: TranscriptTree requires coordinates < 2^31"
+                    );
                     Interval::new(start as i32, (end.saturating_sub(1)) as i32, idx)
                 })
                 .collect();

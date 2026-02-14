@@ -472,29 +472,50 @@ impl ReadDistAccum {
             self.total_tags += 1;
             let midpoint = block_start + (block_end - block_start) / 2;
 
-            // Priority cascade: CDS > UTR > Intron > TSS/TES > unassigned
+            // Priority cascade matching RSeQC read_distribution.py:
+            // CDS > UTR (5'/3', ambiguous if both) > Intron > Intergenic (TSS/TES cumulative)
             if point_in(&regions.cds_exon, chrom_upper, midpoint) {
                 self.cds_tags += 1;
-            } else if point_in(&regions.utr_5, chrom_upper, midpoint) {
-                self.utr5_tags += 1;
-            } else if point_in(&regions.utr_3, chrom_upper, midpoint) {
-                self.utr3_tags += 1;
-            } else if point_in(&regions.intron, chrom_upper, midpoint) {
-                self.intron_tags += 1;
-            } else if point_in(&regions.tss_up_1kb, chrom_upper, midpoint) {
-                self.tss_1k_tags += 1;
-            } else if point_in(&regions.tes_down_1kb, chrom_upper, midpoint) {
-                self.tes_1k_tags += 1;
-            } else if point_in(&regions.tss_up_5kb, chrom_upper, midpoint) {
-                self.tss_5k_tags += 1;
-            } else if point_in(&regions.tes_down_5kb, chrom_upper, midpoint) {
-                self.tes_5k_tags += 1;
-            } else if point_in(&regions.tss_up_10kb, chrom_upper, midpoint) {
-                self.tss_10k_tags += 1;
-            } else if point_in(&regions.tes_down_10kb, chrom_upper, midpoint) {
-                self.tes_10k_tags += 1;
             } else {
-                self.unassigned += 1;
+                let in_utr5 = point_in(&regions.utr_5, chrom_upper, midpoint);
+                let in_utr3 = point_in(&regions.utr_3, chrom_upper, midpoint);
+                if in_utr5 && in_utr3 {
+                    // Ambiguous UTR — RSeQC counts as unassigned
+                    self.unassigned += 1;
+                } else if in_utr5 {
+                    self.utr5_tags += 1;
+                } else if in_utr3 {
+                    self.utr3_tags += 1;
+                } else if point_in(&regions.intron, chrom_upper, midpoint) {
+                    self.intron_tags += 1;
+                } else {
+                    // Intergenic — TSS/TES with cumulative counting
+                    let in_tss_10k = point_in(&regions.tss_up_10kb, chrom_upper, midpoint);
+                    let in_tes_10k = point_in(&regions.tes_down_10kb, chrom_upper, midpoint);
+                    if in_tss_10k && in_tes_10k {
+                        // Ambiguous intergenic — RSeQC counts as unassigned
+                        self.unassigned += 1;
+                    } else if in_tss_10k {
+                        // Cumulative: 1kb ⊂ 5kb ⊂ 10kb
+                        self.tss_10k_tags += 1;
+                        if point_in(&regions.tss_up_5kb, chrom_upper, midpoint) {
+                            self.tss_5k_tags += 1;
+                            if point_in(&regions.tss_up_1kb, chrom_upper, midpoint) {
+                                self.tss_1k_tags += 1;
+                            }
+                        }
+                    } else if in_tes_10k {
+                        self.tes_10k_tags += 1;
+                        if point_in(&regions.tes_down_5kb, chrom_upper, midpoint) {
+                            self.tes_5k_tags += 1;
+                            if point_in(&regions.tes_down_1kb, chrom_upper, midpoint) {
+                                self.tes_1k_tags += 1;
+                            }
+                        }
+                    } else {
+                        self.unassigned += 1;
+                    }
+                }
             }
         }
     }
@@ -1142,25 +1163,34 @@ impl InferExpAccum {
         // PE keys for spec2: "1+-", "1-+", "2++", "2--"
         // SE keys for spec1: "++", "--"
         // SE keys for spec2: "+-", "-+"
+        // Sum individual strand-specific keys to get protocol fractions.
+        // PE spec1: 1++,1--,2+-,2-+  (fr-secondstrand / stranded)
+        // PE spec2: 1+-,1-+,2++,2--  (fr-firststrand / reversely stranded)
+        // SE spec1: ++,--            (sense)
+        // SE spec2: +-,-+            (antisense)
+        let pe_spec1 = *self.p_strandness.get("1++").unwrap_or(&0)
+            + *self.p_strandness.get("1--").unwrap_or(&0)
+            + *self.p_strandness.get("2+-").unwrap_or(&0)
+            + *self.p_strandness.get("2-+").unwrap_or(&0);
+        let pe_spec2 = *self.p_strandness.get("1+-").unwrap_or(&0)
+            + *self.p_strandness.get("1-+").unwrap_or(&0)
+            + *self.p_strandness.get("2++").unwrap_or(&0)
+            + *self.p_strandness.get("2--").unwrap_or(&0);
+        let se_spec1 =
+            *self.s_strandness.get("++").unwrap_or(&0) + *self.s_strandness.get("--").unwrap_or(&0);
+        let se_spec2 =
+            *self.s_strandness.get("+-").unwrap_or(&0) + *self.s_strandness.get("-+").unwrap_or(&0);
+
         let (library_type, spec1, spec2) = if p_total > 0 && s_total > 0 {
-            // Mixed PE and SE
-            let pe_spec1 = *self.p_strandness.get("1++,1--,2+-,2-+").unwrap_or(&0);
-            let pe_spec2 = *self.p_strandness.get("1+-,1-+,2++,2--").unwrap_or(&0);
-            let se_spec1 = *self.s_strandness.get("++,--").unwrap_or(&0);
-            let se_spec2 = *self.s_strandness.get("+-,-+").unwrap_or(&0);
             (
                 "Mixture".to_string(),
                 pe_spec1 + se_spec1,
                 pe_spec2 + se_spec2,
             )
         } else if p_total > 0 {
-            let spec1 = *self.p_strandness.get("1++,1--,2+-,2-+").unwrap_or(&0);
-            let spec2 = *self.p_strandness.get("1+-,1-+,2++,2--").unwrap_or(&0);
-            ("PairEnd".to_string(), spec1, spec2)
+            ("PairEnd".to_string(), pe_spec1, pe_spec2)
         } else {
-            let spec1 = *self.s_strandness.get("++,--").unwrap_or(&0);
-            let spec2 = *self.s_strandness.get("+-,-+").unwrap_or(&0);
-            ("SingleEnd".to_string(), spec1, spec2)
+            ("SingleEnd".to_string(), se_spec1, se_spec2)
         };
 
         let determined = spec1 + spec2;

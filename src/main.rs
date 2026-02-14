@@ -544,7 +544,7 @@ fn process_single_bam(
         .map(|kj| {
             kj.junctions
                 .iter()
-                .map(|s| s.split(':').next().unwrap_or("").to_string())
+                .map(|s| s.split(':').next().unwrap_or("").to_uppercase())
                 .collect()
         })
         .unwrap_or_default();
@@ -1014,6 +1014,8 @@ fn write_rseqc_outputs(
     // --- read_distribution ---
     if let Some(accum) = accums.read_dist {
         info!("[{}] Writing read_distribution results...", bam_stem);
+        // Safety: rd_regions is Some when read_distribution_enabled is true,
+        // which is required for this accumulator to exist.
         let result = accum.into_result(params.rd_regions.unwrap());
         let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
         rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
@@ -1051,6 +1053,8 @@ fn write_rseqc_outputs(
     // --- junction_saturation ---
     if let Some(accum) = accums.junc_sat {
         info!("[{}] Writing junction_saturation results...", bam_stem);
+        // Safety: known_junctions is Some when junction_saturation_enabled is true,
+        // which is required for this accumulator to exist.
         let results = accum.into_result(
             params.known_junctions.unwrap(),
             params.junction_saturation_percentile_floor as u32,
@@ -1130,7 +1134,7 @@ fn run_rseqc_single_pass(
     let ref_chroms: Option<std::collections::HashSet<String>> = params.known_junctions.map(|kj| {
         kj.junctions
             .iter()
-            .map(|j| j.split(':').next().unwrap_or("").to_string())
+            .map(|j| j.split(':').next().unwrap_or("").to_uppercase())
             .collect()
     });
 
