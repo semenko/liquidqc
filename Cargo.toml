@@ -18,7 +18,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 
 # BAM file reading
-rust-htslib = { version = "0.47", features = ["static"] }
+rust-htslib = { version = "1", features = ["static"] }
 
 # Plotting
 plotters = { version = "0.3", features = ["fontconfig-dlopen"] }
@@ -33,11 +33,11 @@ serde_yml = "0.0.12"
 coitrees = "0.4"
 
 # Parallelism
-rayon = "1.10"
+rayon = "1.11"
 
 # Random number generation
-rand = "0.8"
-rand_chacha = "0.3"
+rand = "0.10"
+rand_chacha = "0.10"
 
 # Gzip decompression for .gz annotation files
 flate2 = "1"

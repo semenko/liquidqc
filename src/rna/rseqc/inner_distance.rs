@@ -316,7 +316,10 @@ impl TranscriptTree {
         if let Some(tree) = self.trees.get(chrom) {
             let p = point as i32;
             tree.query(p, p, |node| {
-                let idx = *node.metadata as usize;
+                fn as_usize(v: impl std::borrow::Borrow<u32>) -> usize {
+                    *v.borrow() as usize
+                }
+                let idx = as_usize(node.metadata);
                 if idx < self.names.len() {
                     result.insert(self.names[idx].clone());
                 }
