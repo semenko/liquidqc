@@ -635,12 +635,26 @@ fn classify_junction(
 
 /// junction_saturation accumulator — collects all junction observations.
 ///
-/// Uses packed `(chrom_upper, start, end)` tuples instead of heap-allocated
-/// Strings. The shuffle + subsampling phase runs after all workers merge.
+/// Uses hashed `u64` keys instead of heap-allocated Strings to reduce memory
+/// from ~25 bytes/observation to 8 bytes/observation. The hash function is
+/// the same `SipHash` used for read_duplication sequence dedup.
 #[derive(Debug, Default)]
 pub struct JuncSatAccum {
-    /// All junction observation keys: `"CHROM:start-end"`.
-    pub observations: Vec<String>,
+    /// All junction observation keys (hashed `"CHROM:start-end"`).
+    pub observations: Vec<u64>,
+    /// String keys corresponding to each hash, for the known_junctions lookup
+    /// during into_result(). Stored as `(hash, string)` only for unique junctions.
+    unique_keys: HashMap<u64, String>,
+}
+
+/// Hash a junction key string into a u64 for compact storage.
+fn hash_junction_key(chrom: &str, start: u64, end: u64) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    chrom.hash(&mut hasher);
+    start.hash(&mut hasher);
+    end.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl JuncSatAccum {
@@ -680,14 +694,22 @@ impl JuncSatAccum {
             if iend - istart < min_intron {
                 continue;
             }
-            let key = format!("{}:{}-{}", chrom_upper, istart, iend);
-            self.observations.push(key);
+            let h = hash_junction_key(chrom_upper, istart, iend);
+            self.observations.push(h);
+            // Track the string key only for the first occurrence of each hash
+            self.unique_keys
+                .entry(h)
+                .or_insert_with(|| format!("{}:{}-{}", chrom_upper, istart, iend));
         }
     }
 
     /// Merge another accumulator into this one.
     pub fn merge(&mut self, other: JuncSatAccum) {
         self.observations.extend(other.observations);
+        // Merge unique key maps (first writer wins — all map to the same string)
+        for (h, key) in other.unique_keys {
+            self.unique_keys.entry(h).or_insert(key);
+        }
     }
 }
 
@@ -1277,6 +1299,11 @@ impl JuncSatAccum {
     ///
     /// Performs the shuffle (Phase 2) and incremental subsampling (Phase 3)
     /// that were previously done in the standalone `junction_saturation()` function.
+    ///
+    /// Uses incremental known/novel counting: instead of iterating all unique
+    /// junctions at each percentage step (O(U*P)), maintains running counters
+    /// updated only when new unique junctions first appear or cross the
+    /// min_coverage threshold.
     pub fn into_result(
         mut self,
         known_junctions: &KnownJunctionSet,
@@ -1288,6 +1315,14 @@ impl JuncSatAccum {
         use rand::seq::SliceRandom;
         use rand::SeedableRng;
         use rand_chacha::ChaCha8Rng;
+
+        // Pre-build a HashSet<u64> from known_junctions for O(1) hash-based lookup
+        let known_hashes: HashSet<u64> = self
+            .unique_keys
+            .iter()
+            .filter(|(_, key)| known_junctions.junctions.contains(*key))
+            .map(|(&h, _)| h)
+            .collect();
 
         // Phase 2: deterministic shuffle
         let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -1301,35 +1336,45 @@ impl JuncSatAccum {
             percentages.push(100);
         }
 
-        // Phase 3: incremental sampling
+        // Phase 3: incremental sampling with running counters
         let total = self.observations.len();
-        let mut unique_junctions: HashMap<String, u32> = HashMap::new();
+        let mut junction_counts: HashMap<u64, u32> = HashMap::new();
         let mut prev_end = 0;
         let mut known_counts = Vec::with_capacity(percentages.len());
         let mut novel_counts = Vec::with_capacity(percentages.len());
         let mut all_counts = Vec::with_capacity(percentages.len());
 
+        // Running counters — updated incrementally as new observations arrive
+        let mut running_known: usize = 0;
+        let mut running_novel: usize = 0;
+
         for &pct in &percentages {
             let index_end = total * pct as usize / 100;
-            for obs in &self.observations[prev_end..index_end] {
-                *unique_junctions.entry(obs.clone()).or_insert(0) += 1;
+            for &obs_hash in &self.observations[prev_end..index_end] {
+                let count = junction_counts.entry(obs_hash).or_insert(0);
+                *count += 1;
+
+                let is_known = known_hashes.contains(&obs_hash);
+                if *count == 1 {
+                    // First time seeing this junction
+                    if is_known {
+                        if min_coverage <= 1 {
+                            running_known += 1;
+                        }
+                        // else: known but below threshold, don't count yet
+                    } else {
+                        running_novel += 1;
+                    }
+                } else if is_known && *count == min_coverage && min_coverage > 1 {
+                    // Junction just crossed the min_coverage threshold
+                    running_known += 1;
+                }
             }
             prev_end = index_end;
 
-            let mut known = 0usize;
-            let mut novel = 0usize;
-            for (key, &count) in &unique_junctions {
-                if known_junctions.junctions.contains(key) {
-                    if count >= min_coverage {
-                        known += 1;
-                    }
-                } else {
-                    novel += 1;
-                }
-            }
-            known_counts.push(known);
-            novel_counts.push(novel);
-            all_counts.push(unique_junctions.len());
+            known_counts.push(running_known);
+            novel_counts.push(running_novel);
+            all_counts.push(junction_counts.len());
         }
 
         SaturationResult {
