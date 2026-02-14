@@ -47,18 +47,24 @@ Exactly one of `--gtf` or `--bed` must be provided. They are **mutually exclusiv
 
 #### `--gtf <GTF>` / `-g <GTF>`
 
-Path to a GTF gene annotation file. The GTF must contain `exon` features with a
-`gene_id` attribute. When a GTF is provided, **all analyses run**: dupRadar,
-featureCounts, and all 7 RSeQC tools. Transcript-level structure (exon blocks,
-CDS features) is extracted automatically and used by the RSeQC tools that
-previously required a separate BED file.
+Path to a GTF gene annotation file (plain or gzip-compressed). The GTF must
+contain `exon` features with a `gene_id` attribute. When a GTF is provided,
+**all analyses run**: dupRadar, featureCounts, and all 7 RSeQC tools.
+Transcript-level structure (exon blocks, CDS features) is extracted automatically
+and used by the RSeQC tools that previously required a separate BED file.
+
+Gzip compression is detected automatically by inspecting the file header (magic
+bytes), so the `.gz` extension is not required.
 
 #### `-b, --bed <BED>`
 
-Path to a BED12-format gene model file. When a BED file is provided **without**
-a GTF, only the 7 RSeQC tools run (plus bam_stat and read_duplication). dupRadar
-and featureCounts are skipped because BED files lack gene-level grouping and
-biotype information.
+Path to a BED12-format gene model file (plain or gzip-compressed). When a BED
+file is provided **without** a GTF, only the 7 RSeQC tools run (plus bam_stat
+and read_duplication). dupRadar and featureCounts are skipped because BED files
+lack gene-level grouping and biotype information.
+
+Gzip compression is detected automatically by inspecting the file header (magic
+bytes), so the `.gz` extension is not required.
 
 Individual tools can be disabled via the [configuration file](/usage/configuration/).
 
@@ -203,6 +209,10 @@ rustqc rna sample.bam --gtf genes.gtf -p \
 
 # Multiple BAM files with parallel processing
 rustqc rna *.bam --gtf genes.gtf -p -t 8 -o results/
+
+# Gzip-compressed annotation files (auto-detected)
+rustqc rna sample.bam --gtf genes.gtf.gz -p -o results/
+rustqc rna sample.bam --bed genes.bed.gz -p -o results/
 ```
 
 ---

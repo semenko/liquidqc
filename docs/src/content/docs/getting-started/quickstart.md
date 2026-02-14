@@ -10,7 +10,7 @@ This guide walks you through a basic RustQC analysis from start to finish.
 The `rustqc rna` command runs all analyses in a single pass. It requires:
 
 - A **duplicate-marked** alignment file (BAM, SAM, or CRAM). Duplicates must be flagged with SAM flag 0x400 by a tool like [Picard MarkDuplicates](https://broadinstitute.github.io/picard/), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba](https://github.com/biod/sambamba).
-- Either a **GTF annotation** file (`--gtf`) or a **BED12 gene model** file (`--bed`). With a GTF, all analyses run (dupRadar, featureCounts, and all 7 RSeQC tools). With a BED file, only the 7 RSeQC tools run. The two flags are mutually exclusive.
+- Either a **GTF annotation** file (`--gtf`) or a **BED12 gene model** file (`--bed`). Both can be plain or gzip-compressed (`.gz`) — compression is detected automatically. With a GTF, all analyses run (dupRadar, featureCounts, and all 7 RSeQC tools). With a BED file, only the 7 RSeQC tools run. The two flags are mutually exclusive.
 
 ## RNA-seq duplicate analysis
 
@@ -99,6 +99,10 @@ rustqc rna sample.bam --gtf genes.gtf -p -t 8
 
 # CRAM input with reference
 rustqc rna sample.cram --gtf genes.gtf -p --reference genome.fa
+
+# Gzip-compressed annotation files (auto-detected)
+rustqc rna sample.bam --gtf genes.gtf.gz -p -o results/
+rustqc rna sample.bam --bed genes.bed.gz -p -o results/
 
 # Skip duplicate-marking validation
 rustqc rna sample.bam --gtf genes.gtf -p --skip-dup-check

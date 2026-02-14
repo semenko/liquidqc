@@ -10,6 +10,7 @@
 mod cli;
 mod config;
 mod gtf;
+mod io;
 mod rna;
 
 use anyhow::{ensure, Context, Result};

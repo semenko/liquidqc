@@ -11,7 +11,7 @@ use log::{debug, info, warn};
 use rust_htslib::bam::{self, Read as BamRead};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 use std::path::Path;
 
 // ============================================================================
@@ -79,11 +79,9 @@ impl GeneModel {
     /// Load a BED12 (or BED6+) file into the gene model.
     ///
     /// Extracts columns: chrom (0), start (1), end (2), strand (5).
-    pub fn from_bed<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
-        let file = fs::File::open(path)
-            .with_context(|| format!("Failed to open BED file: {}", path.display()))?;
-        let reader = BufReader::new(file);
+    pub fn from_bed(path: &str) -> Result<Self> {
+        let reader = crate::io::open_reader(path)
+            .with_context(|| format!("Failed to open BED file: {}", path))?;
 
         let mut model = GeneModel::default();
         let mut count: u64 = 0;

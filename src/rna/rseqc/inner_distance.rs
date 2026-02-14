@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use log::info;
 use rust_htslib::bam::{self, Read as BamRead};
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 
 // ============================================================================
 // Data Structures
@@ -77,9 +77,8 @@ impl ExonBitset {
     /// Parses the BED12 file and extracts exon blocks from multi-exon
     /// transcripts. Single-exon transcripts are skipped (matches RSeQC).
     pub fn from_bed(bed_path: &str) -> Result<Self> {
-        let file = std::fs::File::open(bed_path)
+        let reader = crate::io::open_reader(bed_path)
             .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
-        let reader = BufReader::new(file);
 
         let mut bitset = ExonBitset::default();
 
@@ -237,9 +236,8 @@ impl TranscriptTree {
     /// Parses the BED12 file and extracts transcript spans from multi-exon
     /// transcripts. Single-exon transcripts are skipped (matches RSeQC).
     pub fn from_bed(bed_path: &str) -> Result<Self> {
-        let file = std::fs::File::open(bed_path)
+        let reader = crate::io::open_reader(bed_path)
             .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
-        let reader = BufReader::new(file);
 
         let mut tree = TranscriptTree::default();
 

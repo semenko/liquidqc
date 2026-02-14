@@ -300,7 +300,7 @@ impl Bed12Record {
 
 /// Build all region sets from a BED12 gene model file.
 pub fn build_regions_from_bed(bed_path: &str) -> Result<RegionSets> {
-    let content = std::fs::read_to_string(bed_path)
+    let content = crate::io::read_to_string(bed_path)
         .with_context(|| format!("Failed to read BED file: {}", bed_path))?;
 
     let mut regions = RegionSets::default();

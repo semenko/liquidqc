@@ -63,6 +63,7 @@ RustQC is built with the following open-source Rust libraries:
 | [rayon](https://github.com/rayon-rs/rayon) | Data parallelism |
 | [coitrees](https://github.com/dcjones/coitrees) | Cache-oblivious interval trees |
 | [rand](https://github.com/rust-random/rand) / [rand_chacha](https://github.com/rust-random/rand) | Reproducible random number generation |
+| [flate2](https://github.com/rust-lang/flate2-rs) | Gzip decompression for annotation files |
 | [serde](https://github.com/serde-rs/serde) | YAML configuration deserialization |
 | [indexmap](https://github.com/indexmap-rs/indexmap) | Insertion-order-preserving maps |
 | [env_logger](https://github.com/rust-cli/env_logger) | Logging output |

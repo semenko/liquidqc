@@ -50,6 +50,7 @@ src/
   main.rs           — Entry point, dispatches subcommands
   cli.rs            — CLI argument parsing (clap derive, subcommand structure)
   config.rs         — YAML configuration loading (serde), nested tool configs
+  io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
   rna/
     mod.rs          — Re-exports dupradar, featurecounts, rseqc sub-modules
@@ -79,7 +80,7 @@ tests/
   create_test_data.R   — R script to regenerate test data + references
 ```
 
-Nested module structure — top-level modules (`cli`, `config`, `gtf`, `rna`) declared
+Nested module structure — top-level modules (`cli`, `config`, `io`, `gtf`, `rna`) declared
 in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool group.
 Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
 
@@ -210,6 +211,7 @@ All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cac
 | `coitrees`     | Cache-oblivious interval trees   |
 | `rayon`        | Data parallelism                 |
 | `rand` / `rand_chacha` | Reproducible random sampling |
+| `flate2`       | Gzip decompression (annotation files) |
 
 ## Duplicate Marking Validation
 
@@ -253,3 +255,7 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   in the YAML config.
 - GENCODE GTFs use `gene_type` while Ensembl GTFs use `gene_biotype`. The tool
   auto-detects which is present and falls back gracefully with a warning if neither is found.
+- Both GTF and BED annotation files can be provided plain or gzip-compressed (`.gz`).
+  Detection is based on file magic bytes, not the file extension. The shared `io` module
+  (`src/io.rs`) provides `open_reader()` and `read_to_string()` helpers that transparently
+  handle both formats. All annotation file readers use these helpers.

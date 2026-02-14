@@ -56,11 +56,12 @@ pub struct RnaArgs {
     #[arg(value_name = "INPUT", num_args = 1.., required = true)]
     pub input: Vec<String>,
 
-    /// Path to a GTF gene annotation file.
+    /// Path to a GTF gene annotation file (plain or gzip-compressed).
     ///
     /// When provided, all analyses are run: dupRadar, featureCounts, and all
     /// RSeQC tools. The GTF must contain exon features with gene_id attributes.
     /// CDS features are used for read_distribution UTR/CDS classification.
+    /// Gzip-compressed files (.gtf.gz) are detected and decompressed automatically.
     /// Mutually exclusive with --bed.
     #[arg(
         short,
@@ -71,11 +72,12 @@ pub struct RnaArgs {
     )]
     pub gtf: Option<String>,
 
-    /// Path to a BED12 gene model file.
+    /// Path to a BED12 gene model file (plain or gzip-compressed).
     ///
     /// When provided instead of --gtf, only RSeQC tools are run (dupRadar and
     /// featureCounts are skipped because BED files lack gene-level grouping and
-    /// biotype information). Mutually exclusive with --gtf.
+    /// biotype information). Gzip-compressed files (.bed.gz) are detected and
+    /// decompressed automatically. Mutually exclusive with --gtf.
     #[arg(
         short,
         long,

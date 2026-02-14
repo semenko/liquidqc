@@ -1,5 +1,11 @@
 # RustQC Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Gzip-compressed annotation support**: GTF and BED annotation files can now be provided as `.gz` files. Compression is detected automatically by inspecting the file header (magic bytes), so both plain and gzip-compressed files work transparently with `--gtf` and `--bed`.
+
 ## [Version 0.1.0](https://github.com/ewels/RustQC/releases/tag/v0.1.0) - 2026-02-13
 
 Initial release of RustQC -- fast quality control tools for sequencing data, written in Rust.

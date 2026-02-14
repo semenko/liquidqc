@@ -26,7 +26,7 @@ Key advantages:
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
 - **Identical output**: Produces bit-for-bit identical results to the original tools (verified across 820,000+ values with zero mismatches for dupRadar)
 - **Multiple input support**: Process several BAM files in a single command with automatic parallelisation
-- **Modern format support**: Accepts SAM, BAM, and CRAM input files
+- **Modern format support**: Accepts SAM, BAM, and CRAM input files; annotation files (GTF and BED) can be plain or gzip-compressed
 
 ## Available tools
 
@@ -55,7 +55,7 @@ Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, all in
 | junction_saturation | Assess saturation of splice junction detection at increasing read depths, with plot |
 | inner_distance | Compute inner distance between paired-end read mates, with histogram plot |
 
-When a GTF file is provided via `--gtf`, all 7 tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed` (mutually exclusive with `--gtf`), which runs only the RSeQC tools. Individual tools can be disabled via the YAML configuration file.
+When a GTF file is provided via `--gtf`, all 7 tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed` (mutually exclusive with `--gtf`), which runs only the RSeQC tools. Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 

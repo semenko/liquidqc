@@ -9,9 +9,7 @@
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::io::BufRead;
 
 /// Represents a single exon interval.
 #[derive(Debug, Clone)]
@@ -169,9 +167,8 @@ struct TranscriptBuilder {
 /// # Returns
 /// An IndexMap preserving insertion order of gene_id -> Gene
 pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<String, Gene>> {
-    let file = File::open(Path::new(path))
+    let reader = crate::io::open_reader(path)
         .with_context(|| format!("Failed to open GTF file: {}", path))?;
-    let reader = BufReader::new(file);
 
     let mut genes: IndexMap<String, Gene> = IndexMap::new();
 
@@ -343,11 +340,10 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
 /// Scans up to `max_lines` data lines (non-comment, non-empty) and returns
 /// `true` if the attribute is found in at least one exon feature.
 pub fn attribute_exists_in_gtf(path: &str, attribute_name: &str, max_lines: usize) -> bool {
-    let file = match File::open(Path::new(path)) {
-        Ok(f) => f,
+    let reader = match crate::io::open_reader(path) {
+        Ok(r) => r,
         Err(_) => return false,
     };
-    let reader = BufReader::new(file);
     let mut checked = 0;
     for line in reader.lines() {
         let line = match line {

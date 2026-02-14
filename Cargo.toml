@@ -39,6 +39,9 @@ rayon = "1.10"
 rand = "0.8"
 rand_chacha = "0.3"
 
+# Gzip decompression for .gz annotation files
+flate2 = "1"
+
 # General utilities
 anyhow = "1"
 log = "0.4"

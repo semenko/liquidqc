@@ -74,6 +74,7 @@ src/
   main.rs                     Entry point, dispatches subcommands
   cli.rs                      CLI argument parsing (clap derive)
   config.rs                   YAML configuration loading (serde)
+  io.rs                       Shared I/O utilities (gzip-transparent file reading)
   gtf.rs                      GTF annotation file parser
   rna/
     mod.rs                    Re-exports dupradar, featurecounts, rseqc

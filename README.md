@@ -14,7 +14,7 @@
 
 - **`rustqc rna`** -- A single-command RNA-Seq QC pipeline that runs all analyses in one pass: [dupRadar](https://github.com/ssayols/dupRadar) duplicate rate analysis, [featureCounts](http://subread.sourceforge.net/)-compatible read counting with biotype summaries, and 7 [RSeQC](https://rseqc.sourceforge.net/) quality control tools (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance).
 
-All tools accept SAM/BAM/CRAM input and support processing multiple files in a single command.
+All tools accept SAM/BAM/CRAM input and support processing multiple files in a single command. Annotation files (GTF and BED) can be provided plain or gzip-compressed (`.gz`).
 
 <p align="center">
 <picture>
@@ -148,8 +148,8 @@ rustqc rna <INPUT>... (--gtf <GTF> | --bed <BED>) [OPTIONS]
 | Argument | Description |
 |----------|-------------|
 | `<INPUT>...` | One or more duplicate-marked alignment files (SAM/BAM/CRAM). Duplicates must be flagged (SAM flag 0x400), not removed. BAM/CRAM files should be sorted and indexed for parallel processing. |
-| `--gtf <GTF>` | Path to a GTF gene annotation file. Runs all analyses (dupRadar + featureCounts + all 7 RSeQC tools). Mutually exclusive with `--bed`. |
-| `--bed <BED>` | Path to a BED12 gene model file. Runs RSeQC tools only (dupRadar and featureCounts are skipped). Mutually exclusive with `--gtf`. |
+| `--gtf <GTF>` | Path to a GTF gene annotation file (plain or gzip-compressed). Runs all analyses (dupRadar + featureCounts + all 7 RSeQC tools). Mutually exclusive with `--bed`. |
+| `--bed <BED>` | Path to a BED12 gene model file (plain or gzip-compressed). Runs RSeQC tools only (dupRadar and featureCounts are skipped). Mutually exclusive with `--gtf`. |
 
 #### Options
 
@@ -184,6 +184,10 @@ rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf --paired --thread
 
 # GENCODE GTF with gene_type attribute for biotypes
 rustqc rna sample.markdup.bam --gtf gencode.gtf --paired --biotype-attribute gene_type --outdir results/
+
+# Gzip-compressed annotation files (auto-detected)
+rustqc rna sample.markdup.bam --gtf genes.gtf.gz --paired --outdir results/
+rustqc rna sample.markdup.bam --bed genes.bed.gz --paired --outdir results/
 ```
 
 ### RSeQC tools
@@ -376,7 +380,7 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 
 ### `rustqc rna`
 
-1. **GTF parsing**: Reads gene annotations, computes effective gene lengths from non-overlapping exon bases, and extracts additional attributes (e.g., biotype) for downstream grouping.
+1. **GTF parsing**: Reads gene annotations (plain or gzip-compressed), computes effective gene lengths from non-overlapping exon bases, and extracts additional attributes (e.g., biotype) for downstream grouping.
 2. **Read counting**: Reads the alignment file (SAM/BAM/CRAM) once, assigning each read to a gene based on exon overlap. Four count modes are tracked simultaneously:
    - With/without multimappers x with/without duplicates
    - Assignment statistics (assigned, ambiguous, no features) are tracked for the featureCounts summary.

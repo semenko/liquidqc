@@ -93,7 +93,7 @@ pub struct KnownJunctionSet {
 /// # Returns
 /// A `ReferenceJunctions` with intron start and end position sets per chromosome.
 pub fn parse_reference_junctions_from_bed(bed_path: &str) -> Result<ReferenceJunctions> {
-    let content = std::fs::read_to_string(bed_path)
+    let content = crate::io::read_to_string(bed_path)
         .with_context(|| format!("Failed to read BED file: {}", bed_path))?;
 
     let mut result = ReferenceJunctions::default();
@@ -182,7 +182,7 @@ pub fn parse_reference_junctions_from_bed(bed_path: &str) -> Result<ReferenceJun
 /// * `bed_path` - Path to BED12 gene model file.
 pub fn parse_known_junctions_from_bed(bed_path: &str) -> Result<KnownJunctionSet> {
     let content =
-        std::fs::read_to_string(bed_path).with_context(|| format!("reading BED: {bed_path}"))?;
+        crate::io::read_to_string(bed_path).with_context(|| format!("reading BED: {bed_path}"))?;
 
     let mut result = KnownJunctionSet::default();
 
