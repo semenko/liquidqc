@@ -383,8 +383,12 @@ impl ReadDupAccum {
     }
 }
 
-/// Hash a read sequence using SipHash-128 for deduplication.
-/// Collision probability for 100M sequences is negligible (~1 in 10^19).
+/// Hash a read sequence to u128 for deduplication.
+///
+/// Uses two rounds of SipHash-1-3 (via `DefaultHasher`) to produce a 128-bit
+/// fingerprint. The two halves are correlated (h2 is seeded from h1 + length),
+/// so effective collision resistance is ~64 bits (birthday bound ~2^32). This
+/// is more than sufficient for typical RNA-seq datasets (< 1B distinct reads).
 fn hash_sequence(seq: &[u8]) -> u128 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for &b in seq {
@@ -805,7 +809,25 @@ impl InnerDistAccum {
         let read1_start = record.pos() as u64;
         let read2_start = record.mpos() as u64;
 
-        // Mate dedup: skip if mate has lower position (already processed)
+        // Different chromosomes: only process from the lower-tid side to avoid
+        // double-counting in parallel mode (each chromosome is a separate worker).
+        if record.tid() != record.mtid() {
+            if record.tid() > record.mtid() {
+                return;
+            }
+
+            self.pair_num += 1;
+
+            let read_name = String::from_utf8_lossy(record.qname()).to_string();
+            self.pairs.push(InnerDistPair {
+                name: read_name,
+                distance: None,
+                classification: "sameChrom=No".to_string(),
+            });
+            return;
+        }
+
+        // Same chromosome: mate dedup by position (both mates in same worker)
         if read2_start < read1_start {
             return;
         }
@@ -817,16 +839,6 @@ impl InnerDistAccum {
         self.pair_num += 1;
 
         let read_name = String::from_utf8_lossy(record.qname()).to_string();
-
-        // Different chromosomes
-        if record.tid() != record.mtid() {
-            self.pairs.push(InnerDistPair {
-                name: read_name,
-                distance: None,
-                classification: "sameChrom=No".to_string(),
-            });
-            return;
-        }
 
         // Compute read1_end from CIGAR
         let read1_end = record.cigar().end_pos() as u64;
