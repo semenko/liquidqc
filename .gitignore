@@ -22,12 +22,14 @@ tests/output*/
 benchmark/input/**/*.bam
 benchmark/input/**/*.bam.bai
 benchmark/input/**/*.gtf
+benchmark/input/**/*.gtf.gz
 benchmark/input/**/*.bed
+benchmark/input/**/*.bed.gz
 
 # Large RSeQC reference outputs (too big for git)
-benchmark/RSeQC/**/inner_distance.inner_distance.txt
-benchmark/RSeQC/**/junction_annotation.junction.bed
-benchmark/RSeQC/**/junction_annotation.junction.xls
+*.inner_distance.txt
+*.junction.bed
+*.junction.xls
 benchmark/RSeQC/**/junction_annotation.junction.Interact.bed
 
 # Session files
