@@ -28,14 +28,15 @@ The key difference is that RustQC performs counting and duplicate analysis in a 
 
 ## Output files
 
-All featureCounts output files use the BAM file stem as a prefix. Each output can be individually enabled or disabled via the [configuration file](/usage/configuration/).
+All featureCounts output files use the BAM file stem as a prefix and are written to a `featurecounts/` subdirectory under the output directory. Use `--flat-output` to write all files directly to the output directory instead. Each output can be individually enabled or disabled via the [configuration file](/usage/configuration/).
 
 <FileTree>
-- sample.featureCounts.tsv Per-gene read counts
-- sample.featureCounts.tsv.summary Assignment summary statistics
-- sample.biotype_counts.tsv Per-biotype read counts
-- sample.biotype_counts_mqc.tsv MultiQC biotype bargraph
-- sample.biotype_counts_rrna_mqc.tsv MultiQC rRNA percentage
+- featurecounts/
+  - sample.featureCounts.tsv Per-gene read counts
+  - sample.featureCounts.tsv.summary Assignment summary statistics
+  - sample.biotype_counts.tsv Per-biotype read counts
+  - sample.biotype_counts_mqc.tsv MultiQC biotype bargraph
+  - sample.biotype_counts_rrna_mqc.tsv MultiQC rRNA percentage
 </FileTree>
 
 ### Counts file

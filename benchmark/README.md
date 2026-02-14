@@ -251,7 +251,7 @@ docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v 
 python3 -c "
 import csv
 with open('benchmark/dupRadar/large/dupMatrix.txt') as rf, \
-     open('benchmark/RustQC/large/GM12878_REP1.markdup.sorted_dupMatrix.txt') as rustf:
+     open('benchmark/RustQC/large/dupradar/GM12878_REP1.markdup.sorted_dupMatrix.txt') as rustf:
     r = list(csv.reader(rf, delimiter='\t'))
     rust = list(csv.reader(rustf, delimiter='\t'))
     mismatches = sum(1 for i in range(1, len(r)) for j in range(1, len(r[i]))

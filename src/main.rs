@@ -71,6 +71,9 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     if let Some(ref reference) = args.reference {
         parts.push(format!("--reference {}", shell_escape(reference)));
     }
+    if args.flat_output {
+        parts.push("--flat-output".to_string());
+    }
     if args.skip_dup_check {
         parts.push("--skip-dup-check".to_string());
     }
@@ -348,6 +351,9 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Determine if biotype attribute was found in the GTF
     let biotype_in_gtf = extra_attributes.contains(&biotype_attribute);
 
+    // Effective flat_output: true if enabled by either CLI flag or config file
+    let flat_output = args.flat_output || config.flat_output;
+
     // Build the shared parameters struct for process_single_bam
     let shared = SharedParams {
         stranded: args.stranded,
@@ -355,6 +361,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         chrom_mapping: &chrom_mapping,
         chrom_prefix: chrom_prefix.as_deref(),
         outdir,
+        flat_output,
         reference: args.reference.as_deref(),
         skip_dup_check: args.skip_dup_check,
         config: &config,
@@ -455,6 +462,8 @@ struct SharedParams<'a> {
     chrom_prefix: Option<&'a str>,
     /// Output directory for results.
     outdir: &'a Path,
+    /// When true, write all files directly to outdir (no subdirectories).
+    flat_output: bool,
     /// Optional reference FASTA for CRAM files.
     reference: Option<&'a str>,
     /// Whether to skip duplicate-marking validation.
@@ -653,15 +662,33 @@ fn process_single_bam(
         );
         info!("[{}] Ambiguous: {}", bam_stem, count_result.stat_ambiguous);
 
+        // Output directories: nested subdirectories by default, flat if requested
+        let fc_dir = if params.flat_output {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("featurecounts")
+        };
+        let dr_dir = if params.flat_output {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("dupradar")
+        };
+
         // === featureCounts outputs ===
         if config.any_featurecounts_output() {
+            std::fs::create_dir_all(&fc_dir).with_context(|| {
+                format!(
+                    "Failed to create featurecounts output directory: {}",
+                    fc_dir.display()
+                )
+            })?;
             info!(
                 "[{}] Writing featureCounts-compatible output files...",
                 bam_stem
             );
 
             if config.featurecounts.counts_file {
-                let counts_path = outdir.join(format!("{}.featureCounts.tsv", bam_stem));
+                let counts_path = fc_dir.join(format!("{}.featureCounts.tsv", bam_stem));
                 rna::featurecounts::output::write_counts_file(
                     &counts_path,
                     genes,
@@ -677,7 +704,7 @@ fn process_single_bam(
             }
 
             if config.featurecounts.summary_file {
-                let summary_path = outdir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
+                let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
                 rna::featurecounts::output::write_summary_file(
                     &summary_path,
                     &count_result,
@@ -704,7 +731,7 @@ fn process_single_bam(
                 );
 
                 if config.featurecounts.biotype_counts {
-                    let biotype_path = outdir.join(format!("{}.biotype_counts.tsv", bam_stem));
+                    let biotype_path = fc_dir.join(format!("{}.biotype_counts.tsv", bam_stem));
                     rna::featurecounts::output::write_biotype_counts(
                         &biotype_path,
                         &biotype_counts,
@@ -718,7 +745,7 @@ fn process_single_bam(
 
                 if config.featurecounts.biotype_counts_mqc {
                     let mqc_biotype_path =
-                        outdir.join(format!("{}.biotype_counts_mqc.tsv", bam_stem));
+                        fc_dir.join(format!("{}.biotype_counts_mqc.tsv", bam_stem));
                     rna::featurecounts::output::write_biotype_counts_mqc(
                         &mqc_biotype_path,
                         &biotype_counts,
@@ -732,7 +759,7 @@ fn process_single_bam(
 
                 if config.featurecounts.biotype_rrna_mqc {
                     let mqc_rrna_path =
-                        outdir.join(format!("{}.biotype_counts_rrna_mqc.tsv", bam_stem));
+                        fc_dir.join(format!("{}.biotype_counts_rrna_mqc.tsv", bam_stem));
                     rna::featurecounts::output::write_biotype_rrna_mqc(
                         &mqc_rrna_path,
                         &biotype_counts,
@@ -750,6 +777,12 @@ fn process_single_bam(
 
         // === dupRadar outputs ===
         if config.any_dupradar_output() {
+            std::fs::create_dir_all(&dr_dir).with_context(|| {
+                format!(
+                    "Failed to create dupradar output directory: {}",
+                    dr_dir.display()
+                )
+            })?;
             info!("[{}] Building duplication matrix...", bam_stem);
             let dup_matrix = rna::dupradar::dupmatrix::DupMatrix::build(genes, &count_result);
 
@@ -761,7 +794,7 @@ fn process_single_bam(
 
             // Write duplication matrix
             if config.dupradar.dup_matrix {
-                let matrix_path = outdir.join(format!("{}_dupMatrix.txt", bam_stem));
+                let matrix_path = dr_dir.join(format!("{}_dupMatrix.txt", bam_stem));
                 dup_matrix.write_tsv(&matrix_path)?;
                 info!(
                     "[{}] Duplication matrix written to {}",
@@ -791,7 +824,7 @@ fn process_single_bam(
                             bam_stem, fit.intercept, fit.slope
                         );
                         if config.dupradar.intercept_slope {
-                            let fit_path = outdir.join(format!("{}_intercept_slope.txt", bam_stem));
+                            let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", bam_stem));
                             rna::dupradar::plots::write_intercept_slope(fit, &fit_path)?;
                             info!(
                                 "[{}] Fit results written to {}",
@@ -830,9 +863,9 @@ fn process_single_bam(
                     )
                 });
 
-                let density_path = outdir.join(format!("{}_duprateExpDens.png", bam_stem));
-                let boxplot_path = outdir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
-                let histogram_path = outdir.join(format!("{}_expressionHist.png", bam_stem));
+                let density_path = dr_dir.join(format!("{}_duprateExpDens.png", bam_stem));
+                let boxplot_path = dr_dir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
+                let histogram_path = dr_dir.join(format!("{}_expressionHist.png", bam_stem));
 
                 std::thread::scope(|s| -> Result<()> {
                     // Density scatter plot (only if fit succeeded and enabled)
@@ -909,13 +942,13 @@ fn process_single_bam(
             if let Some(ref fit) = fit_ok {
                 if config.dupradar.multiqc_intercept {
                     let mqc_intercept_path =
-                        outdir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
+                        dr_dir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
                     rna::dupradar::plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
                 }
 
                 if config.dupradar.multiqc_curve {
                     let mqc_curve_path =
-                        outdir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
+                        dr_dir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
                     rna::dupradar::plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
                 }
 
@@ -979,30 +1012,74 @@ fn write_rseqc_outputs(
     accums: RseqcAccumulators,
 ) -> Result<()> {
     let outdir = params.outdir;
-    let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
+
+    // Build tool-specific output directories: nested subdirectories by default, flat if requested
+    let flat = params.flat_output;
+    let rseqc_bam_stat_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("rseqc").join("bam_stat")
+    };
+    let rseqc_read_dup_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("rseqc").join("read_duplication")
+    };
+    let rseqc_infer_exp_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("rseqc").join("infer_experiment")
+    };
+    let rseqc_read_dist_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("rseqc").join("read_distribution")
+    };
+    let rseqc_junc_annot_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("rseqc").join("junction_annotation")
+    };
+    let rseqc_junc_sat_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("rseqc").join("junction_saturation")
+    };
+    let rseqc_inner_dist_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("rseqc").join("inner_distance")
+    };
 
     // --- bam_stat ---
     if let Some(accum) = accums.bam_stat {
         info!("[{}] Writing bam_stat results...", bam_stem);
+        std::fs::create_dir_all(&rseqc_bam_stat_dir)?;
         let result = accum.into_result();
-        let output_path = outdir.join(format!("{}.bam_stat.txt", bam_stem));
+        let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
         rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
     }
 
     // --- read_duplication ---
     if let Some(accum) = accums.read_dup {
         info!("[{}] Writing read_duplication results...", bam_stem);
+        std::fs::create_dir_all(&rseqc_read_dup_dir)?;
         let result = accum.into_result();
-        rna::rseqc::read_duplication::write_read_duplication(&result, outdir, bam_stem)?;
-        let plot_path = outdir.join(format!("{}.DupRate_plot.png", bam_stem));
+        rna::rseqc::read_duplication::write_read_duplication(
+            &result,
+            &rseqc_read_dup_dir,
+            bam_stem,
+        )?;
+        let plot_path = rseqc_read_dup_dir.join(format!("{}.DupRate_plot.png", bam_stem));
         rna::rseqc::plots::read_duplication_plot(&result, &plot_path)?;
     }
 
     // --- infer_experiment ---
     if let Some(accum) = accums.infer_exp {
         info!("[{}] Writing infer_experiment results...", bam_stem);
+        std::fs::create_dir_all(&rseqc_infer_exp_dir)?;
         let result = accum.into_result();
-        let output_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
+        let output_path = rseqc_infer_exp_dir.join(format!("{}.infer_experiment.txt", bam_stem));
         rna::rseqc::infer_experiment::write_infer_experiment(&result, &output_path)?;
         info!(
             "[{}] Total {} usable reads were sampled",
@@ -1013,10 +1090,11 @@ fn write_rseqc_outputs(
     // --- read_distribution ---
     if let Some(accum) = accums.read_dist {
         info!("[{}] Writing read_distribution results...", bam_stem);
+        std::fs::create_dir_all(&rseqc_read_dist_dir)?;
         // Safety: rd_regions is Some when read_distribution_enabled is true,
         // which is required for this accumulator to exist.
         let result = accum.into_result(params.rd_regions.unwrap());
-        let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
+        let output_path = rseqc_read_dist_dir.join(format!("{}.read_distribution.txt", bam_stem));
         rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
         info!(
             "[{}] Total {} reads, {} tags ({} assigned)",
@@ -1030,20 +1108,26 @@ fn write_rseqc_outputs(
     // --- junction_annotation ---
     if let Some(accum) = accums.junc_annot {
         info!("[{}] Writing junction_annotation results...", bam_stem);
+        std::fs::create_dir_all(&rseqc_junc_annot_dir)?;
+        let prefix = rseqc_junc_annot_dir
+            .join(bam_stem)
+            .to_string_lossy()
+            .to_string();
         let results = accum.into_result();
 
-        let xls_path = outdir.join(format!("{}.junction.xls", bam_stem));
+        let xls_path = rseqc_junc_annot_dir.join(format!("{}.junction.xls", bam_stem));
         rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
 
-        let bed_out_path = outdir.join(format!("{}.junction.bed", bam_stem));
+        let bed_out_path = rseqc_junc_annot_dir.join(format!("{}.junction.bed", bam_stem));
         rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_out_path)?;
 
-        let r_path = outdir.join(format!("{}.junction_plot.r", bam_stem));
+        let r_path = rseqc_junc_annot_dir.join(format!("{}.junction_plot.r", bam_stem));
         rna::rseqc::junction_annotation::write_junction_plot_r(&results, &prefix, &r_path)?;
 
         rna::rseqc::plots::junction_annotation_plot(&results, &prefix)?;
 
-        let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
+        let summary_path =
+            rseqc_junc_annot_dir.join(format!("{}.junction_annotation.txt", bam_stem));
         rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
 
         rna::rseqc::junction_annotation::print_summary(&results);
@@ -1052,6 +1136,11 @@ fn write_rseqc_outputs(
     // --- junction_saturation ---
     if let Some(accum) = accums.junc_sat {
         info!("[{}] Writing junction_saturation results...", bam_stem);
+        std::fs::create_dir_all(&rseqc_junc_sat_dir)?;
+        let prefix = rseqc_junc_sat_dir
+            .join(bam_stem)
+            .to_string_lossy()
+            .to_string();
         // Safety: known_junctions is Some when junction_saturation_enabled is true,
         // which is required for this accumulator to exist.
         let results = accum.into_result(
@@ -1064,7 +1153,8 @@ fn write_rseqc_outputs(
 
         rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
 
-        let plot_path = outdir.join(format!("{}.junctionSaturation_plot.png", bam_stem));
+        let plot_path =
+            rseqc_junc_sat_dir.join(format!("{}.junctionSaturation_plot.png", bam_stem));
         rna::rseqc::plots::junction_saturation_plot(&results, &plot_path)?;
 
         let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
@@ -1074,6 +1164,11 @@ fn write_rseqc_outputs(
     // --- inner_distance ---
     if let Some(accum) = accums.inner_dist {
         info!("[{}] Writing inner_distance results...", bam_stem);
+        std::fs::create_dir_all(&rseqc_inner_dist_dir)?;
+        let prefix = rseqc_inner_dist_dir
+            .join(bam_stem)
+            .to_string_lossy()
+            .to_string();
         let results = accum.into_result(
             params.inner_distance_lower_bound,
             params.inner_distance_upper_bound,
@@ -1094,7 +1189,7 @@ fn write_rseqc_outputs(
             params.inner_distance_step,
         )?;
 
-        let plot_path = outdir.join(format!("{}.inner_distance_plot.png", bam_stem));
+        let plot_path = rseqc_inner_dist_dir.join(format!("{}.inner_distance_plot.png", bam_stem));
         rna::rseqc::plots::inner_distance_plot(&results, params.inner_distance_step, &plot_path)?;
 
         let summary_path = format!("{prefix}.inner_distance_summary.txt");

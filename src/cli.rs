@@ -119,6 +119,15 @@ pub struct RnaArgs {
     #[arg(short, long, value_name = "FASTA")]
     pub reference: Option<String>,
 
+    /// Write all output files to a flat directory (no subdirectories).
+    ///
+    /// By default, RustQC organises output files into subdirectories by tool:
+    /// `dupradar/`, `featurecounts/`, and `rseqc/{tool}/`. When this flag is
+    /// set, all output files are written directly to the output directory with
+    /// no subdirectories (the legacy behaviour).
+    #[arg(long, default_value_t = false)]
+    pub flat_output: bool,
+
     /// Skip the check for duplicate-marking tools in the BAM header.
     ///
     /// By default, RustQC verifies that the BAM file has been processed by a

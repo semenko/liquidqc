@@ -51,6 +51,24 @@ fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
         .expect("Failed to execute rustqc")
 }
 
+/// Helper: run rustqc rna with --flat-output flag (all files in outdir, no subdirectories)
+fn run_rustqc_flat(outdir: &str) -> std::process::Output {
+    let binary = rustqc_binary();
+    Command::new(&binary)
+        .args([
+            "rna",
+            "tests/data/test.bam",
+            "--gtf",
+            "tests/data/test.gtf",
+            "--outdir",
+            outdir,
+            "--skip-dup-check",
+            "--flat-output",
+        ])
+        .output()
+        .expect("Failed to execute rustqc")
+}
+
 /// Parse a dupMatrix TSV file into a Vec of (gene_id, HashMap<col_name, value_string>)
 fn parse_dup_matrix(path: &str) -> Vec<(String, Vec<String>)> {
     let content = fs::read_to_string(path).expect("Failed to read dup matrix");
@@ -144,7 +162,7 @@ fn test_dup_matrix_exact_match() {
 
     // Compare dup matrix files
     let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
-    let rust_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir));
+    let rust_matrix = parse_dup_matrix(&format!("{}/dupradar/test_dupMatrix.txt", outdir));
 
     assert_eq!(
         r_matrix.len(),
@@ -233,7 +251,7 @@ fn test_intercept_slope_match() {
 
     let (r_intercept, r_slope) = parse_intercept_slope("tests/expected/intercept_slope.txt");
     let (rust_intercept, rust_slope) =
-        parse_intercept_slope(&format!("{}/test_intercept_slope.txt", outdir));
+        parse_intercept_slope(&format!("{}/dupradar/test_intercept_slope.txt", outdir));
 
     // Allow slightly more tolerance for the IRLS implementation differences
     assert!(
@@ -270,25 +288,41 @@ fn test_all_output_files_generated() {
 
     // Check all expected output files exist
     let expected_files = vec![
-        "test_dupMatrix.txt",
-        "test_intercept_slope.txt",
-        "test_duprateExpDens.png",
-        "test_duprateExpDens.svg",
-        "test_duprateExpBoxplot.png",
-        "test_duprateExpBoxplot.svg",
-        "test_expressionHist.png",
-        "test_expressionHist.svg",
-        "test_dup_intercept_mqc.txt",
-        "test_duprateExpDensCurve_mqc.txt",
+        "dupradar/test_dupMatrix.txt",
+        "dupradar/test_intercept_slope.txt",
+        "dupradar/test_duprateExpDens.png",
+        "dupradar/test_duprateExpDens.svg",
+        "dupradar/test_duprateExpBoxplot.png",
+        "dupradar/test_duprateExpBoxplot.svg",
+        "dupradar/test_expressionHist.png",
+        "dupradar/test_expressionHist.svg",
+        "dupradar/test_dup_intercept_mqc.txt",
+        "dupradar/test_duprateExpDensCurve_mqc.txt",
+        "featurecounts/test.featureCounts.tsv",
+        "featurecounts/test.featureCounts.tsv.summary",
+        "rseqc/bam_stat/test.bam_stat.txt",
+        "rseqc/infer_experiment/test.infer_experiment.txt",
+        "rseqc/read_duplication/test.pos.DupRate.xls",
+        "rseqc/read_duplication/test.seq.DupRate.xls",
+        "rseqc/read_distribution/test.read_distribution.txt",
+        "rseqc/junction_annotation/test.junction_annotation.txt",
+        "rseqc/junction_saturation/test.junctionSaturation_summary.txt",
+        "rseqc/inner_distance/test.inner_distance.txt",
     ];
+
+    // Files that may be empty with a small test dataset (e.g. no proper pairs
+    // for inner distance calculation)
+    let allow_empty: Vec<&str> = vec!["rseqc/inner_distance/test.inner_distance.txt"];
 
     for file in &expected_files {
         let path = format!("{}/{}", outdir, file);
         assert!(Path::new(&path).exists(), "Missing output file: {}", file);
 
-        // Check file is non-empty
-        let metadata = fs::metadata(&path).unwrap();
-        assert!(metadata.len() > 0, "Output file is empty: {}", file);
+        // Check file is non-empty (unless it is expected to be empty for the small test data)
+        if !allow_empty.contains(file) {
+            let metadata = fs::metadata(&path).unwrap();
+            assert!(metadata.len() > 0, "Output file is empty: {}", file);
+        }
     }
 
     // Cleanup
@@ -304,7 +338,7 @@ fn test_dup_matrix_header() {
     let output = run_rustqc(outdir);
     assert!(output.status.success());
 
-    let content = fs::read_to_string(format!("{}/test_dupMatrix.txt", outdir)).unwrap();
+    let content = fs::read_to_string(format!("{}/dupradar/test_dupMatrix.txt", outdir)).unwrap();
     let header = content.lines().next().unwrap();
     let expected_cols = vec![
         "ID",
@@ -354,7 +388,8 @@ fn test_mqc_intercept_format() {
     assert!(output.status.success());
 
     // Check MultiQC intercept file format
-    let content = fs::read_to_string(format!("{}/test_dup_intercept_mqc.txt", outdir)).unwrap();
+    let content =
+        fs::read_to_string(format!("{}/dupradar/test_dup_intercept_mqc.txt", outdir)).unwrap();
     // Skip YAML comment lines (starting with #)
     let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
     assert!(data_lines.len() >= 2, "MultiQC intercept file too short");
@@ -391,8 +426,11 @@ fn test_mqc_curve_format() {
     assert!(output.status.success());
 
     // Check MultiQC curve file format
-    let content =
-        fs::read_to_string(format!("{}/test_duprateExpDensCurve_mqc.txt", outdir)).unwrap();
+    let content = fs::read_to_string(format!(
+        "{}/dupradar/test_duprateExpDensCurve_mqc.txt",
+        outdir
+    ))
+    .unwrap();
     // Skip YAML comment lines (starting with #)
     let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
     // Header + at least some data points (101 evenly spaced + header = 102)
@@ -432,7 +470,7 @@ fn test_gene_order_preserved() {
 
     // Both R and Rust should output genes in the same order (GTF order)
     let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
-    let rust_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir));
+    let rust_matrix = parse_dup_matrix(&format!("{}/dupradar/test_dupMatrix.txt", outdir));
 
     let r_genes: Vec<&str> = r_matrix.iter().map(|(id, _)| id.as_str()).collect();
     let rust_genes: Vec<&str> = rust_matrix.iter().map(|(id, _)| id.as_str()).collect();
@@ -457,7 +495,7 @@ fn test_count_values_exact() {
     assert!(output.status.success());
 
     let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
-    let rust_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir));
+    let rust_matrix = parse_dup_matrix(&format!("{}/dupradar/test_dupMatrix.txt", outdir));
 
     // Integer count columns should match EXACTLY (columns 2-3, 5, 8-9, 11)
     // col indices: 2=allCountsMulti, 3=filteredCountsMulti, 5=dupsPerIdMulti,
@@ -497,14 +535,14 @@ fn test_multiple_bam_files() {
 
     // Both BAM stems should have produced output files
     let expected_files = [
-        "test_dupMatrix.txt",
-        "test_duprateExpDens.png",
-        "test_duprateExpBoxplot.png",
-        "test_expressionHist.png",
-        "test_copy_dupMatrix.txt",
-        "test_copy_duprateExpDens.png",
-        "test_copy_duprateExpBoxplot.png",
-        "test_copy_expressionHist.png",
+        "dupradar/test_dupMatrix.txt",
+        "dupradar/test_duprateExpDens.png",
+        "dupradar/test_duprateExpBoxplot.png",
+        "dupradar/test_expressionHist.png",
+        "dupradar/test_copy_dupMatrix.txt",
+        "dupradar/test_copy_duprateExpDens.png",
+        "dupradar/test_copy_duprateExpBoxplot.png",
+        "dupradar/test_copy_expressionHist.png",
     ];
 
     for filename in &expected_files {
@@ -519,7 +557,7 @@ fn test_multiple_bam_files() {
     // Both dupMatrix files should match the R reference (same input data)
     let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
     for stem in &["test", "test_copy"] {
-        let rust_matrix = parse_dup_matrix(&format!("{}/{}_dupMatrix.txt", outdir, stem));
+        let rust_matrix = parse_dup_matrix(&format!("{}/dupradar/{}_dupMatrix.txt", outdir, stem));
         assert_eq!(
             r_matrix.len(),
             rust_matrix.len(),
@@ -591,8 +629,8 @@ fn test_sam_input_matches_bam() {
     );
 
     // Compare dup matrices — SAM and BAM should produce identical output
-    let bam_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir_bam));
-    let sam_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir_sam));
+    let bam_matrix = parse_dup_matrix(&format!("{}/dupradar/test_dupMatrix.txt", outdir_bam));
+    let sam_matrix = parse_dup_matrix(&format!("{}/dupradar/test_dupMatrix.txt", outdir_sam));
 
     assert_eq!(
         bam_matrix.len(),
@@ -621,4 +659,64 @@ fn test_sam_input_matches_bam() {
     // Cleanup
     let _ = fs::remove_dir_all(outdir_bam);
     let _ = fs::remove_dir_all(outdir_sam);
+}
+
+// ===================================================================
+// Flat output mode tests
+// ===================================================================
+
+/// With --flat-output, all files should be written directly in the output directory
+/// with no subdirectories.
+#[test]
+fn test_flat_output_no_subdirectories() {
+    let outdir = "tests/output_integration_flat";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc_flat(outdir);
+    assert!(
+        output.status.success(),
+        "rustqc --flat-output failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // These files should exist directly in outdir (no subdirectories)
+    let expected_flat_files = vec![
+        "test_dupMatrix.txt",
+        "test_intercept_slope.txt",
+        "test_duprateExpDens.png",
+        "test.featureCounts.tsv",
+        "test.featureCounts.tsv.summary",
+        "test.bam_stat.txt",
+        "test.infer_experiment.txt",
+        "test.pos.DupRate.xls",
+        "test.seq.DupRate.xls",
+        "test.read_distribution.txt",
+        "test.junction_annotation.txt",
+        "test.junctionSaturation_summary.txt",
+        "test.inner_distance.txt",
+    ];
+
+    for file in &expected_flat_files {
+        let path = format!("{}/{}", outdir, file);
+        assert!(
+            Path::new(&path).exists(),
+            "Missing flat output file: {}",
+            file
+        );
+    }
+
+    // Subdirectories should NOT exist in flat mode
+    let nested_dirs = vec!["dupradar", "featurecounts", "rseqc"];
+    for dir in &nested_dirs {
+        let path = format!("{}/{}", outdir, dir);
+        assert!(
+            !Path::new(&path).is_dir(),
+            "Subdirectory '{}' should not exist in flat output mode",
+            dir
+        );
+    }
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
 }

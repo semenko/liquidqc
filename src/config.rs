@@ -43,6 +43,16 @@ pub struct Config {
     /// ```
     pub chromosome_mapping: HashMap<String, String>,
 
+    /// Write all output files to a flat directory (no subdirectories).
+    ///
+    /// By default (`false`), output files are organised into subdirectories by
+    /// tool: `dupradar/`, `featurecounts/`, and `rseqc/{tool}/`. When `true`,
+    /// all files are written directly to the output directory (legacy behaviour).
+    /// The CLI `--flat-output` flag enables flat output regardless of this
+    /// setting (either source being `true` produces flat output).
+    #[serde(default)]
+    pub flat_output: bool,
+
     /// dupRadar-specific output configuration.
     #[serde(default)]
     pub dupradar: DupradarConfig,
@@ -489,6 +499,8 @@ mod tests {
         let config: Config = serde_yml::from_str("").unwrap();
         assert!(config.chromosome_mapping.is_empty());
         assert!(!config.has_chromosome_mapping());
+        // flat_output defaults to false (nested subdirectories)
+        assert!(!config.flat_output);
         // Defaults: all outputs enabled
         assert!(config.dupradar.dup_matrix);
         assert!(config.featurecounts.counts_file);
@@ -501,6 +513,17 @@ mod tests {
         assert!(config.junction_annotation.enabled);
         assert!(config.junction_saturation.enabled);
         assert!(config.inner_distance.enabled);
+    }
+
+    #[test]
+    fn test_flat_output_config() {
+        let yaml = "flat_output: true\n";
+        let config: Config = serde_yml::from_str(yaml).unwrap();
+        assert!(config.flat_output);
+
+        let yaml = "flat_output: false\n";
+        let config: Config = serde_yml::from_str(yaml).unwrap();
+        assert!(!config.flat_output);
     }
 
     #[test]

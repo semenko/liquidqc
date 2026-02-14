@@ -13,9 +13,13 @@ original Python implementation, plus **native PNG and SVG plots** generated
 directly -- no R scripts required.
 
 All RSeQC tools run automatically as part of the `rustqc rna` command and use
-the input filename stem as a prefix for output files. For example,
+the input filename stem as a prefix for output files. Output files are organized
+into per-tool subdirectories under `rseqc/`. For example,
 `rustqc rna sample.bam --gtf genes.gtf -o results/` produces
-RSeQC output files like `results/sample.bam_stat.txt`.
+RSeQC output files like `results/rseqc/bam_stat/sample.bam_stat.txt`.
+
+Use `--flat-output` to write all files directly to the output directory instead
+of the nested `rseqc/<tool>/` subdirectories.
 
 ## bam_stat
 

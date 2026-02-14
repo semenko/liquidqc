@@ -64,7 +64,7 @@ All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed
 <tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
 <td><img src="benchmark/dupRadar/large/duprateExpDens.png" width="400"></td>
-<td><img src="benchmark/RustQC/large/GM12878_REP1.markdup.sorted_duprateExpDens.png" width="400"></td>
+<td><img src="benchmark/RustQC/large/dupradar/GM12878_REP1.markdup.sorted_duprateExpDens.png" width="400"></td>
 </tr>
 </table>
 
@@ -74,7 +74,7 @@ All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed
 <tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
 <td><img src="benchmark/dupRadar/large/duprateExpBoxplot.png" width="400"></td>
-<td><img src="benchmark/RustQC/large/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" width="400"></td>
+<td><img src="benchmark/RustQC/large/dupradar/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" width="400"></td>
 </tr>
 </table>
 
@@ -84,7 +84,7 @@ All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed
 <tr><th>dupRadar (R)</th><th>RustQC</th></tr>
 <tr>
 <td><img src="benchmark/dupRadar/large/expressionHist.png" width="400"></td>
-<td><img src="benchmark/RustQC/large/GM12878_REP1.markdup.sorted_expressionHist.png" width="400"></td>
+<td><img src="benchmark/RustQC/large/dupradar/GM12878_REP1.markdup.sorted_expressionHist.png" width="400"></td>
 </tr>
 </table>
 
@@ -162,6 +162,7 @@ rustqc rna <INPUT>... (--gtf <GTF> | --bed <BED>) [OPTIONS]
 | `--reference <FASTA>` / `-r` | none | Reference FASTA file (required for CRAM input) |
 | `--config <FILE>` | none | Path to a YAML configuration file (see [Configuration](#configuration)) |
 | `--biotype-attribute <NAME>` | none | Override the GTF attribute used for biotype counting (default from config: `gene_biotype`). Use `gene_type` for GENCODE GTFs. |
+| `--flat-output` | `false` | Write all output files directly to `--outdir` without subdirectories (legacy layout) |
 | `--skip-dup-check` | `false` | Skip verification that duplicates have been marked in the BAM file (see [Duplicate marking](#duplicate-marking)) |
 
 #### Examples
@@ -291,41 +292,45 @@ featurecounts:
 
 ## Output files
 
-### dupRadar outputs (`rustqc rna`)
+By default, outputs are organized into subdirectories by tool group. Use `--flat-output` to write all files directly to `--outdir` without subdirectories (the legacy layout).
 
-For an input file named `sample.bam`, the following files are generated. All outputs can be individually enabled or disabled via the [configuration file](#output-control).
+### dupRadar outputs (`dupradar/`)
 
-| File | Description |
-|------|-------------|
-| `sample_dupMatrix.txt` | Tab-separated duplication matrix (14 columns, one row per gene) |
-| `sample_duprateExpDens.{png,svg}` | Density scatter plot of duplication rate vs. expression |
-| `sample_duprateExpBoxplot.{png,svg}` | Boxplot of duplication rate by expression quantile bins |
-| `sample_expressionHist.{png,svg}` | Histogram of gene expression levels (log10 RPK) |
-| `sample_intercept_slope.txt` | Logistic regression fit parameters (intercept and slope) |
-| `sample_dup_intercept_mqc.txt` | MultiQC general stats format with intercept value |
-| `sample_duprateExpDensCurve_mqc.txt` | MultiQC line graph data for the fitted curve |
-
-### featureCounts outputs (`rustqc rna`)
+For an input file named `sample.bam`, the following files are generated in the `dupradar/` subdirectory. All outputs can be individually enabled or disabled via the [configuration file](#output-control).
 
 | File | Description |
 |------|-------------|
-| `sample.featureCounts.tsv` | Gene-level read counts in featureCounts format (7 columns: Geneid, Chr, Start, End, Strand, Length, counts) |
-| `sample.featureCounts.tsv.summary` | Assignment summary statistics (Assigned, Unassigned_NoFeatures, Unassigned_Ambiguity, etc.) |
-| `sample.biotype_counts.tsv` | Read counts aggregated by biotype (e.g., protein_coding, lncRNA, rRNA) |
-| `sample.biotype_counts_mqc.tsv` | MultiQC bargraph format for biotype counts |
-| `sample.biotype_counts_rrna_mqc.tsv` | MultiQC general stats with rRNA percentage |
+| `dupradar/sample_dupMatrix.txt` | Tab-separated duplication matrix (14 columns, one row per gene) |
+| `dupradar/sample_duprateExpDens.{png,svg}` | Density scatter plot of duplication rate vs. expression |
+| `dupradar/sample_duprateExpBoxplot.{png,svg}` | Boxplot of duplication rate by expression quantile bins |
+| `dupradar/sample_expressionHist.{png,svg}` | Histogram of gene expression levels (log10 RPK) |
+| `dupradar/sample_intercept_slope.txt` | Logistic regression fit parameters (intercept and slope) |
+| `dupradar/sample_dup_intercept_mqc.txt` | MultiQC general stats format with intercept value |
+| `dupradar/sample_duprateExpDensCurve_mqc.txt` | MultiQC line graph data for the fitted curve |
 
-### RSeQC outputs (`rustqc rna`)
+### featureCounts outputs (`featurecounts/`)
+
+| File | Description |
+|------|-------------|
+| `featurecounts/sample.featureCounts.tsv` | Gene-level read counts in featureCounts format (7 columns: Geneid, Chr, Start, End, Strand, Length, counts) |
+| `featurecounts/sample.featureCounts.tsv.summary` | Assignment summary statistics (Assigned, Unassigned_NoFeatures, Unassigned_Ambiguity, etc.) |
+| `featurecounts/sample.biotype_counts.tsv` | Read counts aggregated by biotype (e.g., protein_coding, lncRNA, rRNA) |
+| `featurecounts/sample.biotype_counts_mqc.tsv` | MultiQC bargraph format for biotype counts |
+| `featurecounts/sample.biotype_counts_rrna_mqc.tsv` | MultiQC general stats with rRNA percentage |
+
+### RSeQC outputs (`rseqc/`)
+
+RSeQC outputs are organized into per-tool subdirectories under `rseqc/`.
 
 | Tool | Output files | Description |
 |------|-------------|-------------|
-| bam_stat | `sample.bam_stat.txt` | Text report with alignment statistics |
-| infer_experiment | `sample.infer_experiment.txt` | Strandedness fractions |
-| read_duplication | `sample.pos.DupRate.xls`, `sample.seq.DupRate.xls`, `sample.DupRate_plot.{png,svg}` | Position-based and sequence-based duplication histograms with plot |
-| read_distribution | `sample.read_distribution.txt` | Per-region read distribution table |
-| junction_annotation | `sample.junction.xls`, `sample.junction.bed`, `sample.splice_events.{png,svg}`, `sample.splice_junction.{png,svg}`, `sample.junction_plot.r`, `sample.junction_annotation.txt` | Junction classifications, pie charts, and summary |
-| junction_saturation | `sample.junctionSaturation_plot.{png,svg}`, `sample.junctionSaturation_plot.r`, `sample.junctionSaturation_summary.txt` | Saturation curve plot and data |
-| inner_distance | `sample.inner_distance.txt`, `sample.inner_distance_freq.txt`, `sample.inner_distance_plot.{png,svg}`, `sample.inner_distance_plot.r`, `sample.inner_distance_summary.txt` | Per-pair distances, histogram plot, and summary |
+| bam_stat | `rseqc/bam_stat/sample.bam_stat.txt` | Text report with alignment statistics |
+| infer_experiment | `rseqc/infer_experiment/sample.infer_experiment.txt` | Strandedness fractions |
+| read_duplication | `rseqc/read_duplication/sample.pos.DupRate.xls`, `...seq.DupRate.xls`, `...DupRate_plot.{png,svg}` | Position-based and sequence-based duplication histograms with plot |
+| read_distribution | `rseqc/read_distribution/sample.read_distribution.txt` | Per-region read distribution table |
+| junction_annotation | `rseqc/junction_annotation/sample.junction.xls`, `...junction.bed`, `...splice_events.{png,svg}`, `...splice_junction.{png,svg}`, `...junction_plot.r`, `...junction_annotation.txt` | Junction classifications, pie charts, and summary |
+| junction_saturation | `rseqc/junction_saturation/sample.junctionSaturation_plot.{png,svg}`, `...junctionSaturation_plot.r`, `...junctionSaturation_summary.txt` | Saturation curve plot and data |
+| inner_distance | `rseqc/inner_distance/sample.inner_distance.txt`, `...inner_distance_freq.txt`, `...inner_distance_plot.{png,svg}`, `...inner_distance_plot.r`, `...inner_distance_summary.txt` | Per-pair distances, histogram plot, and summary |
 
 ### Duplication matrix columns
 

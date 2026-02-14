@@ -27,24 +27,28 @@ This command:
 
 ### Output
 
-After running, you will find in the output directory:
+Output files are organized into subdirectories by tool group. After running, you
+will find in the output directory:
 
 | File | Description |
 |------|-------------|
-| `sample.markdup_dupMatrix.txt` | Full duplication matrix (TSV) |
-| `sample.markdup_intercept_slope.txt` | Fitted model parameters |
-| `sample.markdup_duprateExpDens.png` | Density scatter plot |
-| `sample.markdup_duprateExpBoxplot.png` | Duplication rate boxplot |
-| `sample.markdup_expressionHist.png` | Expression histogram |
-| `sample.markdup.featureCounts.tsv` | Gene-level read counts |
-| `sample.markdup.featureCounts.tsv.summary` | Counting summary statistics |
-| `sample.markdup.DupRate_plot.png` | Read duplication rate plot |
-| `sample.markdup.splice_events.png` | Splice events pie chart |
-| `sample.markdup.splice_junction.png` | Splice junctions pie chart |
-| `sample.markdup.junctionSaturation_plot.png` | Junction saturation plot |
-| `sample.markdup.inner_distance_plot.png` | Inner distance histogram |
+| `dupradar/sample.markdup_dupMatrix.txt` | Full duplication matrix (TSV) |
+| `dupradar/sample.markdup_intercept_slope.txt` | Fitted model parameters |
+| `dupradar/sample.markdup_duprateExpDens.png` | Density scatter plot |
+| `dupradar/sample.markdup_duprateExpBoxplot.png` | Duplication rate boxplot |
+| `dupradar/sample.markdup_expressionHist.png` | Expression histogram |
+| `featurecounts/sample.markdup.featureCounts.tsv` | Gene-level read counts |
+| `featurecounts/sample.markdup.featureCounts.tsv.summary` | Counting summary statistics |
+| `rseqc/read_duplication/sample.markdup.DupRate_plot.png` | Read duplication rate plot |
+| `rseqc/junction_annotation/sample.markdup.splice_events.png` | Splice events pie chart |
+| `rseqc/junction_annotation/sample.markdup.splice_junction.png` | Splice junctions pie chart |
+| `rseqc/junction_saturation/sample.markdup.junctionSaturation_plot.png` | Junction saturation plot |
+| `rseqc/inner_distance/sample.markdup.inner_distance_plot.png` | Inner distance histogram |
 
-Plus SVG versions of all plots, biotype count tables, and MultiQC-compatible report files.
+Plus SVG versions of all plots, biotype count tables, and MultiQC-compatible
+report files. Use `--flat-output` to write all files directly to the output
+directory without subdirectories.
+
 See [dupRadar Outputs](/outputs/dupradar/), [featureCounts Outputs](/outputs/featurecounts/), and [RSeQC Outputs](/outputs/rseqc/) for full details.
 
 ## RSeQC quality control tools
