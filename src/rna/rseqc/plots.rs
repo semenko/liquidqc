@@ -256,23 +256,12 @@ fn compute_weighted_mean_sd(bins: &[(i64, i64, u64)], step: i64) -> (f64, f64) {
 /// - Three categories: known (blue), partial_novel (red), complete_novel (green)
 /// - Labels show rounded integer percentages
 ///
-/// Each chart can be individually enabled/disabled via the `events` and
-/// `junctions` flags (corresponding to `splice_events_plot` and
-/// `splice_junction_plot` in the config).
-///
 /// # Arguments
 /// * `results` — junction annotation analysis results
 /// * `prefix` — output path prefix (e.g. `outdir/sample`)
-/// * `events` — whether to generate the splice events pie chart
-/// * `junctions` — whether to generate the splice junctions pie chart
-pub fn junction_annotation_plot(
-    results: &JunctionResults,
-    prefix: &str,
-    events: bool,
-    junctions: bool,
-) -> Result<()> {
+pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Result<()> {
     // --- Splice events pie chart ---
-    if events {
+    {
         let total_classified_events =
             results.known_events + results.partial_novel_events + results.complete_novel_events;
         let (e_known_pct, e_partial_pct, e_novel_pct) = if total_classified_events > 0 {
@@ -314,7 +303,7 @@ pub fn junction_annotation_plot(
     }
 
     // --- Splice junctions pie chart ---
-    if junctions {
+    {
         let jc = results.junction_counts();
         let (j_known_pct, j_partial_pct, j_novel_pct) = if jc.total > 0 {
             (
