@@ -21,6 +21,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
+use rust_htslib::bam::Read as BamRead;
+
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 
 fn main() -> Result<()> {
@@ -103,7 +105,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     );
 
     // Load configuration file if provided
-    let config = if let Some(ref config_path) = args.config {
+    let mut config = if let Some(ref config_path) = args.config {
         let cfg = config::Config::from_file(Path::new(config_path))?;
         info!("Loaded config from: {}", config_path);
         if cfg.has_chromosome_mapping() {
@@ -117,6 +119,19 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         config::Config::default()
     };
 
+    // Apply CLI overrides to preseq config
+    if args.skip_preseq {
+        config.preseq.enabled = false;
+    }
+    if let Some(val) = args.preseq_max_extrap {
+        config.preseq.max_extrap = val;
+    }
+    if let Some(val) = args.preseq_step_size {
+        config.preseq.step_size = val;
+    }
+    if let Some(val) = args.preseq_n_bootstraps {
+        config.preseq.n_bootstraps = val;
+    }
     // Warn early if CRAM input is likely but no reference is provided
     if args.input.iter().any(|f| f.ends_with(".cram"))
         && args.reference.is_none()
@@ -302,6 +317,15 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         rna::rseqc::inner_distance::TranscriptTree::from_bed
     );
 
+    let tin_sample_size = config.tin.sample_size.unwrap_or(100) as usize;
+    let tin_index = build_rseqc_data!(
+        config.tin.enabled,
+        "Building TIN index from GTF...",
+        |genes| rna::rseqc::tin::TinIndex::from_genes(genes, tin_sample_size),
+        "Building TIN index from BED...",
+        |bed_path| rna::rseqc::tin::TinIndex::from_bed(bed_path, tin_sample_size)
+    );
+
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
@@ -385,6 +409,9 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         inner_distance_lower_bound: args.inner_distance_lower_bound,
         inner_distance_upper_bound: args.inner_distance_upper_bound,
         inner_distance_step: args.inner_distance_step,
+        tin_index: tin_index.as_ref(),
+        tin_sample_size: config.tin.sample_size.unwrap_or(100) as usize,
+        tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -510,6 +537,12 @@ struct SharedParams<'a> {
     inner_distance_upper_bound: i64,
     /// Bin width for inner distance histogram.
     inner_distance_step: i64,
+    /// Pre-built TIN index for transcript integrity analysis (from GTF or BED).
+    tin_index: Option<&'a rna::rseqc::tin::TinIndex>,
+    /// Number of equally-spaced positions to sample per transcript for TIN.
+    tin_sample_size: usize,
+    /// Minimum read-start count per transcript to compute TIN.
+    tin_min_coverage: u32,
 }
 
 // ============================================================================
@@ -570,7 +603,10 @@ fn process_single_bam(
         inner_distance_lower_bound: params.inner_distance_lower_bound,
         inner_distance_upper_bound: params.inner_distance_upper_bound,
         inner_distance_step: params.inner_distance_step,
-        bam_stat_enabled: config.bam_stat.enabled,
+        bam_stat_enabled: config.bam_stat.enabled
+            || config.flagstat.enabled
+            || config.idxstats.enabled
+            || config.samtools_stats.enabled,
         infer_experiment_enabled: config.infer_experiment.enabled && params.gene_model.is_some(),
         read_duplication_enabled: config.read_duplication.enabled,
         read_distribution_enabled: config.read_distribution.enabled && params.rd_regions.is_some(),
@@ -581,6 +617,10 @@ fn process_single_bam(
         inner_distance_enabled: config.inner_distance.enabled
             && params.exon_bitset.is_some()
             && params.transcript_tree.is_some(),
+        tin_enabled: config.tin.enabled && params.tin_index.is_some(),
+        tin_sample_size: params.tin_sample_size,
+        tin_min_coverage: params.tin_min_coverage,
+        preseq_enabled: config.preseq.enabled,
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -591,6 +631,7 @@ fn process_single_bam(
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
         ref_chroms: Some(&ref_chroms),
+        tin_index: params.tin_index,
     };
 
     let any_rseqc_enabled = rseqc_config.bam_stat_enabled
@@ -599,7 +640,15 @@ fn process_single_bam(
         || rseqc_config.read_distribution_enabled
         || rseqc_config.junction_annotation_enabled
         || rseqc_config.junction_saturation_enabled
-        || rseqc_config.inner_distance_enabled;
+        || rseqc_config.inner_distance_enabled
+        || rseqc_config.preseq_enabled;
+
+    // === Build gene body coverage position map (if enabled) ===
+    let genebody_position_map = if params.config.genebody_coverage.enabled {
+        genes.map(rna::genebody::TranscriptPositionMap::from_genes)
+    } else {
+        None
+    };
 
     // === dupRadar counting (requires GTF) ===
     let mut count_result = if let Some(genes) = genes {
@@ -628,6 +677,7 @@ fn process_single_bam(
             } else {
                 None
             },
+            genebody_position_map.as_ref(),
         )?;
         info!(
             "[{}] Counting complete in {:.2}s",
@@ -973,6 +1023,43 @@ fn process_single_bam(
                 stats.f_regions_duplication * 100.0
             );
         }
+        // === Gene body coverage output ===
+        if let Some(ref gb_result) = count_result.genebody {
+            let gb_dir = if params.flat_output {
+                outdir.to_path_buf()
+            } else {
+                outdir.join("qualimap")
+            };
+            std::fs::create_dir_all(&gb_dir)?;
+
+            let profile_path = gb_dir.join("coverage_profile_along_genes_(total).txt");
+            rna::genebody::write_coverage_profile(gb_result, &profile_path)?;
+            info!(
+                "[{}] Gene body coverage profile written to {:?}",
+                bam_stem, profile_path
+            );
+
+            let qualimap_path = gb_dir.join("rnaseq_qc_results.txt");
+            // Get total_records and secondary+supplementary from the bam_stat accumulator.
+            // bam_stat.total_records counts every BAM record (unfiltered), matching Qualimap's
+            // "total alignments". Fall back to dupRadar's stat_total_reads if bam_stat is disabled.
+            let (total_alignments, secondary) = rseqc_accums
+                .as_ref()
+                .and_then(|a| a.bam_stat.as_ref())
+                .map(|bs| (bs.total_records, bs.secondary + bs.supplementary))
+                .unwrap_or((count_result.stat_total_reads, 0));
+            rna::genebody::write_qualimap_results(
+                gb_result,
+                bam_stem,
+                total_alignments,
+                secondary,
+                &qualimap_path,
+            )?;
+            info!(
+                "[{}] Qualimap-compatible results written to {:?}",
+                bam_stem, qualimap_path
+            );
+        }
     } // end if let Some(count_result) — GTF-only outputs
 
     // === RSeQC analyses (post-processing of single-pass accumulators) ===
@@ -986,7 +1073,20 @@ fn process_single_bam(
         info!("[{}] No RSeQC tools enabled, skipping", bam_stem);
         RseqcAccumulators::empty()
     };
-    write_rseqc_outputs(bam_path, bam_stem, params, rseqc_accums)?;
+    // Extract BAM header info (reference names + lengths) for samtools-compatible outputs
+    let bam_header_refs = {
+        let reader = rust_htslib::bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM for header: {}", bam_path))?;
+        let header = reader.header();
+        (0..header.target_count())
+            .map(|tid| {
+                let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
+                let len = header.target_len(tid).unwrap_or(0);
+                (name, len)
+            })
+            .collect::<Vec<(String, u64)>>()
+    };
+    write_rseqc_outputs(bam_path, bam_stem, params, rseqc_accums, &bam_header_refs)?;
 
     info!(
         "[{}] Completed in {:.2}s",
@@ -1006,10 +1106,11 @@ fn process_single_bam(
 /// Converts accumulated data to tool-specific result types and writes all
 /// output files, plots, and summaries.
 fn write_rseqc_outputs(
-    _bam_path: &str,
+    bam_path: &str,
     bam_stem: &str,
     params: &SharedParams,
     accums: RseqcAccumulators,
+    bam_header_refs: &[(String, u64)],
 ) -> Result<()> {
     let outdir = params.outdir;
 
@@ -1051,13 +1152,48 @@ fn write_rseqc_outputs(
         outdir.join("rseqc").join("inner_distance")
     };
 
+    // --- samtools-compatible outputs (flagstat, idxstats, stats) ---
+    // These consume data from BamStatAccum, so they are written before
+    // the main bam_stat output to share the same result.
+    let samtools_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("samtools")
+    };
+
     // --- bam_stat ---
     if let Some(accum) = accums.bam_stat {
         info!("[{}] Writing bam_stat results...", bam_stem);
         std::fs::create_dir_all(&rseqc_bam_stat_dir)?;
         let result = accum.into_result();
-        let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
-        rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
+        if params.config.bam_stat.enabled {
+            let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
+            rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
+        }
+
+        // --- flagstat ---
+        if params.config.flagstat.enabled {
+            info!("[{}] Writing flagstat results...", bam_stem);
+            std::fs::create_dir_all(&samtools_dir)?;
+            let flagstat_path = samtools_dir.join(format!("{}.flagstat", bam_stem));
+            rna::rseqc::flagstat::write_flagstat(&result, &flagstat_path)?;
+        }
+
+        // --- idxstats ---
+        if params.config.idxstats.enabled {
+            info!("[{}] Writing idxstats results...", bam_stem);
+            std::fs::create_dir_all(&samtools_dir)?;
+            let idxstats_path = samtools_dir.join(format!("{}.idxstats", bam_stem));
+            rna::rseqc::idxstats::write_idxstats(&result, bam_header_refs, &idxstats_path)?;
+        }
+
+        // --- samtools stats SN ---
+        if params.config.samtools_stats.enabled {
+            info!("[{}] Writing samtools stats results...", bam_stem);
+            std::fs::create_dir_all(&samtools_dir)?;
+            let stats_path = samtools_dir.join(format!("{}.stats", bam_stem));
+            rna::rseqc::stats::write_stats(&result, &stats_path)?;
+        }
     }
 
     // --- read_duplication ---
@@ -1201,6 +1337,77 @@ fn write_rseqc_outputs(
         );
     }
 
+    // --- TIN ---
+    if let Some(accum) = accums.tin {
+        let rseqc_tin_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("rseqc").join("tin")
+        };
+        std::fs::create_dir_all(&rseqc_tin_dir)?;
+        let prefix = rseqc_tin_dir.join(bam_stem).to_string_lossy().to_string();
+        let tin_index = params
+            .tin_index
+            .as_ref()
+            .expect("TIN index must exist when TIN accumulator is present");
+        let results = accum.into_result(tin_index);
+        info!(
+            "[{}] Writing TIN results ({} transcripts)...",
+            bam_stem,
+            results.len()
+        );
+        rna::rseqc::tin::write_tin(&results, Path::new(&format!("{prefix}.tin.xls")))?;
+        rna::rseqc::tin::write_tin_summary(
+            &results,
+            bam_path,
+            Path::new(&format!("{prefix}.summary.txt")),
+        )?;
+    }
+
+    // --- preseq (library complexity) ---
+    if let Some(accum) = accums.preseq {
+        let preseq_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("preseq")
+        };
+        std::fs::create_dir_all(&preseq_dir)?;
+        let output_path = preseq_dir.join(format!("{}.lc_extrap.txt", bam_stem));
+        let total_reads = accum.total_fragments;
+        let n_distinct = accum.n_distinct();
+        let histogram = accum.into_histogram();
+        info!(
+            "[{}] Running preseq complexity estimation ({} histogram bins, {} total reads, {} distinct)...",
+            bam_stem,
+            histogram.len(),
+            total_reads,
+            n_distinct,
+        );
+        match rna::preseq::estimate_complexity(
+            &histogram,
+            total_reads,
+            n_distinct,
+            &params.config.preseq,
+        ) {
+            Ok(result) => {
+                rna::preseq::write_output(
+                    &result,
+                    &output_path,
+                    params.config.preseq.confidence_level,
+                )?;
+                info!(
+                    "[{}] preseq: {} extrapolation points written to {}",
+                    bam_stem,
+                    result.curve.len(),
+                    output_path.display()
+                );
+            }
+            Err(e) => {
+                log::warn!("[{}] preseq: skipped — {}", bam_stem, e);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -1244,7 +1451,10 @@ fn run_rseqc_single_pass(
         inner_distance_lower_bound: params.inner_distance_lower_bound,
         inner_distance_upper_bound: params.inner_distance_upper_bound,
         inner_distance_step: params.inner_distance_step,
-        bam_stat_enabled: params.config.bam_stat.enabled,
+        bam_stat_enabled: params.config.bam_stat.enabled
+            || params.config.flagstat.enabled
+            || params.config.idxstats.enabled
+            || params.config.samtools_stats.enabled,
         infer_experiment_enabled: params.config.infer_experiment.enabled
             && params.gene_model.is_some(),
         read_duplication_enabled: params.config.read_duplication.enabled,
@@ -1257,6 +1467,10 @@ fn run_rseqc_single_pass(
         inner_distance_enabled: params.config.inner_distance.enabled
             && params.exon_bitset.is_some()
             && params.transcript_tree.is_some(),
+        tin_enabled: params.config.tin.enabled && params.tin_index.is_some(),
+        tin_sample_size: params.tin_sample_size,
+        tin_min_coverage: params.tin_min_coverage,
+        preseq_enabled: params.config.preseq.enabled,
     };
 
     let annotations = RseqcAnnotations {
@@ -1267,9 +1481,10 @@ fn run_rseqc_single_pass(
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
         ref_chroms: ref_chroms.as_ref(),
+        tin_index: params.tin_index,
     };
 
-    let mut accums = RseqcAccumulators::new(&rseqc_config);
+    let mut accums = RseqcAccumulators::new(&rseqc_config, Some(&annotations));
 
     // Open BAM reader
     let mut bam = bam::Reader::from_path(bam_path)

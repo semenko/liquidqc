@@ -88,6 +88,30 @@ pub struct Config {
     /// inner_distance tool configuration.
     #[serde(default)]
     pub inner_distance: InnerDistanceConfig,
+
+    /// samtools flagstat-compatible output configuration.
+    #[serde(default)]
+    pub flagstat: FlagstatConfig,
+
+    /// samtools idxstats-compatible output configuration.
+    #[serde(default)]
+    pub idxstats: IdxstatsConfig,
+
+    /// TIN (Transcript Integrity Number) tool configuration.
+    #[serde(default)]
+    pub tin: TinConfig,
+
+    /// Gene body coverage + Qualimap-compatible output configuration.
+    #[serde(default)]
+    pub genebody_coverage: GenebodyCoverageConfig,
+
+    /// samtools stats-compatible output configuration (SN section).
+    #[serde(default)]
+    pub samtools_stats: SamtoolsStatsConfig,
+
+    /// preseq lc_extrap library complexity extrapolation configuration.
+    #[serde(default)]
+    pub preseq: PreseqConfig,
 }
 
 // ============================================================================
@@ -429,6 +453,197 @@ impl Default for InnerDistanceConfig {
 }
 
 // ============================================================================
+// samtools-compatible output configurations
+// ============================================================================
+
+/// Configuration for samtools flagstat-compatible output.
+///
+/// When enabled, produces a file matching `samtools flagstat` output format,
+/// which is parseable by MultiQC.
+///
+/// Example:
+/// ```yaml
+/// flagstat:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct FlagstatConfig {
+    /// Whether to generate flagstat output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for FlagstatConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for TIN (Transcript Integrity Number) analysis.
+///
+/// TIN measures per-transcript coverage uniformity using Shannon entropy.
+/// Values range from 0 (completely degraded) to 100 (perfectly uniform).
+///
+/// Example:
+/// ```yaml
+/// tin:
+///   enabled: true
+///   sample_size: 100
+///   min_coverage: 10
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct TinConfig {
+    /// Whether to run TIN analysis. Defaults to true.
+    pub enabled: bool,
+    /// Number of equally-spaced positions to sample per transcript.
+    pub sample_size: Option<u32>,
+    /// Minimum number of reads covering a transcript to compute TIN.
+    pub min_coverage: Option<u32>,
+}
+
+impl Default for TinConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sample_size: None,
+            min_coverage: None,
+        }
+    }
+}
+
+/// Configuration for gene body coverage and Qualimap-compatible output.
+///
+/// When enabled, produces a coverage profile along gene bodies and a
+/// Qualimap-compatible `rnaseq_qc_results.txt` file parseable by MultiQC.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct GenebodyCoverageConfig {
+    /// Whether to produce gene body coverage output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for GenebodyCoverageConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for samtools idxstats-compatible output.
+///
+/// When enabled, produces a file matching `samtools idxstats` output format,
+/// which is parseable by MultiQC.
+///
+/// Example:
+/// ```yaml
+/// idxstats:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct IdxstatsConfig {
+    /// Whether to generate idxstats output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for IdxstatsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for samtools stats-compatible output (SN summary numbers section).
+///
+/// When enabled, produces a file matching the `SN` (Summary Numbers) section
+/// of `samtools stats` output, which is parseable by MultiQC.
+///
+/// Example:
+/// ```yaml
+/// samtools_stats:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct SamtoolsStatsConfig {
+    /// Whether to generate samtools stats SN output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for SamtoolsStatsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+// ============================================================================
+// preseq lc_extrap configuration
+// ============================================================================
+
+/// Configuration for preseq lc_extrap library complexity extrapolation.
+///
+/// Estimates the expected number of distinct molecules as a function of
+/// sequencing depth using Good-Toulmin rational function extrapolation
+/// with bootstrap confidence intervals.
+///
+/// Example:
+/// ```yaml
+/// preseq:
+///   enabled: true
+///   max_extrap: 10000000000
+///   step_size: 1000000
+///   n_bootstraps: 100
+///   confidence_level: 0.95
+///   seed: 1
+///   max_terms: 100
+///   defects: false
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct PreseqConfig {
+    /// Whether to run preseq lc_extrap analysis. Defaults to true.
+    pub enabled: bool,
+
+    /// Maximum extrapolation depth in total reads. Defaults to 1e10.
+    pub max_extrap: f64,
+
+    /// Step size between extrapolation points (in reads). Defaults to 1e6.
+    pub step_size: f64,
+
+    /// Number of bootstrap replicates for confidence intervals. Defaults to 100.
+    pub n_bootstraps: u32,
+
+    /// Confidence level for bootstrap intervals (e.g. 0.95 for 95%). Defaults to 0.95.
+    pub confidence_level: f64,
+
+    /// Random seed for bootstrap reproducibility. Defaults to 1.
+    pub seed: u64,
+
+    /// Maximum number of terms in the power series / continued fraction. Defaults to 100.
+    pub max_terms: usize,
+
+    /// Use the defects model for extrapolation. Defaults to false.
+    ///
+    /// When true, uses a modified rational function approximation that can
+    /// handle certain problematic histograms where the standard method fails.
+    pub defects: bool,
+}
+
+impl Default for PreseqConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_extrap: 1e10,
+            step_size: 1e6,
+            n_bootstraps: 100,
+            confidence_level: 0.95,
+            seed: 1,
+            max_terms: 100,
+            defects: false,
+        }
+    }
+}
+
+// ============================================================================
 // Config implementation
 // ============================================================================
 
@@ -513,6 +728,19 @@ mod tests {
         assert!(config.junction_annotation.enabled);
         assert!(config.junction_saturation.enabled);
         assert!(config.inner_distance.enabled);
+        // samtools-compatible outputs all enabled by default
+        assert!(config.flagstat.enabled);
+        assert!(config.idxstats.enabled);
+        assert!(config.samtools_stats.enabled);
+        // preseq enabled by default with standard defaults
+        assert!(config.preseq.enabled);
+        assert!((config.preseq.max_extrap - 1e10).abs() < 1.0);
+        assert!((config.preseq.step_size - 1e6).abs() < 1.0);
+        assert_eq!(config.preseq.n_bootstraps, 100);
+        assert!((config.preseq.confidence_level - 0.95).abs() < 1e-10);
+        assert_eq!(config.preseq.seed, 1);
+        assert_eq!(config.preseq.max_terms, 100);
+        assert!(!config.preseq.defects);
     }
 
     #[test]

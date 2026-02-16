@@ -2,8 +2,11 @@
 
 Benchmark data and scripts for comparing RustQC against
 [dupRadar](https://bioconductor.org/packages/dupRadar/) (R/Bioconductor),
-[Subread featureCounts](http://subread.sourceforge.net/), and
-[RSeQC](https://rseqc.sourceforge.net/).
+[Subread featureCounts](http://subread.sourceforge.net/),
+[RSeQC](https://rseqc.sourceforge.net/),
+[preseq](https://github.com/smithlabcode/preseq),
+[samtools](http://www.htslib.org/), and
+[Qualimap](http://qualimap.conesalab.org/).
 
 For detailed results, tables, and side-by-side plot comparisons, see the
 documentation:
@@ -11,6 +14,8 @@ documentation:
 - [Combined benchmarks](https://ewels.github.io/RustQC/benchmarks/combined/)
 - [dupRadar benchmarks](https://ewels.github.io/RustQC/benchmarks/dupradar/)
 - [featureCounts benchmarks](https://ewels.github.io/RustQC/benchmarks/featurecounts/)
+- [Preseq benchmarks](https://ewels.github.io/RustQC/benchmarks/preseq/)
+- [Samtools benchmarks](https://ewels.github.io/RustQC/benchmarks/samtools/)
 
 ## Latest results (large dataset)
 
@@ -28,8 +33,13 @@ Mac. Upstream tools run via Docker with x86 emulation; RustQC runs natively.
 | junction_annotation (RSeQC) | 4m 37s |
 | junction_saturation (RSeQC) | 6m 32s |
 | inner_distance (RSeQC) | 1m 09s |
-| **Traditional total** | **1h 25m** |
-| **RustQC (10 threads)** | **3m 56s** |
+| preseq lc_extrap | ~4m |
+| samtools flagstat | ~1m |
+| samtools idxstats | ~1s |
+| samtools stats | ~3m |
+| tin.py (RSeQC) | ~30m |
+| **Traditional total** | **~2h 45m** |
+| **RustQC (10 threads)** | **~5m** |
 
 > **Note:** Docker x86 emulation on ARM inflates the upstream tool timings.
 > The key takeaway is that RustQC replaces 9 separate tool invocations
@@ -42,15 +52,33 @@ benchmark/
   input/            — Shared input files (BAM, GTF, BED, config)
     large/          — Full-size GM12878 dataset (~10 GB BAM)
     small/          — Small chr6 test dataset
+  RustQC/           — RustQC output (all tools, single-pass)
+    large/          — Output for large dataset
+    small/          — Output for small dataset
   dupRadar/         — R dupRadar reference output
     large/          — R script + output for large dataset
     small/          — R script + output for small dataset
-  RustQC/           — RustQC output (dupRadar + featureCounts)
-    large/          — Output for large dataset
-    small/          — Output for small dataset
-  RSeQC/            — Python RSeQC reference output
+  rseqc/            — Python RSeQC reference output
     large/          — Reference output for large dataset
+      bam_stat/
+      infer_experiment/
+      read_distribution/
+      read_duplication/
+      junction_annotation/
+      junction_saturation/
+      inner_distance/
+      tin/
     small/          — Reference output for small dataset
+      (same tool subdirectories)
+  samtools/         — samtools reference output
+    large/          — flagstat, idxstats, stats
+    small/
+  preseq/           — preseq lc_extrap reference output
+    large/          — PE and SE reference extrapolations
+    small/
+  qualimap/         — Qualimap rnaseq reference output
+    large/          — Gene body coverage, QC results
+    small/
 ```
 
 ## Benchmark data
@@ -62,6 +90,10 @@ annotation (2,905 genes), and a BED12 gene model for RSeQC tools.
 
 - `input/small/test.bam` + `input/small/chr6.gtf` + `input/small/chr6.bed`
 - `dupRadar/small/` — R dupRadar reference output
+- `rseqc/small/` — Python RSeQC reference output (per-tool subdirectories)
+- `samtools/small/` — samtools reference output
+- `preseq/small/` — preseq reference output
+- `qualimap/small/` — Qualimap reference output
 - `RustQC/small/` — RustQC output
 
 ### Large benchmark
@@ -82,7 +114,7 @@ genome-matched GTF with matching Ensembl chromosome names.
 ### RSeQC reference outputs
 
 Reference outputs for validating RSeQC reimplementations are stored in
-`RSeQC/small/` and `RSeQC/large/`. These were generated with
+`rseqc/small/` and `rseqc/large/` in per-tool subdirectories. These were generated with
 [RSeQC 5.0.4](https://rseqc.sourceforge.net/) run via Docker
 (`--platform linux/amd64`).
 
@@ -215,36 +247,137 @@ RSEQC_IMG="wave.seqera.io/wt/ea3e9f972b6e/wave/build:rseqc-5.0.4--14c99cde3bff8d
 
 # bam_stat
 docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
-  $RSEQC_IMG bam_stat.py -i /data/test.bam > benchmark/RSeQC/small/bam_stat.txt 2>&1
+  $RSEQC_IMG bam_stat.py -i /data/test.bam > benchmark/rseqc/small/bam_stat/bam_stat.txt 2>&1
 
 # infer_experiment
 docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
   $RSEQC_IMG infer_experiment.py -i /data/test.bam -r /data/chr6.bed \
-  > benchmark/RSeQC/small/infer_experiment.txt 2>&1
+  > benchmark/rseqc/small/infer_experiment/infer_experiment.txt 2>&1
 
 # read_duplication
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/read_duplication:/out \
   $RSEQC_IMG read_duplication.py -i /data/test.bam -o /out/read_duplication
 
 # read_distribution
 docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
   $RSEQC_IMG read_distribution.py -i /data/test.bam -r /data/chr6.bed \
-  > benchmark/RSeQC/small/read_distribution.txt 2>&1
+  > benchmark/rseqc/small/read_distribution/read_distribution.txt 2>&1
 
 # junction_annotation
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/junction_annotation:/out \
   $RSEQC_IMG junction_annotation.py -i /data/test.bam -r /data/chr6.bed -o /out/junction_annotation
 
 # junction_saturation
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/junction_saturation:/out \
   $RSEQC_IMG junction_saturation.py -i /data/test.bam -r /data/chr6.bed -o /out/junction_saturation
 
 # inner_distance
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/inner_distance:/out \
   $RSEQC_IMG inner_distance.py -i /data/test.bam -r /data/chr6.bed -o /out/inner_distance
 ```
 
-### 7. Compare results
+### 7. Generate samtools reference outputs
+
+Reference outputs for validating the samtools reimplementations are stored in
+`samtools/small/` and `samtools/large/`.
+
+```bash
+SAMTOOLS_IMG="quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
+
+# Small
+docker run --rm -v $(pwd)/benchmark/input/small:/data $SAMTOOLS_IMG \
+  samtools flagstat /data/test.bam > benchmark/samtools/small/flagstat.txt
+docker run --rm -v $(pwd)/benchmark/input/small:/data $SAMTOOLS_IMG \
+  samtools idxstats /data/test.bam > benchmark/samtools/small/idxstats.txt
+docker run --rm -v $(pwd)/benchmark/input/small:/data $SAMTOOLS_IMG \
+  samtools stats /data/test.bam > benchmark/samtools/small/stats.txt
+
+# Large
+docker run --rm -v $(pwd)/benchmark/input/large:/data $SAMTOOLS_IMG \
+  samtools flagstat /data/GM12878_REP1.markdup.sorted.bam > benchmark/samtools/large/flagstat.txt
+docker run --rm -v $(pwd)/benchmark/input/large:/data $SAMTOOLS_IMG \
+  samtools idxstats /data/GM12878_REP1.markdup.sorted.bam > benchmark/samtools/large/idxstats.txt
+docker run --rm -v $(pwd)/benchmark/input/large:/data $SAMTOOLS_IMG \
+  samtools stats /data/GM12878_REP1.markdup.sorted.bam > benchmark/samtools/large/stats.txt
+```
+
+### 8. Generate preseq reference outputs
+
+Reference outputs for validating the preseq `lc_extrap` reimplementation are stored
+in `preseq/small/` and `preseq/large/`. These were generated with
+[preseq 3.2.0](https://github.com/smithlabcode/preseq) run via Docker.
+
+Two reference files are provided per dataset:
+
+| File | Mode | Command |
+| ---- | ---- | ------- |
+| `lc_extrap_se.txt` | SE (default) | `preseq lc_extrap -bam -seed 1` |
+| `lc_extrap_pe.txt` | PE (nf-core style) | `preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000` |
+
+The **PE reference** matches the invocation used by
+[nf-core/rnaseq](https://nf-co.re/rnaseq), which auto-adds `-pe` for
+paired-end data with a large `-seg_len` window. Both references use the
+coordinate-sorted BAM directly (no name-sorting required).
+
+```bash
+PRESEQ_IMG="quay.io/biocontainers/preseq:3.2.0--hdcf5f25_6"
+
+# Small
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/benchmark:/data \
+  $PRESEQ_IMG preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000 \
+  -output /data/preseq/small/lc_extrap_pe.txt /data/input/small/test.bam
+
+# Large — SE reference
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/benchmark:/data \
+  $PRESEQ_IMG preseq lc_extrap -bam -seed 1 \
+  -output /data/preseq/large/lc_extrap_se.txt \
+  /data/input/large/GM12878_REP1.markdup.sorted.bam
+
+# Large — PE reference (nf-core/rnaseq style)
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/benchmark:/data \
+  $PRESEQ_IMG preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000 \
+  -output /data/preseq/large/lc_extrap_pe.txt \
+  /data/input/large/GM12878_REP1.markdup.sorted.bam
+```
+
+> **Note:** preseq's `-pe` mode on coordinate-sorted BAMs uses the `-seg_len`
+> parameter to find mates within a window. Without `-pe`, preseq treats every
+> mapped read independently using only `{tid, pos}` as the unique identifier,
+> even for paired-end BAMs. The nf-core/rnaseq pipeline always passes `-pe`
+> for paired-end data.
+
+### 9. Generate Qualimap reference outputs
+
+Reference outputs for validating the gene body coverage reimplementation are
+stored in `qualimap/small/` and `qualimap/large/`. These were generated with
+[Qualimap 2.3](http://qualimap.conesalab.org/) run via Docker.
+
+```bash
+QUALIMAP_IMG="quay.io/biocontainers/qualimap:2.3--hdfd78af_0"
+
+# Small (requires uncompressed GTF)
+gunzip -k benchmark/input/small/chr6.gtf.gz
+docker run --rm -v $(pwd)/benchmark:/data \
+  $QUALIMAP_IMG qualimap rnaseq \
+  -bam /data/input/small/test.bam -gtf /data/input/small/chr6.gtf \
+  -outdir /data/qualimap_tmp_small --java-mem-size=4G -pe
+cp benchmark/qualimap_tmp_small/rnaseq_qc_results.txt benchmark/qualimap/small/
+cp "benchmark/qualimap_tmp_small/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt" benchmark/qualimap/small/
+
+# Large
+gunzip -k benchmark/input/large/genes.gtf.gz
+docker run --rm -v $(pwd)/benchmark:/data \
+  $QUALIMAP_IMG qualimap rnaseq \
+  -bam /data/input/large/GM12878_REP1.markdup.sorted.bam -gtf /data/input/large/genes.gtf \
+  -outdir /data/qualimap_tmp_large --java-mem-size=8G -pe
+cp benchmark/qualimap_tmp_large/rnaseq_qc_results.txt benchmark/qualimap/large/
+cp "benchmark/qualimap_tmp_large/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt" benchmark/qualimap/large/
+```
+
+### 10. Compare results
 
 ```bash
 # Compare duplication matrices cell-by-cell
