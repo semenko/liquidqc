@@ -336,21 +336,33 @@ impl TranscriptTree {
 // ============================================================================
 
 /// Build histogram bins for inner distances.
+///
+/// Uses sort + single linear scan (O(n log n + m)) instead of per-bin filtering
+/// (O(n × m)) where n = distances.len() and m = number of bins.
 pub fn build_histogram(
     distances: &[i64],
     lower_bound: i64,
     upper_bound: i64,
     step: i64,
 ) -> Vec<(i64, i64, u64)> {
+    let mut sorted = distances.to_vec();
+    sorted.sort_unstable();
+
     let mut bins: Vec<(i64, i64, u64)> = Vec::new();
+    let mut cursor = 0;
     let mut bin_start = lower_bound;
     while bin_start < upper_bound {
         let bin_end = bin_start + step;
-        let count = distances
-            .iter()
-            .filter(|&&d| d > bin_start && d <= bin_end)
-            .count() as u64;
-        bins.push((bin_start, bin_end, count));
+        // Skip values <= bin_start
+        while cursor < sorted.len() && sorted[cursor] <= bin_start {
+            cursor += 1;
+        }
+        // Count values in (bin_start, bin_end]
+        let start_cursor = cursor;
+        while cursor < sorted.len() && sorted[cursor] <= bin_end {
+            cursor += 1;
+        }
+        bins.push((bin_start, bin_end, (cursor - start_cursor) as u64));
         bin_start = bin_end;
     }
     bins

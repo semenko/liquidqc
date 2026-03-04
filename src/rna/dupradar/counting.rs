@@ -1035,6 +1035,33 @@ fn process_chromosome_batch(
 ///
 /// # Arguments
 /// * `bam_path` - Path to the duplicate-marked alignment file (BAM/CRAM must have
+/// Partition chromosome indices across workers using greedy bin-packing
+/// (largest-first scheduling). Assigns each chromosome to the worker with the
+/// smallest current total length, producing a more balanced distribution than
+/// round-robin when chromosome sizes vary widely.
+fn partition_chromosomes(lengths: &[u64], num_workers: usize) -> Vec<Vec<u32>> {
+    let mut batches: Vec<Vec<u32>> = vec![Vec::new(); num_workers];
+    let mut loads: Vec<u64> = vec![0; num_workers];
+
+    // Sort chromosome indices by length descending
+    let mut order: Vec<u32> = (0..lengths.len() as u32).collect();
+    order.sort_unstable_by(|&a, &b| lengths[b as usize].cmp(&lengths[a as usize]));
+
+    // Assign each chromosome to the least-loaded worker
+    for tid in order {
+        let min_worker = loads
+            .iter()
+            .enumerate()
+            .min_by_key(|&(_, &load)| load)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        batches[min_worker].push(tid);
+        loads[min_worker] += lengths[tid as usize];
+    }
+
+    batches
+}
+
 ///   an index for `threads > 1`; SAM files always use single-threaded mode)
 /// * `genes` - Gene annotation map from GTF parsing
 /// * `stranded` - Library strandedness (0, 1, or 2)
@@ -1066,7 +1093,7 @@ pub fn count_reads(
 
     // Get chromosome names from header using a temporary reader,
     // and verify that duplicates have been marked in the BAM file.
-    let tid_to_name: Vec<String> = {
+    let (tid_to_name, tid_to_len): (Vec<String>, Vec<u64>) = {
         let mut bam = bam::Reader::from_path(bam_path)
             .with_context(|| format!("Failed to open alignment file: {}", bam_path))?;
         if let Some(ref_path) = reference {
@@ -1082,9 +1109,13 @@ pub fn count_reads(
             verify_duplicates_marked(&header, bam_path)?;
         }
 
-        (0..header.target_count())
+        let names = (0..header.target_count())
             .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
-            .collect()
+            .collect();
+        let lengths = (0..header.target_count())
+            .map(|tid| header.target_len(tid).unwrap_or(0))
+            .collect();
+        (names, lengths)
     };
 
     // Check if an alignment index is available for parallel processing
@@ -1120,11 +1151,16 @@ pub fn count_reads(
         let num_chroms = tid_to_name.len();
         let num_workers = threads.min(num_chroms).max(1);
 
-        // Distribute chromosomes round-robin across workers for balanced load
-        // (chromosomes vary widely in size, so round-robin spreads large ones)
-        let mut batches: Vec<Vec<u32>> = vec![Vec::new(); num_workers];
-        for (i, _name) in tid_to_name.iter().enumerate() {
-            batches[i % num_workers].push(i as u32);
+        // Distribute chromosomes using greedy bin-packing (largest-first) for
+        // balanced load — assigns each chromosome to the worker with the smallest
+        // current total, preventing large chromosomes from clustering on one thread.
+        let batches = partition_chromosomes(&tid_to_len, num_workers);
+        if log::log_enabled!(log::Level::Debug) {
+            let worker_loads: Vec<u64> = batches
+                .iter()
+                .map(|b| b.iter().map(|&tid| tid_to_len[tid as usize]).sum())
+                .collect();
+            debug!("Chromosome load distribution across {} workers: {:?}", num_workers, worker_loads);
         }
 
         // Configure rayon thread pool
@@ -1959,5 +1995,51 @@ mod tests {
         assert_eq!(result.fc_ambiguous, 1);
         assert_eq!(result.gene_counts[0].fc_reads, 2);
         assert_eq!(result.gene_counts[1].fc_reads, 0);
+    }
+
+    // --- Chromosome partitioning tests ---
+
+    #[test]
+    fn test_partition_chromosomes_balanced() {
+        // Simulate human-like chromosome sizes (large variation)
+        let lengths = vec![250, 243, 198, 191, 182, 171, 159, 146, 138, 133, 135, 130, 57];
+        let batches = partition_chromosomes(&lengths, 4);
+
+        assert_eq!(batches.len(), 4);
+
+        // Every chromosome should appear exactly once
+        let mut all_tids: Vec<u32> = batches.iter().flatten().copied().collect();
+        all_tids.sort();
+        assert_eq!(all_tids, (0..13).collect::<Vec<u32>>());
+
+        // Check that loads are reasonably balanced (no worker > 1.3× average)
+        let total: u64 = lengths.iter().sum();
+        let avg = total as f64 / 4.0;
+        for batch in &batches {
+            let load: u64 = batch.iter().map(|&tid| lengths[tid as usize]).sum();
+            assert!(
+                (load as f64) < avg * 1.3,
+                "Worker load {} exceeds 1.3× average {:.0}",
+                load,
+                avg
+            );
+        }
+    }
+
+    #[test]
+    fn test_partition_chromosomes_single_worker() {
+        let lengths = vec![100, 200, 300];
+        let batches = partition_chromosomes(&lengths, 1);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].len(), 3);
+    }
+
+    #[test]
+    fn test_partition_chromosomes_more_workers_than_chroms() {
+        let lengths = vec![100, 200];
+        let batches = partition_chromosomes(&lengths, 4);
+        assert_eq!(batches.len(), 4);
+        let non_empty: usize = batches.iter().filter(|b| !b.is_empty()).count();
+        assert_eq!(non_empty, 2);
     }
 }
