@@ -272,16 +272,25 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
 pub fn write_summary(results: &JunctionResults, path: &Path) -> Result<()> {
     let mut f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
+    write_summary_to(results, &mut f)?;
+    Ok(())
+}
 
-    // Junction-level counts
+/// Print the summary to stderr (matching RSeQC behavior).
+pub fn print_summary(results: &JunctionResults) {
+    let mut stderr = std::io::stderr();
+    // Ignore write errors to stderr
+    let _ = write_summary_to(results, &mut stderr);
+}
+
+/// Write the junction annotation summary to any writer.
+fn write_summary_to<W: std::io::Write>(results: &JunctionResults, f: &mut W) -> Result<()> {
     let jc = results.junction_counts();
 
     writeln!(
         f,
         "==================================================================="
     )?;
-
-    // Events section
     writeln!(f, "Total splicing  Events:\t{}", results.total_events)?;
     writeln!(f, "Known Splicing Events:\t{}", results.known_events)?;
     writeln!(
@@ -295,14 +304,11 @@ pub fn write_summary(results: &JunctionResults, path: &Path) -> Result<()> {
         results.complete_novel_events
     )?;
     writeln!(f, "Filtered Splicing Events:\t{}", results.filtered_events)?;
-
-    // Junctions section
     writeln!(f)?;
     writeln!(f, "Total splicing  Junctions:\t{}", jc.total)?;
     writeln!(f, "Known Splicing Junctions:\t{}", jc.known)?;
     writeln!(f, "Partial Novel Splicing Junctions:\t{}", jc.partial_novel)?;
     writeln!(f, "Novel Splicing Junctions:\t{}", jc.novel)?;
-
     writeln!(f)?;
     writeln!(
         f,
@@ -310,29 +316,6 @@ pub fn write_summary(results: &JunctionResults, path: &Path) -> Result<()> {
     )?;
 
     Ok(())
-}
-
-/// Print the summary to stderr (matching RSeQC behavior).
-pub fn print_summary(results: &JunctionResults) {
-    // Junction-level counts
-    let jc = results.junction_counts();
-
-    eprintln!("===================================================================");
-    eprintln!("Total splicing  Events:\t{}", results.total_events);
-    eprintln!("Known Splicing Events:\t{}", results.known_events);
-    eprintln!(
-        "Partial Novel Splicing Events:\t{}",
-        results.partial_novel_events
-    );
-    eprintln!("Novel Splicing Events:\t{}", results.complete_novel_events);
-    eprintln!("Filtered Splicing Events:\t{}", results.filtered_events);
-    eprintln!();
-    eprintln!("Total splicing  Junctions:\t{}", jc.total);
-    eprintln!("Known Splicing Junctions:\t{}", jc.known);
-    eprintln!("Partial Novel Splicing Junctions:\t{}", jc.partial_novel);
-    eprintln!("Novel Splicing Junctions:\t{}", jc.novel);
-    eprintln!();
-    eprintln!("===================================================================");
 }
 
 // ===================================================================

@@ -175,20 +175,7 @@ fn verify_duplicates_marked(header: &bam::HeaderView, bam_path: &str) -> Result<
 // BAM flag constants
 // ===================================================================
 
-/// Flag indicating the read is a PCR or optical duplicate (0x400).
-const BAM_FDUP: u16 = 0x400;
-/// Flag indicating the read is unmapped (0x4).
-const BAM_FUNMAP: u16 = 0x4;
-/// Flag indicating the read failed quality checks (0x200).
-const BAM_FQCFAIL: u16 = 0x200;
-/// Flag indicating a supplementary alignment (0x800).
-const BAM_FSUPPLEMENTARY: u16 = 0x800;
-/// Flag indicating the read is paired (0x1).
-const BAM_FPAIRED: u16 = 0x1;
-/// Flag indicating it is the first read in a pair (0x40).
-const BAM_FREAD1: u16 = 0x40;
-/// Flag indicating the read is reverse-complemented (0x10).
-const BAM_FREVERSE: u16 = 0x10;
+use crate::rna::bam_flags::*;
 
 /// Counts for a single gene across the four counting modes.
 #[derive(Debug, Clone, Default)]
@@ -724,10 +711,9 @@ fn process_chromosome_batch(
     }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
-    // Pre-compute resolved chromosome names for RSeQC tools.
-    // These apply the chromosome prefix and mapping (BAM name -> GTF name)
-    // so that RSeQC annotation lookups match the GTF-derived data structures.
-    let tid_to_rseqc_chrom: Vec<String> = tid_to_name
+    // Pre-compute resolved chromosome names per TID (apply prefix/mapping once,
+    // not on every read). Used by both featureCounts counting and RSeQC tools.
+    let tid_to_gtf_chrom: Vec<String> = tid_to_name
         .iter()
         .map(|bam_name| {
             if let Some(mapped) = chrom_mapping.get(bam_name.as_str()) {
@@ -739,24 +725,10 @@ fn process_chromosome_batch(
             }
         })
         .collect();
-    let tid_to_rseqc_chrom_upper: Vec<String> = tid_to_rseqc_chrom
+    let tid_to_rseqc_chrom = &tid_to_gtf_chrom;
+    let tid_to_rseqc_chrom_upper: Vec<String> = tid_to_gtf_chrom
         .iter()
         .map(|s| s.to_uppercase())
-        .collect();
-
-    // Pre-compute GTF chromosome names per TID (apply prefix/mapping once,
-    // not on every read)
-    let tid_to_gtf_chrom: Vec<String> = tid_to_name
-        .iter()
-        .map(|bam_chrom| {
-            if let Some(mapped) = chrom_mapping.get(bam_chrom.as_str()) {
-                mapped.clone()
-            } else if let Some(prefix) = chrom_prefix {
-                format!("{}{}", prefix, bam_chrom)
-            } else {
-                bam_chrom.clone()
-            }
-        })
         .collect();
 
     // Open an indexed reader for this thread (supports BAM with .bai/.csi and CRAM with .crai)

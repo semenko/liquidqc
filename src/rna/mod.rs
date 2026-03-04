@@ -3,6 +3,7 @@
 //! Contains dupRadar duplication rate analysis, featureCounts-compatible output,
 //! and RSeQC tool reimplementations.
 
+pub mod bam_flags;
 pub mod dupradar;
 pub mod featurecounts;
 pub mod genebody;

@@ -621,18 +621,7 @@ fn table_row(html: &mut String, label: &str, value: &str) {
     html.push_str("</tr>\n");
 }
 
-/// Format a `u64` with comma separators (e.g., `1,234,567`).
-fn format_with_commas(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
-}
+use crate::io::format_with_commas;
 
 /// Format the current local date/time as `YYYY/MM/DD HH:MM:SS`.
 ///

@@ -4,11 +4,7 @@
 //! to 100 percentile bins (5'→3'). Produces Qualimap rnaseq-compatible output
 //! for MultiQC parsing.
 
-use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use log::{debug, info};
-use std::io::Write;
-use std::path::Path;
 
 use crate::gtf::Gene;
 
@@ -21,7 +17,6 @@ const NUM_BINS: usize = 100;
 
 /// Per-gene exon structure for mapping genomic positions to transcript percentiles.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct GeneExonMap {
     /// Sorted exon intervals in 0-based half-open coordinates `(start, end)`.
     pub exons: Vec<(u64, u64)>,
@@ -98,16 +93,10 @@ impl TranscriptPositionMap {
     }
 
     /// Get the exon map for a gene by index.
-    #[allow(dead_code)]
     pub fn get(&self, gene_idx: usize) -> Option<&GeneExonMap> {
         self.genes.get(gene_idx).and_then(|m| m.as_ref())
     }
 
-    /// Number of genes in the map.
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.genes.len()
-    }
 }
 
 // ============================================================
@@ -296,8 +285,8 @@ impl GenebodyCoverageAccum {
 // ============================================================
 
 /// Gene body coverage results.
-#[allow(dead_code)]
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GenebodyCoverageResult {
     /// Coverage profile bins (100 percentile bins).
     pub coverage_bins: [f64; NUM_BINS],
@@ -369,143 +358,6 @@ impl GenebodyCoverageAccum {
     }
 }
 
-/// Write the coverage profile along genes in Qualimap format.
-///
-/// Format: TSV with columns `position` (0.0–99.0) and `coverage` (cumulative depth).
-#[allow(dead_code)]
-pub fn write_coverage_profile(result: &GenebodyCoverageResult, output_path: &Path) -> Result<()> {
-    let mut f = std::fs::File::create(output_path)
-        .with_context(|| format!("Failed to create {}", output_path.display()))?;
-
-    for (i, &val) in result.coverage_bins.iter().enumerate() {
-        writeln!(f, "{:.1}\t{}", i as f64, val)?;
-    }
-
-    debug!("Wrote coverage profile to {}", output_path.display());
-    Ok(())
-}
-
-/// Format a number with comma-separated thousands.
-#[allow(dead_code)]
-fn format_with_commas(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
-}
-
-/// Write Qualimap rnaseq-compatible results file.
-///
-/// Format matches `rnaseq_qc_results.txt` expected by MultiQC.
-#[allow(dead_code)]
-pub fn write_qualimap_results(
-    result: &GenebodyCoverageResult,
-    bam_path: &str,
-    total_alignments: u64,
-    secondary: u64,
-    output_path: &Path,
-) -> Result<()> {
-    let mut f = std::fs::File::create(output_path)
-        .with_context(|| format!("Failed to create {}", output_path.display()))?;
-
-    let reads_aligned = total_alignments - secondary;
-    let total_bases = result.exonic + result.intronic + result.intergenic;
-
-    let pct = |n: u64, d: u64| -> String {
-        if d == 0 {
-            "0".to_string()
-        } else {
-            format!("{:.2}", n as f64 / d as f64 * 100.0)
-        }
-    };
-
-    writeln!(f, ">>>>>>> Input")?;
-    writeln!(f)?;
-    writeln!(f, "     bam file = {}", bam_path)?;
-    writeln!(f)?;
-
-    writeln!(f, ">>>>>>> Reads alignment")?;
-    writeln!(f)?;
-    writeln!(
-        f,
-        "     reads aligned = {}",
-        format_with_commas(reads_aligned)
-    )?;
-    writeln!(
-        f,
-        "     total alignments = {}",
-        format_with_commas(total_alignments)
-    )?;
-    writeln!(
-        f,
-        "     secondary alignments = {}",
-        format_with_commas(secondary)
-    )?;
-    writeln!(
-        f,
-        "     non-unique alignments = {}",
-        format_with_commas(secondary)
-    )?;
-    writeln!(
-        f,
-        "     aligned to genes = {}",
-        format_with_commas(result.aligned_to_genes)
-    )?;
-    writeln!(
-        f,
-        "     ambiguous alignments = {}",
-        format_with_commas(result.ambiguous)
-    )?;
-    writeln!(
-        f,
-        "     no feature assigned = {}",
-        format_with_commas(result.no_feature)
-    )?;
-    writeln!(f)?;
-
-    writeln!(f, ">>>>>>> Reads genomic origin")?;
-    writeln!(f)?;
-    writeln!(
-        f,
-        "     exonic = {} ({}%)",
-        format_with_commas(result.exonic),
-        pct(result.exonic, total_bases)
-    )?;
-    writeln!(
-        f,
-        "     intronic = {} ({}%)",
-        format_with_commas(result.intronic),
-        pct(result.intronic, total_bases)
-    )?;
-    writeln!(
-        f,
-        "     intergenic = {} ({}%)",
-        format_with_commas(result.intergenic),
-        pct(result.intergenic, total_bases)
-    )?;
-    writeln!(
-        f,
-        "     overlapping exon = {} ({}%)",
-        format_with_commas(result.overlapping_exon),
-        pct(result.overlapping_exon, result.aligned_to_genes)
-    )?;
-    writeln!(f)?;
-
-    writeln!(f, ">>>>>>> Transcript coverage profile")?;
-    writeln!(f)?;
-    writeln!(f, "     5' bias = {:.2}", result.bias_5prime)?;
-    writeln!(f, "     3' bias = {:.2}", result.bias_3prime)?;
-    writeln!(f, "     5'-3' bias = {:.2}", result.bias_5_to_3)?;
-
-    info!("Wrote Qualimap results to {}", output_path.display());
-    Ok(())
-}
-
 // ============================================================
 // Unit tests
 // ============================================================
@@ -513,14 +365,6 @@ pub fn write_qualimap_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_with_commas() {
-        assert_eq!(format_with_commas(0), "0");
-        assert_eq!(format_with_commas(999), "999");
-        assert_eq!(format_with_commas(1000), "1,000");
-        assert_eq!(format_with_commas(1234567), "1,234,567");
-    }
 
     #[test]
     fn test_median() {

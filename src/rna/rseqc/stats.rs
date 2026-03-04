@@ -205,10 +205,10 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     sn_no_comment(&mut out, "bases trimmed:", 0_u64)?;
     sn_no_comment(&mut out, "bases duplicated:", result.bases_duplicated)?;
     sn(&mut out, "mismatches:", result.mismatches, "from NM fields")?;
-    sn_str(
+    sn(
         &mut out,
         "error rate:",
-        &fmt_sci(error_rate),
+        fmt_sci(error_rate),
         "mismatches / bases mapped (cigar)",
     )?;
     sn_no_comment(&mut out, "average length:", avg_len as u64)?;
@@ -267,12 +267,6 @@ fn sn<W: std::io::Write, V: std::fmt::Display>(
     value: V,
     comment: &str,
 ) -> Result<()> {
-    writeln!(out, "SN\t{key}\t{value}\t# {comment}")?;
-    Ok(())
-}
-
-/// Write a single SN line with a pre-formatted string value.
-fn sn_str<W: std::io::Write>(out: &mut W, key: &str, value: &str, comment: &str) -> Result<()> {
     writeln!(out, "SN\t{key}\t{value}\t# {comment}")?;
     Ok(())
 }

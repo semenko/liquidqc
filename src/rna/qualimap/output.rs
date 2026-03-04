@@ -37,22 +37,7 @@ const MIN_TRANSCRIPT_LENGTH_FOR_BIAS: usize = 500;
 // ============================= Number Formatting ===============================
 
 /// Format an integer with comma separators (e.g., 1234567 → "1,234,567").
-fn format_with_commas(n: u64) -> String {
-    let s = n.to_string();
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    if len <= 3 {
-        return s;
-    }
-    let mut result = String::with_capacity(len + (len - 1) / 3);
-    for (i, &b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i).is_multiple_of(3) {
-            result.push(',');
-        }
-        result.push(b as char);
-    }
-    result
-}
+use crate::io::format_with_commas;
 
 /// Format a percentage with Qualimap-style precision.
 ///

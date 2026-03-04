@@ -22,20 +22,7 @@ use super::read_duplication::ReadDuplicationResult;
 use super::tin::TinAccum;
 use crate::rna::preseq::PreseqAccum;
 
-// ===================================================================
-// BAM flag constants
-// ===================================================================
-
-const BAM_FPAIRED: u16 = 0x1;
-const BAM_FPROPER_PAIR: u16 = 0x2;
-const BAM_FUNMAP: u16 = 0x4;
-const BAM_FREVERSE: u16 = 0x10;
-const BAM_FREAD1: u16 = 0x40;
-const BAM_FREAD2: u16 = 0x80;
-const BAM_FSECONDARY: u16 = 0x100;
-const BAM_FQCFAIL: u16 = 0x200;
-const BAM_FDUP: u16 = 0x400;
-const BAM_FSUPPLEMENTARY: u16 = 0x800;
+use crate::rna::bam_flags::*;
 
 // ===================================================================
 // Shared references to annotation data
@@ -50,9 +37,6 @@ pub struct RseqcAnnotations<'a> {
     pub gene_model: Option<&'a GeneModel>,
     /// Reference junctions for junction_annotation.
     pub ref_junctions: Option<&'a ReferenceJunctions>,
-    /// Known junction set for junction_saturation (used at result-conversion time).
-    #[allow(dead_code)]
-    pub known_junctions: Option<&'a KnownJunctionSet>,
     /// Genomic region sets for read_distribution.
     pub rd_regions: Option<&'a RegionSets>,
     /// Exon bitset for inner_distance.
@@ -240,11 +224,6 @@ pub struct BamStatAccum {
     /// Primary non-QC-fail mapped paired reads where mate is also mapped.
     pub reads_mapped_and_paired: u64,
 }
-
-/// Mate unmapped flag (0x8).
-const BAM_FMUNMAP: u16 = 0x8;
-/// Mate reverse strand flag (0x20).
-const BAM_FMREVERSE: u16 = 0x20;
 
 impl BamStatAccum {
     /// Process a single BAM record. Called for EVERY record (before counting filters).

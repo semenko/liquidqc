@@ -410,7 +410,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         inner_distance_upper_bound: args.inner_distance_upper_bound,
         inner_distance_step: args.inner_distance_step,
         tin_index: tin_index.as_ref(),
-        tin_sample_size: config.tin.sample_size.unwrap_or(100) as usize,
+        tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
         gtf_path: args.gtf.as_deref(),
     };
@@ -629,7 +629,6 @@ fn process_single_bam(
     let rseqc_annotations = RseqcAnnotations {
         gene_model: params.gene_model,
         ref_junctions: params.ref_junctions,
-        known_junctions: params.known_junctions,
         rd_regions: params.rd_regions,
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
@@ -1237,9 +1236,11 @@ fn write_rseqc_outputs(
     if let Some(accum) = accums.read_dist {
         info!("[{}] Writing read_distribution results...", bam_stem);
         std::fs::create_dir_all(&rseqc_read_dist_dir)?;
-        // Safety: rd_regions is Some when read_distribution_enabled is true,
-        // which is required for this accumulator to exist.
-        let result = accum.into_result(params.rd_regions.unwrap());
+        let result = accum.into_result(
+            params
+                .rd_regions
+                .expect("rd_regions must be Some when read_distribution accumulator exists"),
+        );
         let output_path = rseqc_read_dist_dir.join(format!("{}.read_distribution.txt", bam_stem));
         rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
         info!(
@@ -1287,10 +1288,10 @@ fn write_rseqc_outputs(
             .join(bam_stem)
             .to_string_lossy()
             .to_string();
-        // Safety: known_junctions is Some when junction_saturation_enabled is true,
-        // which is required for this accumulator to exist.
         let results = accum.into_result(
-            params.known_junctions.unwrap(),
+            params
+                .known_junctions
+                .expect("known_junctions must be Some when junction_saturation accumulator exists"),
             params.junction_saturation_percentile_floor as u32,
             params.junction_saturation_percentile_ceiling as u32,
             params.junction_saturation_percentile_step as u32,
@@ -1486,7 +1487,6 @@ fn run_rseqc_single_pass(
     let annotations = RseqcAnnotations {
         gene_model: params.gene_model,
         ref_junctions: params.ref_junctions,
-        known_junctions: params.known_junctions,
         rd_regions: params.rd_regions,
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,

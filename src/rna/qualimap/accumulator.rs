@@ -36,19 +36,7 @@ struct CachedBlockHits {
     has_overlap_not_enclosed: bool,
 }
 
-// ============================================================
-// BAM flag constants
-// ============================================================
-
-const BAM_FUNMAP: u16 = 0x4;
-const BAM_FSECONDARY: u16 = 0x100;
-const BAM_FQCFAIL: u16 = 0x200;
-const BAM_FSUPPLEMENTARY: u16 = 0x800;
-const BAM_FPAIRED: u16 = 0x1;
-const BAM_FPROPER_PAIR: u16 = 0x2;
-const BAM_FREAD1: u16 = 0x40;
-const BAM_FREAD2: u16 = 0x80;
-const BAM_FREVERSE: u16 = 0x10;
+use crate::rna::bam_flags::*;
 
 // ============================================================
 // Mate buffer for PE reads

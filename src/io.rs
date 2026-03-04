@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::Path;
 
 /// Gzip magic bytes: the first two bytes of any gzip-compressed file.
@@ -35,9 +35,9 @@ pub fn open_reader<P: AsRef<Path>>(path: P) -> Result<Box<dyn BufRead>> {
         .read(&mut magic)
         .with_context(|| format!("Failed to read from file: {}", path.display()))?;
 
-    // Re-open the file so the reader starts from byte 0
-    let file =
-        File::open(path).with_context(|| format!("Failed to open file: {}", path.display()))?;
+    // Seek back to the beginning so the reader starts from byte 0
+    file.seek(std::io::SeekFrom::Start(0))
+        .with_context(|| format!("Failed to seek in file: {}", path.display()))?;
 
     if bytes_read >= 2 && magic == GZIP_MAGIC {
         log::debug!("Detected gzip compression: {}", path.display());
@@ -67,6 +67,28 @@ pub fn read_to_string<P: AsRef<Path>>(path: P) -> Result<String> {
         .read_to_string(&mut contents)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
     Ok(contents)
+}
+
+// ============================================================
+// Formatting helpers
+// ============================================================
+
+/// Format a `u64` with comma-separated thousands (e.g. `1,234,567`).
+pub fn format_with_commas(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    if len <= 3 {
+        return s;
+    }
+    let mut result = String::with_capacity(len + (len - 1) / 3);
+    for (i, &b) in bytes.iter().enumerate() {
+        if i > 0 && (len - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(b as char);
+    }
+    result
 }
 
 // ============================================================
@@ -118,6 +140,14 @@ mod tests {
         encoder.write_all(content.as_bytes()).unwrap();
         encoder.finish().unwrap();
         path
+    }
+
+    #[test]
+    fn test_format_with_commas() {
+        assert_eq!(format_with_commas(0), "0");
+        assert_eq!(format_with_commas(999), "999");
+        assert_eq!(format_with_commas(1000), "1,000");
+        assert_eq!(format_with_commas(1234567), "1,234,567");
     }
 
     #[test]
