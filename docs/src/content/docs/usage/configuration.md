@@ -28,8 +28,8 @@ CLI flags take precedence over config file values.
 
 ```yaml
 # Library settings
-stranded: 0       # 0=unstranded, 1=forward, 2=reverse
-paired: true      # Paired-end mode
+stranded: 0 # 0=unstranded, 1=forward, 2=reverse
+paired: true # Paired-end mode
 
 # Chromosome name remapping
 chromosome_prefix: "chr"
@@ -37,7 +37,7 @@ chromosome_mapping:
   chrM: "MT"
 
 # Output directory layout
-flat_output: false  # Set to true to skip subdirectories
+flat_output: false # Set to true to skip subdirectories
 
 # dupRadar output toggles
 dupradar:
@@ -121,11 +121,11 @@ samtools_stats:
 
 Library strandedness for strand-aware read counting:
 
-| Value | Meaning |
-|-------|---------|
-| `0` | Unstranded (count reads on either strand) |
-| `1` | Forward stranded (read 1 maps to the transcript strand) |
-| `2` | Reverse stranded (read 2 maps to the transcript strand) |
+| Value | Meaning                                                 |
+| ----- | ------------------------------------------------------- |
+| `0`   | Unstranded (count reads on either strand)               |
+| `1`   | Forward stranded (read 1 maps to the transcript strand) |
+| `2`   | Reverse stranded (read 2 maps to the transcript strand) |
 
 **Default:** `0` (unstranded)
 
@@ -191,13 +191,13 @@ All outputs are **enabled by default**.
 
 ```yaml
 dupradar:
-  dup_matrix: true              # Duplication matrix TSV
-  intercept_slope: true         # Intercept/slope fit results
-  density_scatter_plot: true    # Density scatter plot (PNG + SVG)
-  boxplot: true                 # Duplication rate boxplot (PNG + SVG)
-  expression_histogram: true    # Expression histogram (PNG + SVG)
-  multiqc_intercept: true       # MultiQC intercept/slope file
-  multiqc_curve: true           # MultiQC fitted curve file
+  dup_matrix: true # Duplication matrix TSV
+  intercept_slope: true # Intercept/slope fit results
+  density_scatter_plot: true # Density scatter plot (PNG + SVG)
+  boxplot: true # Duplication rate boxplot (PNG + SVG)
+  expression_histogram: true # Expression histogram (PNG + SVG)
+  multiqc_intercept: true # MultiQC intercept/slope file
+  multiqc_curve: true # MultiQC fitted curve file
 ```
 
 Set any field to `false` to skip generating that output:
@@ -215,12 +215,12 @@ are generated, plus the biotype attribute setting.
 
 ```yaml
 featurecounts:
-  counts_file: true           # featureCounts-compatible counts TSV
-  summary_file: true          # Assignment summary file
-  biotype_counts: true        # Biotype counts TSV
-  biotype_counts_mqc: true    # Biotype counts MultiQC bargraph file
-  biotype_rrna_mqc: true      # Biotype rRNA percentage MultiQC file
-  biotype_attribute: "gene_biotype"  # GTF attribute for biotype grouping
+  counts_file: true # featureCounts-compatible counts TSV
+  summary_file: true # Assignment summary file
+  biotype_counts: true # Biotype counts TSV
+  biotype_counts_mqc: true # Biotype counts MultiQC bargraph file
+  biotype_rrna_mqc: true # Biotype rRNA percentage MultiQC file
+  biotype_attribute: "gene_biotype" # GTF attribute for biotype grouping
 ```
 
 ### `biotype_attribute`
@@ -229,9 +229,9 @@ The GTF attribute name used for biotype grouping. This controls how genes are
 categorized in the biotype output files.
 
 | GTF source | Typical attribute |
-|------------|-------------------|
-| Ensembl | `gene_biotype` |
-| GENCODE | `gene_type` |
+| ---------- | ----------------- |
+| Ensembl    | `gene_biotype`    |
+| GENCODE    | `gene_type`       |
 
 **Default:** `"gene_biotype"`
 
@@ -253,7 +253,7 @@ config file values for all parameters.
 
 ```yaml
 bam_stat:
-  enabled: true    # Set to false to skip bam_stat
+  enabled: true # Set to false to skip bam_stat
 ```
 
 No additional parameters. This tool does not require annotation.
@@ -263,7 +263,7 @@ No additional parameters. This tool does not require annotation.
 ```yaml
 infer_experiment:
   enabled: true
-  sample_size: 200000   # Number of reads to sample (default: 200000)
+  sample_size: 200000 # Number of reads to sample (default: 200000)
 ```
 
 Requires annotation (`--gtf` or `--bed`). The `sample_size` can also be set via
@@ -273,7 +273,7 @@ Requires annotation (`--gtf` or `--bed`). The `sample_size` can also be set via
 
 ```yaml
 read_duplication:
-  enabled: true    # Set to false to skip read_duplication
+  enabled: true # Set to false to skip read_duplication
 ```
 
 No additional parameters. This tool does not require annotation.
@@ -282,7 +282,7 @@ No additional parameters. This tool does not require annotation.
 
 ```yaml
 read_distribution:
-  enabled: true    # Set to false to skip read_distribution
+  enabled: true # Set to false to skip read_distribution
 ```
 
 No additional parameters. Requires annotation (`--gtf` or `--bed`).
@@ -292,7 +292,7 @@ No additional parameters. Requires annotation (`--gtf` or `--bed`).
 ```yaml
 junction_annotation:
   enabled: true
-  min_intron: 50   # Minimum intron length in bases (default: 50)
+  min_intron: 50 # Minimum intron length in bases (default: 50)
 ```
 
 Requires annotation (`--gtf` or `--bed`). The `min_intron` can also be set via `--min-intron`.
@@ -302,11 +302,11 @@ Requires annotation (`--gtf` or `--bed`). The `min_intron` can also be set via `
 ```yaml
 junction_saturation:
   enabled: true
-  min_intron: 50           # Minimum intron length in bases (default: 50)
-  min_coverage: 1          # Minimum read count to consider a junction (default: 1)
-  percentile_floor: 5      # Sampling start percentage (default: 5)
-  percentile_ceiling: 100  # Sampling end percentage (default: 100)
-  percentile_step: 5       # Sampling step size (default: 5)
+  min_intron: 50 # Minimum intron length in bases (default: 50)
+  min_coverage: 1 # Minimum read count to consider a junction (default: 1)
+  percentile_floor: 5 # Sampling start percentage (default: 5)
+  percentile_ceiling: 100 # Sampling end percentage (default: 100)
+  percentile_step: 5 # Sampling step size (default: 5)
 ```
 
 Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
@@ -319,10 +319,10 @@ Requires annotation (`--gtf` or `--bed`). These parameters can also be set via C
 ```yaml
 inner_distance:
   enabled: true
-  sample_size: 1000000   # Number of reads to sample (default: 1000000)
-  lower_bound: -250      # Histogram lower bound (default: -250)
-  upper_bound: 250       # Histogram upper bound (default: 250)
-  step: 5                # Histogram bin width (default: 5)
+  sample_size: 1000000 # Number of reads to sample (default: 1000000)
+  lower_bound: -250 # Histogram lower bound (default: -250)
+  upper_bound: 250 # Histogram upper bound (default: 250)
+  step: 5 # Histogram bin width (default: 5)
 ```
 
 Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
@@ -334,8 +334,8 @@ Requires annotation (`--gtf` or `--bed`). These parameters can also be set via C
 ```yaml
 tin:
   enabled: true
-  sample_size: 100     # Equally-spaced positions to sample per transcript (default: 100)
-  min_coverage: 10     # Minimum read-start count to compute TIN (default: 10)
+  sample_size: 100 # Equally-spaced positions to sample per transcript (default: 100)
+  min_coverage: 10 # Minimum read-start count to compute TIN (default: 10)
 ```
 
 Requires annotation (`--gtf` or `--bed`). The TIN (Transcript Integrity Number)
@@ -345,7 +345,7 @@ measures transcript integrity via Shannon entropy of read coverage uniformity.
 
 ```yaml
 qualimap:
-  enabled: true    # Set to false to skip Qualimap RNA-Seq QC analysis
+  enabled: true # Set to false to skip Qualimap RNA-Seq QC analysis
 ```
 
 Requires annotation (`--gtf` only). Runs the Qualimap RNA-Seq QC analysis:
@@ -359,13 +359,13 @@ output files parseable by MultiQC.
 ```yaml
 preseq:
   enabled: true
-  max_extrap: 10000000000  # Maximum extrapolation depth (default: 1e10)
-  step_size: 1000000       # Step size between extrapolation points (default: 1e6)
-  n_bootstraps: 100        # Bootstrap replicates for confidence intervals (default: 100)
-  confidence_level: 0.95   # CI confidence level (default: 0.95)
-  seed: 1                  # Random seed for reproducibility (default: 1)
-  max_terms: 100           # Maximum terms in power series (default: 100)
-  defects: false           # Use defects model for problematic histograms (default: false)
+  max_extrap: 10000000000 # Maximum extrapolation depth (default: 1e10)
+  step_size: 1000000 # Step size between extrapolation points (default: 1e6)
+  n_bootstraps: 100 # Bootstrap replicates for confidence intervals (default: 100)
+  confidence_level: 0.95 # CI confidence level (default: 0.95)
+  seed: 1 # Random seed for reproducibility (default: 1)
+  max_terms: 100 # Maximum terms in power series (default: 100)
+  defects: false # Use defects model for problematic histograms (default: false)
 ```
 
 Runs in both GTF and BED modes (only needs BAM fragment info). The `max_extrap`,
@@ -378,11 +378,11 @@ Runs in both GTF and BED modes (only needs BAM fragment info). The `max_extrap`,
 
 ```yaml
 flagstat:
-  enabled: true        # samtools flagstat-compatible output
+  enabled: true # samtools flagstat-compatible output
 idxstats:
-  enabled: true        # samtools idxstats-compatible output
+  enabled: true # samtools idxstats-compatible output
 samtools_stats:
-  enabled: true        # samtools stats SN-section compatible output
+  enabled: true # samtools stats compatible output (full format including all histogram sections)
 ```
 
 These produce samtools-compatible output files in the `samtools/` subdirectory.

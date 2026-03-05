@@ -9,7 +9,7 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 - **[featureCounts](http://subread.sourceforge.net/)** -- gene-level read counting and biotype quantification
 - **[RSeQC](https://rseqc.sourceforge.net/)** -- 7 RNA-seq quality control modules (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance) plus TIN (Transcript Integrity Number) analysis
 - **[preseq](https://github.com/smithlabcode/preseq)** -- library complexity extrapolation (lc_extrap)
-- **[samtools](http://www.htslib.org/)** -- flagstat, idxstats, and stats SN-section compatible outputs
+- **[samtools](http://www.htslib.org/)** -- flagstat, idxstats, and full stats output including all histogram sections
 - **[Qualimap](http://qualimap.conesalab.org/)** -- gene body coverage profiling and RNA-seq QC summary
 
 ## Why RustQC?
@@ -52,28 +52,28 @@ Given a duplicate-marked BAM file and a GTF or BED12 annotation, `rustqc rna` ru
 
 Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, plus TIN analysis, all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis:
 
-| Tool | Description |
-|------|-------------|
-| bam_stat | Basic BAM alignment statistics (total reads, duplicates, mapping quality, etc.) |
-| infer_experiment | Infer library strandedness from read/gene-model strand concordance |
-| read_duplication | Position-based and sequence-based read duplication histograms with plots |
-| read_distribution | Classify reads across genomic features (CDS, UTR, intron, intergenic) |
+| Tool                | Description                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| bam_stat            | Basic BAM alignment statistics (total reads, duplicates, mapping quality, etc.)            |
+| infer_experiment    | Infer library strandedness from read/gene-model strand concordance                         |
+| read_duplication    | Position-based and sequence-based read duplication histograms with plots                   |
+| read_distribution   | Classify reads across genomic features (CDS, UTR, intron, intergenic)                      |
 | junction_annotation | Classify splice junctions as known, partial novel, or complete novel, with pie chart plots |
-| junction_saturation | Assess saturation of splice junction detection at increasing read depths, with plot |
-| inner_distance | Compute inner distance between paired-end read mates, with histogram plot |
-| tin | Transcript Integrity Number (TIN) for RNA degradation assessment |
+| junction_saturation | Assess saturation of splice junction detection at increasing read depths, with plot        |
+| inner_distance      | Compute inner distance between paired-end read mates, with histogram plot                  |
+| tin                 | Transcript Integrity Number (TIN) for RNA degradation assessment                           |
 
 ### Additional tools
 
-| Tool | Equivalent | Description |
-|------|-----------|-------------|
-| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq | Gene body coverage profiling, 5'/3' bias metrics, read origin classification (exonic/intronic/intergenic), strand-specificity estimation, and junction analysis. Qualimap-compatible output parseable by MultiQC. |
-| preseq | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation with bootstrap confidence intervals |
-| flagstat | `samtools flagstat` | Alignment flag statistics |
-| idxstats | `samtools idxstats` | Per-chromosome read counts |
-| stats | `samtools stats` | Summary number (SN) statistics |
+| Tool            | Equivalent                                                         | Description                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq                  | Gene body coverage profiling, 5'/3' bias metrics, read origin classification (exonic/intronic/intergenic), strand-specificity estimation, and junction analysis. Qualimap-compatible output parseable by MultiQC. |
+| preseq          | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation with bootstrap confidence intervals                                                                                                                                              |
+| flagstat        | `samtools flagstat`                                                | Alignment flag statistics                                                                                                                                                                                         |
+| idxstats        | `samtools idxstats`                                                | Per-chromosome read counts                                                                                                                                                                                        |
+| stats           | `samtools stats`                                                   | Full samtools stats output including all histogram sections                                                                                                                                                       |
 
-When a GTF file is provided via `--gtf`, all tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed` (mutually exclusive with `--gtf`), which runs the RSeQC tools, TIN, preseq, and samtools outputs, but skips dupRadar, featureCounts, and Qualimap (they require a GTF). Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
+When a GTF file is provided via `--gtf`, all tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed`, which runs the RSeQC tools, TIN, preseq, and samtools outputs, but skips dupRadar, featureCounts, and Qualimap (they require a GTF). Both `--gtf` and `--bed` can be used together: the GTF is used for dupRadar, featureCounts, and Qualimap, while the BED file is used for read_distribution. Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 

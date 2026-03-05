@@ -18,7 +18,7 @@ outputs.
 ### Synopsis
 
 ```
-rustqc rna <INPUT>... (--gtf <GTF> | --bed <BED>) [OPTIONS]
+rustqc rna <INPUT>... (--gtf <GTF> [--bed <BED>] | --bed <BED>) [OPTIONS]
 ```
 
 ### Positional arguments
@@ -45,7 +45,7 @@ rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf
 
 ### Annotation options
 
-Exactly one of `--gtf` or `--bed` must be provided. They are **mutually exclusive**.
+At least one of `--gtf` or `--bed` must be provided. They can be **used together**: when both are supplied, the GTF is used for dupRadar, featureCounts, and Qualimap, while the BED file is used for read_distribution.
 
 #### `--gtf <GTF>` / `-g <GTF>`
 
@@ -63,7 +63,9 @@ bytes), so the `.gz` extension is not required.
 Path to a BED12-format gene model file (plain or gzip-compressed). When a BED
 file is provided **without** a GTF, the RSeQC tools, TIN, preseq, and samtools
 outputs run. dupRadar, featureCounts, and Qualimap are skipped because BED files
-lack gene-level grouping and biotype information.
+lack gene-level grouping and biotype information. When provided **together with**
+a GTF, the BED file is used for read_distribution while the GTF handles
+dupRadar, featureCounts, and Qualimap.
 
 Gzip compression is detected automatically by inspecting the file header (magic
 bytes), so the `.gz` extension is not required.
@@ -80,11 +82,11 @@ Output directory for all result files. Created if it does not exist.
 
 Library strandedness for strand-aware read counting:
 
-| Value | Meaning |
-|-------|---------|
-| `0` | Unstranded (count reads on either strand) |
-| `1` | Forward stranded (read 1 maps to the transcript strand) |
-| `2` | Reverse stranded (read 2 maps to the transcript strand) |
+| Value | Meaning                                                 |
+| ----- | ------------------------------------------------------- |
+| `0`   | Unstranded (count reads on either strand)               |
+| `1`   | Forward stranded (read 1 maps to the transcript strand) |
+| `2`   | Reverse stranded (read 2 maps to the transcript strand) |
 
 **Default:** `0` (unstranded)
 
@@ -164,45 +166,45 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 
 #### infer_experiment
 
-| Option | Default | Description |
-|--------|---------|-------------|
+| Option                               | Default  | Description                       |
+| ------------------------------------ | -------- | --------------------------------- |
 | `--infer-experiment-sample-size <N>` | `200000` | Maximum number of reads to sample |
 
 #### junction_annotation / junction_saturation
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--min-intron <N>` | `50` | Minimum intron size to consider (shared by both tools) |
+| Option             | Default | Description                                            |
+| ------------------ | ------- | ------------------------------------------------------ |
+| `--min-intron <N>` | `50`    | Minimum intron size to consider (shared by both tools) |
 
 #### junction_saturation
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--junction-saturation-min-coverage <N>` | `1` | Minimum reads for a junction to count as detected |
-| `--junction-saturation-percentile-floor <N>` | `5` | Sampling start percentage |
-| `--junction-saturation-percentile-ceiling <N>` | `100` | Sampling end percentage |
-| `--junction-saturation-percentile-step <N>` | `5` | Sampling step percentage |
+| Option                                         | Default | Description                                       |
+| ---------------------------------------------- | ------- | ------------------------------------------------- |
+| `--junction-saturation-min-coverage <N>`       | `1`     | Minimum reads for a junction to count as detected |
+| `--junction-saturation-percentile-floor <N>`   | `5`     | Sampling start percentage                         |
+| `--junction-saturation-percentile-ceiling <N>` | `100`   | Sampling end percentage                           |
+| `--junction-saturation-percentile-step <N>`    | `5`     | Sampling step percentage                          |
 
 #### inner_distance
 
-| Option | Default | Description |
-|--------|---------|-------------|
+| Option                             | Default   | Description                  |
+| ---------------------------------- | --------- | ---------------------------- |
 | `--inner-distance-sample-size <N>` | `1000000` | Maximum read pairs to sample |
-| `--inner-distance-lower-bound <N>` | `-250` | Histogram lower bound |
-| `--inner-distance-upper-bound <N>` | `250` | Histogram upper bound |
-| `--inner-distance-step <N>` | `5` | Histogram bin width |
+| `--inner-distance-lower-bound <N>` | `-250`    | Histogram lower bound        |
+| `--inner-distance-upper-bound <N>` | `250`     | Histogram upper bound        |
+| `--inner-distance-step <N>`        | `5`       | Histogram bin width          |
 
 ### Preseq options
 
 These flags control parameters for the preseq library complexity extrapolation.
 Preseq runs by default and can be skipped entirely with `--skip-preseq`.
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--skip-preseq` | `false` | Skip the preseq library complexity analysis entirely |
-| `--preseq-max-extrap <N>` | `1e10` | Maximum extrapolation depth in total reads |
-| `--preseq-step-size <N>` | `1e6` | Step size between extrapolation points |
-| `--preseq-n-bootstraps <N>` | `100` | Number of bootstrap replicates for confidence intervals |
+| Option                      | Default | Description                                             |
+| --------------------------- | ------- | ------------------------------------------------------- |
+| `--skip-preseq`             | `false` | Skip the preseq library complexity analysis entirely    |
+| `--preseq-max-extrap <N>`   | `1e10`  | Maximum extrapolation depth in total reads              |
+| `--preseq-step-size <N>`    | `1e6`   | Step size between extrapolation points                  |
+| `--preseq-n-bootstraps <N>` | `100`   | Number of bootstrap replicates for confidence intervals |
 
 ### Examples
 
@@ -246,9 +248,9 @@ rustqc rna sample.bam --bed genes.bed.gz -p -o results/
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | Error (missing input, invalid arguments, BAM processing failure, etc.) |
+| Code | Meaning                                                                |
+| ---- | ---------------------------------------------------------------------- |
+| `0`  | Success                                                                |
+| `1`  | Error (missing input, invalid arguments, BAM processing failure, etc.) |
 
 Error messages are printed to stderr with context about the failure.

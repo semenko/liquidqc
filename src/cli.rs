@@ -2,9 +2,11 @@
 //!
 //! Provides a subcommand-based CLI. The `rna` subcommand runs all RNA-Seq QC
 //! analyses in a single pass: dupRadar duplication rate analysis, featureCounts-
-//! compatible output, and RSeQC-equivalent metrics (bam_stat, infer_experiment,
+//! compatible output, RSeQC-equivalent metrics (bam_stat, infer_experiment,
 //! read_duplication, read_distribution, junction_annotation, junction_saturation,
-//! inner_distance). Individual tools can be disabled via the YAML config file.
+//! inner_distance), TIN (Transcript Integrity Number), preseq library complexity
+//! extrapolation, samtools-compatible outputs (flagstat, idxstats, stats), and
+//! Qualimap RNA-seq QC. Individual tools can be disabled via the YAML config file.
 
 use clap::{Parser, Subcommand};
 

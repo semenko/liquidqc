@@ -32,23 +32,23 @@ It currently includes:
 
 - **`rustqc rna`** -- A single-command RNA-Seq QC pipeline that runs all analyses in one pass:
 
-| Tool | Reimplements | Description |
-|------|-------------|-------------|
-| dupRadar | [dupRadar](https://github.com/ssayols/dupRadar) | PCR duplicate rate vs. expression analysis with density scatter plots |
-| featureCounts | [featureCounts](http://subread.sourceforge.net/) | Gene-level read counting with biotype summaries |
-| bam_stat | [RSeQC](https://rseqc.sourceforge.net/#bam-stat-py) `bam_stat.py` | Basic alignment statistics |
-| infer_experiment | [RSeQC](https://rseqc.sourceforge.net/#infer-experiment-py) `infer_experiment.py` | Library strandedness inference |
-| read_duplication | [RSeQC](https://rseqc.sourceforge.net/#read-duplication-py) `read_duplication.py` | Position- and sequence-based duplication histograms |
-| read_distribution | [RSeQC](https://rseqc.sourceforge.net/#read-distribution-py) `read_distribution.py` | Read distribution across genomic features |
-| junction_annotation | [RSeQC](https://rseqc.sourceforge.net/#junction-annotation-py) `junction_annotation.py` | Splice junction classification |
-| junction_saturation | [RSeQC](https://rseqc.sourceforge.net/#junction-saturation-py) `junction_saturation.py` | Splice junction saturation analysis |
-| inner_distance | [RSeQC](https://rseqc.sourceforge.net/#inner-distance-py) `inner_distance.py` | Paired-end inner distance distribution |
-| TIN | [RSeQC](https://rseqc.sourceforge.net/#tin-py) `tin.py` | Transcript Integrity Number |
-| preseq | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation |
-| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) `rnaseq` | Gene body coverage, read origin, strand specificity |
-| flagstat | [samtools](http://www.htslib.org/) `flagstat` | Alignment flag summary |
-| idxstats | [samtools](http://www.htslib.org/) `idxstats` | Per-chromosome read counts |
-| stats | [samtools](http://www.htslib.org/) `stats` | Summary statistics (SN section) |
+| Tool                | Reimplements                                                                            | Description                                                           |
+| ------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| dupRadar            | [dupRadar](https://github.com/ssayols/dupRadar)                                         | PCR duplicate rate vs. expression analysis with density scatter plots |
+| featureCounts       | [featureCounts](http://subread.sourceforge.net/)                                        | Gene-level read counting with biotype summaries                       |
+| bam_stat            | [RSeQC](https://rseqc.sourceforge.net/#bam-stat-py) `bam_stat.py`                       | Basic alignment statistics                                            |
+| infer_experiment    | [RSeQC](https://rseqc.sourceforge.net/#infer-experiment-py) `infer_experiment.py`       | Library strandedness inference                                        |
+| read_duplication    | [RSeQC](https://rseqc.sourceforge.net/#read-duplication-py) `read_duplication.py`       | Position- and sequence-based duplication histograms                   |
+| read_distribution   | [RSeQC](https://rseqc.sourceforge.net/#read-distribution-py) `read_distribution.py`     | Read distribution across genomic features                             |
+| junction_annotation | [RSeQC](https://rseqc.sourceforge.net/#junction-annotation-py) `junction_annotation.py` | Splice junction classification                                        |
+| junction_saturation | [RSeQC](https://rseqc.sourceforge.net/#junction-saturation-py) `junction_saturation.py` | Splice junction saturation analysis                                   |
+| inner_distance      | [RSeQC](https://rseqc.sourceforge.net/#inner-distance-py) `inner_distance.py`           | Paired-end inner distance distribution                                |
+| TIN                 | [RSeQC](https://rseqc.sourceforge.net/#tin-py) `tin.py`                                 | Transcript Integrity Number                                           |
+| preseq              | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap`                      | Library complexity extrapolation                                      |
+| Qualimap rnaseq     | [Qualimap](http://qualimap.conesalab.org/) `rnaseq`                                     | Gene body coverage, read origin, strand specificity                   |
+| flagstat            | [samtools](http://www.htslib.org/) `flagstat`                                           | Alignment flag summary                                                |
+| idxstats            | [samtools](http://www.htslib.org/) `idxstats`                                           | Per-chromosome read counts                                            |
+| stats               | [samtools](http://www.htslib.org/) `stats`                                              | Full samtools stats output including all histogram sections           |
 
 All outputs are format- and numerically identical to the upstream tools, and compatible with [MultiQC](https://multiqc.info/) for reporting.
 

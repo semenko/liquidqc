@@ -2,6 +2,7 @@
 
 > Fast quality control tools for sequencing data, written in Rust. The
 > **`rustqc rna`** command runs all RNA-Seq QC analyses in a single pass:
+>
 > - **dupRadar** duplicate rate analysis (reimplementation of
 >   [dupRadar](https://github.com/ssayols/dupRadar))
 > - **featureCounts**-compatible gene-level read counting with biotype summaries
@@ -97,9 +98,10 @@ in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool g
 Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
 
 The CLI uses a single subcommand:
-- `rustqc rna <BAM>... (--gtf <GTF> | --bed <BED>) [OPTIONS]`
 
-The `--gtf` and `--bed` flags are **mutually exclusive** — provide one or the other:
+- `rustqc rna <BAM>... (--gtf <GTF> | --bed <BED> | --gtf <GTF> --bed <BED>) [OPTIONS]`
+
+The `--gtf` and `--bed` flags can be used **individually or together**. At least one must be provided:
 
 - **`--gtf`** (recommended): Runs all analyses — dupRadar duplicate rate analysis,
   featureCounts-compatible gene counting, all 7 RSeQC-equivalent tools
@@ -113,6 +115,10 @@ The `--gtf` and `--bed` flags are **mutually exclusive** — provide one or the 
   preseq + samtools outputs (flagstat, idxstats, stats). DupRadar,
   featureCounts, and gene body coverage are skipped (they require gene-level
   annotation with biotype/exon attributes that BED12 cannot provide).
+- **`--gtf` + `--bed` together**: When both are provided, the GTF is used for
+  dupRadar, featureCounts, and Qualimap (which require gene-level annotation),
+  while the BED file is used for read_distribution. All other RSeQC tools,
+  TIN, preseq, and samtools outputs also run.
 
 Individual tools can be disabled via the YAML config file (each has an `enabled`
 toggle). Tool-specific parameters (e.g., `--min-intron`, `--inner-distance-lower-bound`)
@@ -148,14 +154,14 @@ Localized `use` inside function bodies is acceptable for narrow imports
 
 ### Naming
 
-| Kind              | Convention             | Examples                                       |
-|-------------------|------------------------|-------------------------------------------------|
-| Types / Structs   | `CamelCase`            | `GeneCounts`, `DupMatrix`, `FitResult`          |
-| Functions/Methods | `snake_case`           | `count_reads`, `build_index`, `format_float`    |
-| Constants         | `SCREAMING_SNAKE_CASE` | `BAM_FDUP`, `DENSITY_COLORS`, `SCALE`           |
+| Kind              | Convention             | Examples                                              |
+| ----------------- | ---------------------- | ----------------------------------------------------- |
+| Types / Structs   | `CamelCase`            | `GeneCounts`, `DupMatrix`, `FitResult`                |
+| Functions/Methods | `snake_case`           | `count_reads`, `build_index`, `format_float`          |
+| Constants         | `SCREAMING_SNAKE_CASE` | `BAM_FDUP`, `DENSITY_COLORS`, `SCALE`                 |
 | Modules           | `snake_case`           | `dupmatrix`, `counting`, `bam_stat`, `inner_distance` |
-| Variables/Fields  | `snake_case`           | `gene_counts`, `dup_rate_multi`, `is_dup`       |
-| Type aliases      | `CamelCase`            | `MateBufferKey`                                 |
+| Variables/Fields  | `snake_case`           | `gene_counts`, `dup_rate_multi`, `is_dup`             |
+| Type aliases      | `CamelCase`            | `MateBufferKey`                                       |
 
 ### Error Handling
 
@@ -213,20 +219,20 @@ All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cac
 
 ## Key Dependencies
 
-| Crate          | Purpose                          |
-|----------------|----------------------------------|
-| `clap` v4      | CLI argument parsing (derive)    |
-| `rust-htslib`  | BAM file I/O (statically linked) |
-| `plotters`     | Chart generation (PNG + SVG)     |
-| `serde`        | YAML config deserialization      |
-| `anyhow`       | Error handling                   |
-| `log`          | Logging facade                   |
-| `env_logger`   | Log output backend               |
-| `indexmap`     | Insertion-order-preserving maps  |
-| `coitrees`     | Cache-oblivious interval trees   |
-| `rayon`        | Data parallelism                 |
-| `rand` / `rand_chacha` | Reproducible random sampling |
-| `flate2`       | Gzip decompression (annotation files) |
+| Crate                  | Purpose                               |
+| ---------------------- | ------------------------------------- |
+| `clap` v4              | CLI argument parsing (derive)         |
+| `rust-htslib`          | BAM file I/O (statically linked)      |
+| `plotters`             | Chart generation (PNG + SVG)          |
+| `serde`                | YAML config deserialization           |
+| `anyhow`               | Error handling                        |
+| `log`                  | Logging facade                        |
+| `env_logger`           | Log output backend                    |
+| `indexmap`             | Insertion-order-preserving maps       |
+| `coitrees`             | Cache-oblivious interval trees        |
+| `rayon`                | Data parallelism                      |
+| `rand` / `rand_chacha` | Reproducible random sampling          |
+| `flate2`               | Gzip decompression (annotation files) |
 
 ## Duplicate Marking Validation
 

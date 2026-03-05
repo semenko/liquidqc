@@ -18,27 +18,27 @@ RustQC replaces all of these in a single pass, producing every output together.
 **Large benchmark input:** GM12878 REP1 -- a 10 GB paired-end RNA-seq BAM aligned
 to GRCh38 (63,086 genes).
 
-| Step | Traditional workflow | RustQC |
-|------|--------------------:|-------:|
-| Read counting (featureCounts) | 3m 39s | -- |
-| Duplication analysis (dupRadar) | 27m 21s | -- |
-| bam_stat (RSeQC) | 6m 07s | -- |
-| infer_experiment (RSeQC) | 7s | -- |
-| read_duplication (RSeQC) | 29m 43s | -- |
-| read_distribution (RSeQC) | 6m 00s | -- |
-| junction_annotation (RSeQC) | 4m 37s | -- |
-| junction_saturation (RSeQC) | 6m 32s | -- |
-| inner_distance (RSeQC) | 1m 09s | -- |
-| TIN (RSeQC tin.py) | ~20m | -- |
-| samtools flagstat | ~2m | -- |
-| samtools idxstats | <1s | -- |
-| samtools stats | ~5m | -- |
-| preseq lc_extrap | ~3m | -- |
-| samtools sort -n (for Qualimap) | ~5-10m | -- |
-| Qualimap rnaseq | ~10m | -- |
-| Biotype summaries | Additional scripting | -- |
-| **All outputs, single pass** | -- | **~5m** |
-| **Total** | **~2h 15m** | **~5m** |
+| Step                            | Traditional workflow |  RustQC |
+| ------------------------------- | -------------------: | ------: |
+| Read counting (featureCounts)   |               3m 39s |      -- |
+| Duplication analysis (dupRadar) |              27m 21s |      -- |
+| bam_stat (RSeQC)                |               6m 07s |      -- |
+| infer_experiment (RSeQC)        |                   7s |      -- |
+| read_duplication (RSeQC)        |              29m 43s |      -- |
+| read_distribution (RSeQC)       |               6m 00s |      -- |
+| junction_annotation (RSeQC)     |               4m 37s |      -- |
+| junction_saturation (RSeQC)     |               6m 32s |      -- |
+| inner_distance (RSeQC)          |               1m 09s |      -- |
+| TIN (RSeQC tin.py)              |                 ~20m |      -- |
+| samtools flagstat               |                  ~2m |      -- |
+| samtools idxstats               |                  <1s |      -- |
+| samtools stats                  |                  ~5m |      -- |
+| preseq lc_extrap                |                  ~3m |      -- |
+| samtools sort -n (for Qualimap) |               ~5-10m |      -- |
+| Qualimap rnaseq                 |                 ~10m |      -- |
+| Biotype summaries               | Additional scripting |      -- |
+| **All outputs, single pass**    |                   -- | **~5m** |
+| **Total**                       |          **~2h 15m** | **~5m** |
 
 RustQC produces all outputs -- dupRadar duplication matrix, model fit, plots,
 featureCounts-compatible counts, assignment summary, biotype counts, all 7
@@ -70,7 +70,7 @@ Every output file produced by RustQC matches the original tools:
 - **Assignment statistics** (Assigned, NoFeatures, Ambiguous) match exactly
 - **flagstat** all 16 metrics identical to samtools flagstat
 - **idxstats** all per-chromosome counts identical to samtools idxstats
-- **stats** core SN metrics (read counts, lengths, duplicates) match samtools stats
+- **stats** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, etc.) matches samtools stats
 - **preseq** extrapolation curve within <0.1% of preseq v3.2.0 across entire range
 - **RSeQC tools** all values match Python RSeQC (see [RSeQC benchmark](rseqc/))
 - **Qualimap** all read counts, genomic origin percentages, and coverage bias metrics

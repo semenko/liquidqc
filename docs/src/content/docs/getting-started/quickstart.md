@@ -10,7 +10,7 @@ This guide walks you through a basic RustQC analysis from start to finish.
 The `rustqc rna` command runs all analyses in a single pass. It requires:
 
 - A **duplicate-marked** alignment file (BAM, SAM, or CRAM). Duplicates must be flagged with SAM flag 0x400 by a tool like [Picard MarkDuplicates](https://broadinstitute.github.io/picard/), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba](https://github.com/biod/sambamba).
-- Either a **GTF annotation** file (`--gtf`) or a **BED12 gene model** file (`--bed`). Both can be plain or gzip-compressed (`.gz`) — compression is detected automatically. With a GTF, all analyses run (dupRadar, featureCounts, all 7 RSeQC tools, TIN, Qualimap, preseq, and samtools). With a BED file, RSeQC tools, TIN, preseq, and samtools run, but dupRadar, featureCounts, and Qualimap are skipped. The two flags are mutually exclusive.
+- A **GTF annotation** file (`--gtf`) and/or a **BED12 gene model** file (`--bed`). At least one must be provided. Both can be plain or gzip-compressed (`.gz`) — compression is detected automatically. With a GTF, all analyses run (dupRadar, featureCounts, all 7 RSeQC tools, TIN, Qualimap, preseq, and samtools). With a BED file alone, RSeQC tools, TIN, preseq, and samtools run, but dupRadar, featureCounts, and Qualimap are skipped. When both are provided, the GTF is used for dupRadar/featureCounts/Qualimap and the BED is used for read_distribution.
 
 ## RNA-seq duplicate analysis
 
@@ -21,6 +21,7 @@ rustqc rna sample.markdup.bam --gtf genes.gtf -p -o results/
 ```
 
 This command:
+
 - Analyses `sample.markdup.bam` against `genes.gtf`
 - Uses paired-end mode (`-p`)
 - Writes all output to `results/`
@@ -30,27 +31,27 @@ This command:
 Output files are organized into subdirectories by tool group. After running, you
 will find in the output directory:
 
-| File | Description |
-|------|-------------|
-| `dupradar/sample.markdup_dupMatrix.txt` | Full duplication matrix (TSV) |
-| `dupradar/sample.markdup_intercept_slope.txt` | Fitted model parameters |
-| `dupradar/sample.markdup_duprateExpDens.png` | Density scatter plot |
-| `dupradar/sample.markdup_duprateExpBoxplot.png` | Duplication rate boxplot |
-| `dupradar/sample.markdup_expressionHist.png` | Expression histogram |
-| `featurecounts/sample.markdup.featureCounts.tsv` | Gene-level read counts |
-| `featurecounts/sample.markdup.featureCounts.tsv.summary` | Counting summary statistics |
-| `rseqc/read_duplication/sample.markdup.DupRate_plot.png` | Read duplication rate plot |
-| `rseqc/junction_annotation/sample.markdup.splice_events.png` | Splice events pie chart |
-| `rseqc/junction_annotation/sample.markdup.splice_junction.png` | Splice junctions pie chart |
-| `rseqc/junction_saturation/sample.markdup.junctionSaturation_plot.png` | Junction saturation plot |
-| `rseqc/inner_distance/sample.markdup.inner_distance_plot.png` | Inner distance histogram |
-| `rseqc/tin/sample.markdup.tin.xls` | Transcript Integrity Numbers |
-| `samtools/sample.markdup.flagstat` | samtools flagstat-compatible output |
-| `samtools/sample.markdup.idxstats` | samtools idxstats-compatible output |
-| `samtools/sample.markdup.stats` | samtools stats SN-compatible output |
-| `preseq/sample.markdup.lc_extrap.txt` | Library complexity extrapolation |
-| `qualimap/rnaseq_qc_results.txt` | Qualimap-compatible QC report (bias, read origin, SSP) |
-| `qualimap/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt` | Gene body coverage profile |
+| File                                                                        | Description                                                                     |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `dupradar/sample.markdup_dupMatrix.txt`                                     | Full duplication matrix (TSV)                                                   |
+| `dupradar/sample.markdup_intercept_slope.txt`                               | Fitted model parameters                                                         |
+| `dupradar/sample.markdup_duprateExpDens.png`                                | Density scatter plot                                                            |
+| `dupradar/sample.markdup_duprateExpBoxplot.png`                             | Duplication rate boxplot                                                        |
+| `dupradar/sample.markdup_expressionHist.png`                                | Expression histogram                                                            |
+| `featurecounts/sample.markdup.featureCounts.tsv`                            | Gene-level read counts                                                          |
+| `featurecounts/sample.markdup.featureCounts.tsv.summary`                    | Counting summary statistics                                                     |
+| `rseqc/read_duplication/sample.markdup.DupRate_plot.png`                    | Read duplication rate plot                                                      |
+| `rseqc/junction_annotation/sample.markdup.splice_events.png`                | Splice events pie chart                                                         |
+| `rseqc/junction_annotation/sample.markdup.splice_junction.png`              | Splice junctions pie chart                                                      |
+| `rseqc/junction_saturation/sample.markdup.junctionSaturation_plot.png`      | Junction saturation plot                                                        |
+| `rseqc/inner_distance/sample.markdup.inner_distance_plot.png`               | Inner distance histogram                                                        |
+| `rseqc/tin/sample.markdup.tin.xls`                                          | Transcript Integrity Numbers                                                    |
+| `samtools/sample.markdup.flagstat`                                          | samtools flagstat-compatible output                                             |
+| `samtools/sample.markdup.idxstats`                                          | samtools idxstats-compatible output                                             |
+| `samtools/sample.markdup.stats`                                             | samtools stats compatible output (full format including all histogram sections) |
+| `preseq/sample.markdup.lc_extrap.txt`                                       | Library complexity extrapolation                                                |
+| `qualimap/rnaseq_qc_results.txt`                                            | Qualimap-compatible QC report (bias, read origin, SSP)                          |
+| `qualimap/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt` | Gene body coverage profile                                                      |
 
 Plus SVG versions of all plots, biotype count tables, and MultiQC-compatible
 report files. Use `--flat-output` to write all files directly to the output
