@@ -424,8 +424,9 @@ pub fn build_regions_from_bed(bed_path: &str) -> Result<RegionSets> {
 /// - **Introns**: gaps between consecutive exon blocks per transcript
 /// - **TSS/TES flanking**: upstream/downstream of transcript start/end (strand-aware)
 ///
-/// Non-coding transcripts (no CDS) contribute only introns and TSS/TES regions,
-/// matching BED12 behavior where `cds_start == cds_end`.
+/// Non-coding transcripts (no CDS) have a virtual CDS at `tx_end` (matching
+/// BED12 `thickStart == thickEnd == txEnd`), so all exon bases become UTR:
+/// 5'UTR on + strand, 3'UTR on - strand. This matches upstream RSeQC behavior.
 pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
     let mut regions = RegionSets::default();
 
@@ -438,71 +439,71 @@ pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
             let exon_starts: Vec<u64> = tx.exons.iter().map(|&(s, _)| s - 1).collect();
             let exon_ends: Vec<u64> = tx.exons.iter().map(|&(_, e)| e).collect(); // GTF end inclusive -> BED end exclusive = same value
 
-            // CDS range (0-based half-open), None for non-coding
-            let cds_range: Option<(u64, u64)> =
-                if let (Some(cds_s), Some(cds_e)) = (tx.cds_start, tx.cds_end) {
-                    Some((cds_s - 1, cds_e)) // GTF 1-based inclusive -> 0-based half-open
-                } else {
-                    None
-                };
-
-            // Transcript span (0-based half-open)
+            // CDS range (0-based half-open).
+            // Non-coding transcripts: synthesize cds_start = cds_end = tx_end,
+            // matching BED12 convention where thickStart == thickEnd == txEnd.
+            // This causes all exon bases to become UTR (5'UTR on +, 3'UTR on -),
+            // exactly matching upstream RSeQC's getUTR() behavior.
             let tx_start = tx.start - 1; // GTF 1-based -> 0-based
             let tx_end = tx.end; // GTF inclusive end -> exclusive end
 
+            let (cds_start, cds_end) =
+                if let (Some(cds_s), Some(cds_e)) = (tx.cds_start, tx.cds_end) {
+                    (cds_s - 1, cds_e) // GTF 1-based inclusive -> 0-based half-open
+                } else {
+                    // Non-coding: virtual CDS at tx_end (matches BED12 thickStart==thickEnd==txEnd)
+                    (tx_end, tx_end)
+                };
+
             // CDS exons: intersection of exon blocks with CDS range
-            if let Some((cds_start, cds_end)) = cds_range {
-                for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
-                    if ee <= cds_start || es >= cds_end {
-                        continue;
-                    }
-                    let s = es.max(cds_start);
-                    let e = ee.min(cds_end);
-                    if s < e {
-                        regions.cds_exon.entry(chrom.clone()).or_default().add(s, e);
-                    }
+            for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
+                if ee <= cds_start || es >= cds_end {
+                    continue;
                 }
-
-                // 5' UTR: exon portions before CDS (strand-aware)
-                for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
-                    match strand {
-                        '+' => {
-                            if es < cds_start {
-                                let e = ee.min(cds_start);
-                                regions.utr_5.entry(chrom.clone()).or_default().add(es, e);
-                            }
-                        }
-                        '-' => {
-                            if ee > cds_end {
-                                let s = es.max(cds_end);
-                                regions.utr_5.entry(chrom.clone()).or_default().add(s, ee);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                // 3' UTR: exon portions after CDS (strand-aware)
-                for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
-                    match strand {
-                        '+' => {
-                            if ee > cds_end {
-                                let s = es.max(cds_end);
-                                regions.utr_3.entry(chrom.clone()).or_default().add(s, ee);
-                            }
-                        }
-                        '-' => {
-                            if es < cds_start {
-                                let e = ee.min(cds_start);
-                                regions.utr_3.entry(chrom.clone()).or_default().add(es, e);
-                            }
-                        }
-                        _ => {}
-                    }
+                let s = es.max(cds_start);
+                let e = ee.min(cds_end);
+                if s < e {
+                    regions.cds_exon.entry(chrom.clone()).or_default().add(s, e);
                 }
             }
-            // Non-coding transcripts: no CDS, no UTR — skip CDS/UTR regions
-            // (matches BED12 behavior where cds_start == cds_end)
+
+            // 5' UTR: exon portions before CDS (strand-aware)
+            for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
+                match strand {
+                    '+' => {
+                        if es < cds_start {
+                            let e = ee.min(cds_start);
+                            regions.utr_5.entry(chrom.clone()).or_default().add(es, e);
+                        }
+                    }
+                    '-' => {
+                        if ee > cds_end {
+                            let s = es.max(cds_end);
+                            regions.utr_5.entry(chrom.clone()).or_default().add(s, ee);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // 3' UTR: exon portions after CDS (strand-aware)
+            for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
+                match strand {
+                    '+' => {
+                        if ee > cds_end {
+                            let s = es.max(cds_end);
+                            regions.utr_3.entry(chrom.clone()).or_default().add(s, ee);
+                        }
+                    }
+                    '-' => {
+                        if es < cds_start {
+                            let e = ee.min(cds_start);
+                            regions.utr_3.entry(chrom.clone()).or_default().add(es, e);
+                        }
+                    }
+                    _ => {}
+                }
+            }
 
             // Introns: gaps between consecutive exon blocks
             for i in 0..exon_starts.len().saturating_sub(1) {
@@ -739,5 +740,76 @@ mod tests {
         ci.add(30, 50);
         ci.merge();
         assert_eq!(ci.total_bases(), 30); // 10 + 20
+    }
+
+    #[test]
+    fn test_noncoding_transcript_exons_as_utr() {
+        use crate::gtf::{Gene, Transcript};
+
+        // Non-coding transcript on + strand: exons at [101,200] and [301,400] (1-based inclusive)
+        // tx_start=101, tx_end=400 (1-based). No CDS.
+        // Upstream RSeQC: thickStart=thickEnd=txEnd → all exon bases become 5'UTR on + strand
+        let tx_plus = Transcript {
+            transcript_id: "TX_NC_PLUS".to_string(),
+            chrom: "chr1".to_string(),
+            start: 101,
+            end: 400,
+            strand: '+',
+            exons: vec![(101, 200), (301, 400)],
+            cds_start: None,
+            cds_end: None,
+        };
+
+        // Non-coding transcript on - strand: exons at [501,600] and [701,800] (1-based inclusive)
+        // All exon bases should become 3'UTR on - strand
+        let tx_minus = Transcript {
+            transcript_id: "TX_NC_MINUS".to_string(),
+            chrom: "chr1".to_string(),
+            start: 501,
+            end: 800,
+            strand: '-',
+            exons: vec![(501, 600), (701, 800)],
+            cds_start: None,
+            cds_end: None,
+        };
+
+        let mut genes = IndexMap::new();
+        genes.insert(
+            "GENE_NC".to_string(),
+            Gene {
+                gene_id: "GENE_NC".to_string(),
+                chrom: "chr1".to_string(),
+                start: 101,
+                end: 800,
+                strand: '+',
+                exons: vec![],
+                effective_length: 0,
+                attributes: std::collections::HashMap::new(),
+                transcripts: vec![tx_plus, tx_minus],
+            },
+        );
+
+        let regions = build_regions_from_genes(&genes);
+
+        // CDS should be empty for non-coding transcripts
+        let cds_bases = regions
+            .cds_exon
+            .get("CHR1")
+            .map_or(0, |c| c.total_bases());
+        assert_eq!(cds_bases, 0, "Non-coding transcripts should have no CDS exons");
+
+        // + strand non-coding: all exon bases (200 bases) should be 5'UTR
+        let utr5_bases = regions.utr_5.get("CHR1").map_or(0, |c| c.total_bases());
+        assert_eq!(
+            utr5_bases, 200,
+            "Non-coding + strand exons should all be 5'UTR"
+        );
+
+        // - strand non-coding: all exon bases (200 bases) should be 3'UTR
+        let utr3_bases = regions.utr_3.get("CHR1").map_or(0, |c| c.total_bases());
+        assert_eq!(
+            utr3_bases, 200,
+            "Non-coding - strand exons should all be 3'UTR"
+        );
     }
 }

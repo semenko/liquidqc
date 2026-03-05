@@ -6,9 +6,8 @@
 
 use anyhow::{bail, Context, Result};
 use log::{debug, info, warn};
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
-use rayon::prelude::*;
+use rand_distr::{Binomial, Distribution};
+use rand_mt::Mt;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -56,9 +55,9 @@ const MIN_DISTINCT: u64 = 10;
 /// correctly groups duplicates regardless of their order in the BAM file.
 /// Multi-thread safe (accumulators can be merged).
 ///
-/// For paired-end data, a fragment is identified by `(tid, pos, mtid, mpos)` —
-/// no strand, no normalization. Both reads of a pair produce separate entries.
-/// For single-end data, the key is `(tid, pos)`.
+/// For paired-end data, each read is identified by `(tid, pos, mtid, mpos)` —
+/// no strand, no normalization. Both mates of a pair contribute independently.
+/// For single-end data, the key is `(tid, pos, -1, -1)`.
 #[derive(Debug)]
 pub struct PreseqAccum {
     /// Maps fragment key (hash) to observation count.
@@ -76,31 +75,26 @@ impl PreseqAccum {
         }
     }
 
-    /// Process a fragment for library complexity estimation.
+    /// Process a read for library complexity estimation.
     ///
-    /// Callers are responsible for fragment-level counting:
-    /// - **PE data**: Count read1 of primary proper pairs + unpaired primary reads.
-    ///   Compute fragment boundaries: `frag_start = pos`, `frag_end = pos + tlen`.
-    ///   This matches preseq v3.2.0's `merge_mates()` behavior which creates
-    ///   fragments keyed by `(chrom, fragment_start, fragment_end)`.
-    /// - **SE data**: Count primary mapped reads with `frag_start = pos`, `frag_end = 0`.
-    ///
-    /// Each fragment is hashed and stored in a hash table. This correctly groups
-    /// all duplicates regardless of BAM order.
+    /// Matches upstream preseq's `load_counts_BAM_pe` behavior: every
+    /// non-secondary, mapped read is counted with key `(tid, pos, mtid, mpos)`.
+    /// Both mates of a pair contribute independently.
     ///
     /// Only unmapped reads (tid < 0) are skipped internally.
     ///
     /// # Arguments
     /// * `tid` - Target (chromosome) ID.
-    /// * `frag_start` - Fragment start position (leftmost alignment position).
-    /// * `frag_end` - Fragment end position (for PE: pos + tlen; for SE: 0).
-    pub fn process_read(&mut self, tid: i32, frag_start: i64, frag_end: i64) {
+    /// * `pos` - Alignment position.
+    /// * `mtid` - Mate target ID.
+    /// * `mpos` - Mate position.
+    pub fn process_read(&mut self, tid: i32, pos: i64, mtid: i32, mpos: i64) {
         // Only skip unmapped reads (tid == -1), matching preseq behavior
         if tid < 0 {
             return;
         }
 
-        let key = compute_hash(tid as u64, frag_start as u64, frag_end as u64, 0);
+        let key = compute_hash(tid as u64, pos as u64, mtid as u64, mpos as u64);
         *self.fragment_counts.entry(key).or_insert(0) += 1;
         self.total_fragments += 1;
     }
@@ -627,14 +621,9 @@ fn power_series_coeffs_defects(
 /// number of distinct molecules in the resample.
 fn bootstrap_resample(
     histogram: &[(u64, u64)],
-    rng: &mut ChaCha8Rng,
+    rng: &mut Mt,
 ) -> (Vec<(u64, u64)>, u64, u64) {
-    use rand::distr::weighted::WeightedIndex;
-
     // Build parallel vectors of histogram indices and their counts (n_j values).
-    // These are the indices into the original histogram that have nonzero n_j.
-    // In preseq this is "orig_hist_distinct_counts" (the indices) and
-    // "distinct_orig_hist" (the positive n_j values).
     let mut hist_indices: Vec<u64> = Vec::new();
     let mut hist_weights: Vec<u64> = Vec::new();
     for &(j, n_j) in histogram {
@@ -651,25 +640,33 @@ fn bootstrap_resample(
         return (Vec::new(), 0, 0);
     }
 
-    // Categorical sampling: draw n_distinct samples weighted by hist_weights.
-    // Each draw selects a frequency bin; we increment that bin's count in the
-    // resampled histogram.
-    let weights_f64: Vec<f64> = hist_weights.iter().map(|&w| w as f64).collect();
-    let dist = match WeightedIndex::new(&weights_f64) {
-        Ok(d) => d,
-        Err(_) => return (Vec::new(), 0, 0),
-    };
-
-    // sample[k] = how many times frequency bin k was drawn
+    // Sequential binomial sampling (multinomial via sequential binomials).
+    // Matches upstream preseq's resample_hist() behavior exactly.
+    // For each category i: draw Binomial(remaining_trials, p_i / remaining_prob),
+    // then update remaining_trials and remaining_prob.
+    let mut remaining_trials = n_distinct;
+    let mut remaining_prob: f64 = hist_weights.iter().sum::<u64>() as f64;
     let mut sample = vec![0u64; hist_indices.len()];
-    for _ in 0..n_distinct {
-        let idx = dist.sample(rng);
-        sample[idx] += 1;
+
+    for i in 0..hist_indices.len() {
+        if remaining_trials == 0 || remaining_prob <= 0.0 {
+            break;
+        }
+        let p = (hist_weights[i] as f64) / remaining_prob;
+        let drawn = if p >= 1.0 {
+            remaining_trials
+        } else {
+            match Binomial::new(remaining_trials, p) {
+                Ok(dist) => dist.sample(rng),
+                Err(_) => 0,
+            }
+        };
+        sample[i] = drawn;
+        remaining_trials -= drawn;
+        remaining_prob -= hist_weights[i] as f64;
     }
 
     // Reconstruct the histogram from the resampled data.
-    // For each frequency bin j (from hist_indices), if sample[k] > 0, then
-    // sample[k] distinct molecules have frequency j in the bootstrap sample.
     let mut freq_of_freq: HashMap<u64, u64> = HashMap::new();
     let mut resample_total = 0u64;
     let mut resample_distinct = 0u64;
@@ -778,6 +775,7 @@ pub fn estimate_complexity(
             histogram,
             total_reads,
             n_distinct,
+            n_distinct,
             &targets,
             config.max_terms,
             max_extrap,
@@ -798,106 +796,47 @@ pub fn estimate_complexity(
 
     info!("Running {} bootstrap replicates...", n_bootstraps);
 
-    // Generate deterministic per-replicate seeds from the master seed.
-    // We generate 2x n_bootstraps seeds initially (enough for most cases
-    // where failures are rare), and fall back to a sequential retry loop
-    // if more are needed.
+    // Run bootstraps sequentially with a single MT19937 RNG seeded once,
+    // matching upstream preseq's behavior exactly. Upstream uses C++ std::mt19937
+    // (32-bit Mersenne Twister) with a single seed, running each bootstrap in order.
     let boot_max_terms = config.max_terms;
     let boot_defects = config.defects;
     let n_targets = targets.len();
 
-    // Phase 1: generate seeds and run replicates in parallel.
-    // Use 2x over-provisioning to handle occasional failures.
-    let initial_batch = (2 * n_bootstraps as usize).max(n_bootstraps as usize + 10);
-    let replicate_seeds: Vec<u64> = {
-        let mut master_rng = ChaCha8Rng::seed_from_u64(config.seed);
-        (0..initial_batch).map(|_| master_rng.next_u64()).collect()
-    };
-
-    let all_results: Vec<Option<Vec<f64>>> = replicate_seeds
-        .par_iter()
-        .map(|&seed| {
-            let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let (boot_hist, boot_total, _boot_distinct) = bootstrap_resample(histogram, &mut rng);
-
-            if boot_total == 0 {
-                return None;
-            }
-
-            // Use ORIGINAL n_distinct for extrapolation, but boot_total as vals_sum
-            // This matches preseq's extrap_bootstrap behavior
-            match compute_curve(
-                &boot_hist,
-                boot_total,
-                n_distinct, // original initial_distinct
-                &targets,
-                boot_max_terms,
-                max_extrap,
-                boot_defects,
-            ) {
-                Ok(boot_curve) => {
-                    let stable = boot_curve.iter().all(|&(_, e)| e.is_finite() && e >= 0.0);
-                    if stable {
-                        let vals: Vec<f64> =
-                            boot_curve.iter().map(|&(_, expected)| expected).collect();
-                        Some(vals)
-                    } else {
-                        None
-                    }
-                }
-                Err(_) => None,
-            }
-        })
-        .collect();
-
-    // Collect successful results, stopping after n_bootstraps successes
+    let mut rng = Mt::new(config.seed as u32);
     let mut bootstrap_curves: Vec<Vec<f64>> = vec![Vec::new(); n_targets];
     let mut successful_bootstraps = 0u32;
+    let max_iter = 100 * n_bootstraps as u64;
+    let mut iter_count = 0u64;
 
-    for vals in all_results.into_iter().flatten() {
-        for (i, &expected) in vals.iter().enumerate() {
-            if i < bootstrap_curves.len() {
-                bootstrap_curves[i].push(expected);
-            }
-        }
-        successful_bootstraps += 1;
-        if successful_bootstraps >= n_bootstraps {
-            break;
-        }
-    }
+    while successful_bootstraps < n_bootstraps && iter_count < max_iter {
+        iter_count += 1;
+        let (boot_hist, boot_total, boot_distinct) = bootstrap_resample(histogram, &mut rng);
 
-    // Phase 2: if we still need more replicates, run sequentially with
-    // fresh seeds (rare — only when failure rate > 50%).
-    if successful_bootstraps < n_bootstraps {
-        let max_extra = 100 * n_bootstraps as u64;
-        let mut extra_rng = ChaCha8Rng::seed_from_u64(config.seed.wrapping_add(1));
-        let mut extra_iter = 0u64;
-        while successful_bootstraps < n_bootstraps && extra_iter < max_extra {
-            extra_iter += 1;
-            let seed = extra_rng.next_u64();
-            let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let (boot_hist, boot_total, _) = bootstrap_resample(histogram, &mut rng);
-            if boot_total == 0 {
-                continue;
-            }
-            if let Ok(boot_curve) = compute_curve(
-                &boot_hist,
-                boot_total,
-                n_distinct,
-                &targets,
-                boot_max_terms,
-                max_extrap,
-                boot_defects,
-            ) {
-                let stable = boot_curve.iter().all(|&(_, e)| e.is_finite() && e >= 0.0);
-                if stable {
-                    for (i, &(_, expected)) in boot_curve.iter().enumerate() {
-                        if i < bootstrap_curves.len() {
-                            bootstrap_curves[i].push(expected);
-                        }
+        if boot_total == 0 {
+            continue;
+        }
+
+        // Use boot_distinct for interpolation, original n_distinct for extrapolation
+        // This matches preseq's extrap_bootstrap behavior
+        if let Ok(boot_curve) = compute_curve(
+            &boot_hist,
+            boot_total,
+            boot_distinct, // bootstrap's own distinct for interpolation
+            n_distinct,    // original initial_distinct for extrapolation
+            &targets,
+            boot_max_terms,
+            max_extrap,
+            boot_defects,
+        ) {
+            let stable = boot_curve.iter().all(|&(_, e)| e.is_finite() && e >= 0.0);
+            if stable {
+                for (i, &(_, expected)) in boot_curve.iter().enumerate() {
+                    if i < bootstrap_curves.len() {
+                        bootstrap_curves[i].push(expected);
                     }
-                    successful_bootstraps += 1;
                 }
+                successful_bootstraps += 1;
             }
         }
     }
@@ -945,11 +884,22 @@ fn median_sorted(sorted: &[f64]) -> f64 {
 }
 
 /// Compute a single complexity curve (point estimates only).
+///
+/// # Arguments
+/// * `histogram` - Frequency-of-frequencies.
+/// * `total_reads` - Total reads in this sample.
+/// * `interp_distinct` - Distinct count for interpolation (bootstrap's own).
+/// * `extrap_distinct` - Distinct count for extrapolation (original initial_distinct).
+/// * `targets` - Evaluation grid points.
+/// * `max_terms` - Maximum CF terms.
+/// * `max_extrap` - Maximum extrapolation value.
+/// * `use_defects` - Whether to use defects mode.
 #[allow(clippy::too_many_arguments)]
 fn compute_curve(
     histogram: &[(u64, u64)],
     total_reads: u64,
-    n_distinct: u64,
+    interp_distinct: u64,
+    extrap_distinct: u64,
     targets: &[f64],
     max_terms: usize,
     max_extrap: f64,
@@ -1003,11 +953,11 @@ fn compute_curve(
     let mut curve = Vec::with_capacity(targets.len());
     for &target in targets {
         let expected = if target <= n {
-            // Interpolation region
-            interpolate(histogram, total_reads, n_distinct, target)
+            // Interpolation region: use bootstrap's own distinct count
+            interpolate(histogram, total_reads, interp_distinct, target)
         } else {
-            // Extrapolation region
-            match extrapolate(&cf_coeffs, degree, total_reads, n_distinct, target) {
+            // Extrapolation region: use original initial_distinct
+            match extrapolate(&cf_coeffs, degree, total_reads, extrap_distinct, target) {
                 Some(v) => v,
                 None => {
                     // If extrapolation fails, stop the curve here
@@ -1163,23 +1113,23 @@ mod tests {
         let mut accum = PreseqAccum::new();
 
         // Simulate fragments: 3 seen once, 2 seen twice, 1 seen three times
-        // Key is (tid, frag_start, frag_end)
+        // Key is (tid, pos, mtid, mpos)
         // Fragment A: 1 time
-        accum.process_read(0, 100, 100);
+        accum.process_read(0, 100, 0, 100);
         // Fragment B: 1 time
-        accum.process_read(0, 200, 200);
+        accum.process_read(0, 200, 0, 200);
         // Fragment C: 1 time
-        accum.process_read(0, 300, 300);
+        accum.process_read(0, 300, 0, 300);
         // Fragment D: 2 times
-        accum.process_read(0, 400, 400);
-        accum.process_read(0, 400, 400);
+        accum.process_read(0, 400, 0, 400);
+        accum.process_read(0, 400, 0, 400);
         // Fragment E: 2 times
-        accum.process_read(0, 500, 500);
-        accum.process_read(0, 500, 500);
+        accum.process_read(0, 500, 0, 500);
+        accum.process_read(0, 500, 0, 500);
         // Fragment F: 3 times
-        accum.process_read(0, 600, 600);
-        accum.process_read(0, 600, 600);
-        accum.process_read(0, 600, 600);
+        accum.process_read(0, 600, 0, 600);
+        accum.process_read(0, 600, 0, 600);
+        accum.process_read(0, 600, 0, 600);
 
         assert_eq!(accum.total_fragments, 10);
         assert_eq!(accum.n_distinct(), 6);
@@ -1196,19 +1146,19 @@ mod tests {
         let mut accum = PreseqAccum::new();
 
         // Mapped read — should be counted
-        accum.process_read(0, 100, 100);
+        accum.process_read(0, 100, 0, 100);
         assert_eq!(accum.total_fragments, 1);
 
         // Unmapped (tid == -1) — should be skipped
-        accum.process_read(-1, 200, 200);
+        accum.process_read(-1, 200, 0, 200);
         assert_eq!(accum.total_fragments, 1);
 
         // Another mapped read at different position — should be counted
-        accum.process_read(0, 300, 300);
+        accum.process_read(0, 300, 0, 300);
         assert_eq!(accum.total_fragments, 2);
 
         // Duplicate at same position — should be counted (whole point!)
-        accum.process_read(0, 300, 300);
+        accum.process_read(0, 300, 0, 300);
         assert_eq!(accum.total_fragments, 3);
     }
 
@@ -1216,33 +1166,33 @@ mod tests {
     fn test_pe_accumulator() {
         let mut accum = PreseqAccum::new();
 
-        // PE fragment spanning 100-200 (callers compute frag_start/frag_end from BAM)
-        accum.process_read(0, 100, 200);
+        // PE read: (tid=0, pos=100, mtid=0, mpos=200)
+        accum.process_read(0, 100, 0, 200);
         assert_eq!(accum.total_fragments, 1);
 
-        // Same fragment again (PCR duplicate) — same key
-        accum.process_read(0, 100, 200);
+        // Same read again (PCR duplicate) — same key
+        accum.process_read(0, 100, 0, 200);
         assert_eq!(accum.total_fragments, 2);
 
-        // Different fragment (same start, different end = different insert size)
-        accum.process_read(0, 100, 300);
+        // Different read (same pos, different mpos)
+        accum.process_read(0, 100, 0, 300);
         assert_eq!(accum.total_fragments, 3);
-        assert_eq!(accum.n_distinct(), 2); // Two distinct fragments
+        assert_eq!(accum.n_distinct(), 2); // Two distinct reads
     }
 
     #[test]
     fn test_interleaved_fragments_grouped_correctly() {
         // Simulate fragments at the same start but different ends (different insert sizes):
-        //   (0, 100, 200) — fragment A
-        //   (0, 100, 300) — fragment B (different end)
-        //   (0, 100, 200) — fragment A duplicate
+        //   (0, 100, 0, 200) — read A
+        //   (0, 100, 0, 300) — read B (different mpos)
+        //   (0, 100, 0, 200) — read A duplicate
         //
         // Hash-based counting correctly groups A (count 2), B (count 1) → 2 distinct
 
         let mut accum = PreseqAccum::new();
-        accum.process_read(0, 100, 200); // A
-        accum.process_read(0, 100, 300); // B (different end)
-        accum.process_read(0, 100, 200); // A duplicate
+        accum.process_read(0, 100, 0, 200); // A
+        accum.process_read(0, 100, 0, 300); // B (different mpos)
+        accum.process_read(0, 100, 0, 200); // A duplicate
 
         assert_eq!(accum.total_fragments, 3);
         assert_eq!(accum.n_distinct(), 2, "2 distinct (A and B)");
@@ -1257,12 +1207,12 @@ mod tests {
     #[test]
     fn test_accumulator_merge() {
         let mut accum1 = PreseqAccum::new();
-        accum1.process_read(0, 100, 100);
-        accum1.process_read(0, 200, 200);
+        accum1.process_read(0, 100, 0, 100);
+        accum1.process_read(0, 200, 0, 200);
 
         let mut accum2 = PreseqAccum::new();
-        accum2.process_read(0, 100, 100); // Same fragment as accum1
-        accum2.process_read(0, 300, 300);
+        accum2.process_read(0, 100, 0, 100); // Same read as accum1
+        accum2.process_read(0, 300, 0, 300);
 
         accum1.merge(accum2);
         assert_eq!(accum1.total_fragments, 4);
@@ -1373,10 +1323,10 @@ mod tests {
         let hist = vec![(1, 100), (2, 50), (3, 25)];
         let _total_reads = 225;
 
-        let mut rng1 = ChaCha8Rng::seed_from_u64(42);
+        let mut rng1 = Mt::new(42);
         let (h1, t1, d1) = bootstrap_resample(&hist, &mut rng1);
 
-        let mut rng2 = ChaCha8Rng::seed_from_u64(42);
+        let mut rng2 = Mt::new(42);
         let (h2, t2, d2) = bootstrap_resample(&hist, &mut rng2);
 
         assert_eq!(t1, t2, "Same seed should give same total");
