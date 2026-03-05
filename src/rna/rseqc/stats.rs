@@ -1,8 +1,9 @@
-//! Samtools stats SN-section compatible output.
+//! Samtools stats compatible output.
 //!
-//! Produces the Summary Numbers (SN) section from `samtools stats`, which is
-//! the section parsed by MultiQC for key alignment statistics.
+//! Produces the Summary Numbers (SN) section and all histogram/distribution
+//! sections from `samtools stats`, compatible with MultiQC and plot-bamstats.
 
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -53,8 +54,6 @@ fn fmt_sci(v: f64) -> String {
 /// * `result` - The computed BAM statistics
 /// * `output_path` - Path to write the stats file
 pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
-    use std::io::Write;
-
     let mut out = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create stats file: {}", output_path.display()))?;
 
@@ -100,11 +99,12 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     // Both mates contribute to the histogram; total count / 2 = pairs.
     // Samtools computes mean/SD from the "main bulk" (up to 99th percentile).
     let (avg_insert, insert_sd) = {
-        let hist = &result.insert_size_histogram;
-        let total_count: u64 = hist.values().sum();
+        // Build a flat insert-size histogram from is_hist (total column = index 0)
+        let total_count: u64 = result.is_hist.values().map(|v| v[0]).sum();
         if total_count > 0 {
             // Sort insert sizes for percentile computation
-            let mut sorted_isizes: Vec<(u64, u64)> = hist.iter().map(|(&k, &v)| (k, v)).collect();
+            let mut sorted_isizes: Vec<(u64, u64)> =
+                result.is_hist.iter().map(|(&k, v)| (k, v[0])).collect();
             sorted_isizes.sort_by_key(|&(k, _)| k);
 
             // Find 99th percentile cutoff (isize_main_bulk = 0.99)
@@ -295,6 +295,73 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         }),
     )?;
 
+    // =================================================================
+    // Histogram/distribution sections
+    // =================================================================
+
+    // FFQ — first fragment quality per cycle
+    write_ffq_lfq(&mut out, "FFQ", "first fragment", &result.ffq)?;
+
+    // LFQ — last fragment quality per cycle
+    write_ffq_lfq(&mut out, "LFQ", "last fragment", &result.lfq)?;
+
+    // GCF — GC content of first fragments
+    write_gc_content(&mut out, "GCF", "first fragments", &result.gcf)?;
+
+    // GCL — GC content of last fragments
+    write_gc_content(&mut out, "GCL", "last fragments", &result.gcl)?;
+
+    // GCC — ACGT content per cycle (derived from FBC+LBC as percentages)
+    write_gcc(
+        &mut out,
+        "GCC",
+        "ACGT content per cycle",
+        &result.fbc,
+        &result.lbc,
+    )?;
+
+    // GCT — ACGT content per cycle, read-oriented
+    write_gcc(
+        &mut out,
+        "GCT",
+        "ACGT content per cycle, read-oriented (reversed for reverse reads)",
+        &result.fbc_ro,
+        &result.lbc_ro,
+    )?;
+
+    // FBC — ACGT raw counts per cycle, first fragments
+    write_base_counts(&mut out, "FBC", "first fragments", &result.fbc)?;
+
+    // LBC — ACGT raw counts per cycle, last fragments
+    write_base_counts(&mut out, "LBC", "last fragments", &result.lbc)?;
+
+    // FTC — total base counters, first fragments
+    write_total_base_counts(&mut out, "FTC", &result.ftc)?;
+
+    // LTC — total base counters, last fragments
+    write_total_base_counts(&mut out, "LTC", &result.ltc)?;
+
+    // IS — insert size with orientation breakdown
+    write_insert_size(&mut out, &result.is_hist)?;
+
+    // RL — read length histogram
+    write_length_hist(&mut out, "RL", &result.rl_hist)?;
+
+    // FRL — first fragment read lengths
+    write_length_hist(&mut out, "FRL", &result.frl_hist)?;
+
+    // LRL — last fragment read lengths
+    write_length_hist(&mut out, "LRL", &result.lrl_hist)?;
+
+    // MAPQ — mapping quality histogram
+    write_mapq_hist(&mut out, &result.mapq_hist)?;
+
+    // ID — indel size distribution
+    write_indel_dist(&mut out, &result.id_hist)?;
+
+    // IC — indels per cycle
+    write_indel_cycle(&mut out, &result.ic)?;
+
     info!("Wrote samtools stats output to {}", output_path.display());
     Ok(())
 }
@@ -317,6 +384,270 @@ fn sn_no_comment<W: std::io::Write, V: std::fmt::Display>(
     value: V,
 ) -> Result<()> {
     writeln!(out, "SN\t{key}\t{value}")?;
+    Ok(())
+}
+
+// ============================================================================
+// Histogram/distribution output helpers
+// ============================================================================
+
+/// Write FFQ or LFQ section (per-cycle quality distribution).
+///
+/// Each row is a cycle, columns are quality values 0..max_q.
+/// `tag` is "FFQ" or "LFQ", `desc` is "first fragment" or "last fragment".
+fn write_ffq_lfq<W: std::io::Write>(
+    out: &mut W,
+    tag: &str,
+    desc: &str,
+    data: &[[u64; 64]],
+) -> Result<()> {
+    // Determine max quality observed across all cycles
+    let max_q = data
+        .iter()
+        .flat_map(|row| {
+            row.iter()
+                .enumerate()
+                .rev()
+                .find(|(_, &c)| c > 0)
+                .map(|(i, _)| i)
+        })
+        .max()
+        .unwrap_or(0);
+
+    writeln!(
+        out,
+        "# {tag}, {desc} quality. Columns correspond to qualities and rows to cycles. First column is the cycle number."
+    )?;
+    writeln!(
+        out,
+        "# Columns correspond to qualities 0, 1, 2, ..., {max_q}"
+    )?;
+    writeln!(
+        out,
+        "# Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+    for (cycle, row) in data.iter().enumerate() {
+        write!(out, "{tag}\t{cycle}")?;
+        for &count in row.iter().take(max_q + 1) {
+            write!(out, "\t{count}")?;
+        }
+        writeln!(out)?;
+    }
+    Ok(())
+}
+
+/// Write GCF or GCL section (GC content distribution, 101 buckets 0-100%).
+fn write_gc_content<W: std::io::Write>(
+    out: &mut W,
+    tag: &str,
+    desc: &str,
+    data: &[u64; 101],
+) -> Result<()> {
+    writeln!(
+        out,
+        "# {tag}, GC content of {desc}. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+    for (i, &count) in data.iter().enumerate() {
+        writeln!(out, "{tag}\t{:.2}\t{count}", i as f64)?;
+    }
+    Ok(())
+}
+
+/// Write GCC or GCT section (ACGT content per cycle as percentages).
+///
+/// Combines first-fragment and last-fragment base counts to produce
+/// per-cycle percentages of A, C, G, T, N, Other.
+fn write_gcc<W: std::io::Write>(
+    out: &mut W,
+    tag: &str,
+    desc: &str,
+    fbc: &[[u64; 6]],
+    lbc: &[[u64; 6]],
+) -> Result<()> {
+    writeln!(
+        out,
+        "# {tag}, {desc}. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+
+    let max_cycles = fbc.len().max(lbc.len());
+    for cycle in 0..max_cycles {
+        let mut combined = [0u64; 6];
+        if cycle < fbc.len() {
+            for j in 0..6 {
+                combined[j] += fbc[cycle][j];
+            }
+        }
+        if cycle < lbc.len() {
+            for j in 0..6 {
+                combined[j] += lbc[cycle][j];
+            }
+        }
+        let total: u64 = combined.iter().sum();
+        if total > 0 {
+            let pcts: Vec<f64> = combined
+                .iter()
+                .map(|&c| 100.0 * c as f64 / total as f64)
+                .collect();
+            writeln!(
+                out,
+                "{tag}\t{cycle}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                pcts[0], pcts[1], pcts[2], pcts[3], pcts[4], pcts[5]
+            )?;
+        } else {
+            writeln!(out, "{tag}\t{cycle}\t0.00\t0.00\t0.00\t0.00\t0.00\t0.00")?;
+        }
+    }
+    Ok(())
+}
+
+/// Write FBC or LBC section (ACGT raw counts per cycle).
+fn write_base_counts<W: std::io::Write>(
+    out: &mut W,
+    tag: &str,
+    desc: &str,
+    data: &[[u64; 6]],
+) -> Result<()> {
+    writeln!(
+        out,
+        "# {tag}, ACGT content per cycle for {desc}. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+    for (cycle, row) in data.iter().enumerate() {
+        writeln!(
+            out,
+            "{tag}\t{cycle}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row[0], row[1], row[2], row[3], row[4], row[5]
+        )?;
+    }
+    Ok(())
+}
+
+/// Write FTC or LTC section (total base counters, one line).
+fn write_total_base_counts<W: std::io::Write>(
+    out: &mut W,
+    tag: &str,
+    data: &[u64; 5],
+) -> Result<()> {
+    writeln!(
+        out,
+        "# {tag}, total base counters. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+    writeln!(
+        out,
+        "{tag}\t{}\t{}\t{}\t{}\t{}",
+        data[0], data[1], data[2], data[3], data[4]
+    )?;
+    Ok(())
+}
+
+/// Write IS section (insert size with orientation breakdown).
+fn write_insert_size<W: std::io::Write>(
+    out: &mut W,
+    is_hist: &std::collections::HashMap<u64, [u64; 4]>,
+) -> Result<()> {
+    writeln!(
+        out,
+        "# IS, insert size. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+
+    if is_hist.is_empty() {
+        return Ok(());
+    }
+
+    let max_isize = *is_hist.keys().max().unwrap_or(&0);
+    // Cap at 8000 to match samtools stats default MAX_INSERT_SIZE
+    let limit = max_isize.min(8000);
+    for isize_val in 0..=limit {
+        let counts = is_hist.get(&isize_val).copied().unwrap_or([0; 4]);
+        writeln!(
+            out,
+            "IS\t{isize_val}\t{}\t{}\t{}\t{}",
+            counts[0], counts[1], counts[2], counts[3]
+        )?;
+    }
+    Ok(())
+}
+
+/// Write RL, FRL, or LRL section (read length histogram).
+fn write_length_hist<W: std::io::Write>(
+    out: &mut W,
+    tag: &str,
+    hist: &std::collections::HashMap<u64, u64>,
+) -> Result<()> {
+    writeln!(
+        out,
+        "# {tag}, read length. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+
+    if hist.is_empty() {
+        return Ok(());
+    }
+
+    let min_len = *hist.keys().min().unwrap_or(&0);
+    let max_len = *hist.keys().max().unwrap_or(&0);
+    for len in min_len..=max_len {
+        let count = hist.get(&len).copied().unwrap_or(0);
+        writeln!(out, "{tag}\t{len}\t{count}")?;
+    }
+    Ok(())
+}
+
+/// Write MAPQ section (mapping quality histogram).
+fn write_mapq_hist<W: std::io::Write>(out: &mut W, mapq_hist: &[u64; 256]) -> Result<()> {
+    writeln!(
+        out,
+        "# MAPQ, mapping quality. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+
+    // Find max observed MAPQ
+    let max_mapq = mapq_hist
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, &c)| c > 0)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    for (q, &count) in mapq_hist.iter().enumerate().take(max_mapq + 1) {
+        writeln!(out, "MAPQ\t{q}\t{count}")?;
+    }
+    Ok(())
+}
+
+/// Write ID section (indel size distribution).
+fn write_indel_dist<W: std::io::Write>(
+    out: &mut W,
+    id_hist: &std::collections::HashMap<u64, [u64; 2]>,
+) -> Result<()> {
+    writeln!(
+        out,
+        "# ID, indel size. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+
+    if id_hist.is_empty() {
+        return Ok(());
+    }
+
+    let max_len = *id_hist.keys().max().unwrap_or(&0);
+    for len in 1..=max_len {
+        let counts = id_hist.get(&len).copied().unwrap_or([0; 2]);
+        writeln!(out, "ID\t{len}\t{}\t{}", counts[0], counts[1])?;
+    }
+    Ok(())
+}
+
+/// Write IC section (indels per cycle).
+fn write_indel_cycle<W: std::io::Write>(out: &mut W, ic: &[[u64; 4]]) -> Result<()> {
+    writeln!(
+        out,
+        "# IC, indels per cycle. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+    for (cycle, row) in ic.iter().enumerate() {
+        writeln!(
+            out,
+            "IC\t{cycle}\t{}\t{}\t{}\t{}",
+            row[0], row[1], row[2], row[3]
+        )?;
+    }
     Ok(())
 }
 

@@ -105,7 +105,7 @@ pub struct RseqcConfig {
 ///
 /// Also collects the additional counters needed for samtools-compatible
 /// flagstat, idxstats, and stats output.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BamStatAccum {
     // --- RSeQC bam_stat fields (original) ---
     /// Total BAM records seen (primary + secondary + supplementary + unmapped).
@@ -198,9 +198,9 @@ pub struct BamStatAccum {
     pub quality_count: u64,
     /// Sum of NM tag values across mapped primary reads.
     pub mismatches: u64,
-    /// Raw insert-size histogram: abs(TLEN) → count, for 99th percentile truncation.
+    /// Insert size with orientation: abs_tlen → [total, inward, outward, other].
     /// Both mates contribute (divide by 2 at output, matching samtools stats).
-    pub insert_size_histogram: HashMap<u64, u64>,
+    pub is_hist: HashMap<u64, [u64; 4]>,
     /// Inward-oriented pairs (FR).
     pub inward_pairs: u64,
     /// Outward-oriented pairs (RF).
@@ -217,6 +217,117 @@ pub struct BamStatAccum {
     pub reads_mq0: u64,
     /// Primary non-QC-fail mapped paired reads where mate is also mapped.
     pub reads_mapped_and_paired: u64,
+
+    // --- samtools stats histogram/distribution fields ---
+    /// Read length histogram (all primary reads): length → count.
+    pub rl_hist: HashMap<u64, u64>,
+    /// First fragment read length histogram: length → count.
+    pub frl_hist: HashMap<u64, u64>,
+    /// Last fragment read length histogram: length → count.
+    pub lrl_hist: HashMap<u64, u64>,
+    /// MAPQ histogram: primary, mapped, !qcfail, !dup (quality 0-255).
+    pub mapq_hist: [u64; 256],
+    /// Per-cycle quality for first fragments (primary, mapped, !qcfail, !dup).
+    /// Outer: cycle index. Inner: quality value → count (64 buckets covers Q0-Q63).
+    pub ffq: Vec<[u64; 64]>,
+    /// Per-cycle quality for last fragments.
+    pub lfq: Vec<[u64; 64]>,
+    /// GC content distribution for first fragments (0-100%), 101 buckets.
+    pub gcf: [u64; 101],
+    /// GC content distribution for last fragments (0-100%), 101 buckets.
+    pub gcl: [u64; 101],
+    /// Per-cycle base composition for first fragments (primary, mapped, !qcfail, !dup).
+    /// [A, C, G, T, N, Other] per cycle.
+    pub fbc: Vec<[u64; 6]>,
+    /// Per-cycle base composition for last fragments.
+    pub lbc: Vec<[u64; 6]>,
+    /// Per-cycle base composition (read-oriented) for first fragments.
+    /// Reverse strand reads contribute in reversed cycle order.
+    pub fbc_ro: Vec<[u64; 6]>,
+    /// Per-cycle base composition (read-oriented) for last fragments.
+    pub lbc_ro: Vec<[u64; 6]>,
+    /// Total base counters for first fragments: [A, C, G, T, N].
+    pub ftc: [u64; 5],
+    /// Total base counters for last fragments: [A, C, G, T, N].
+    pub ltc: [u64; 5],
+    /// Indel distribution by size: length → [insertions, deletions].
+    pub id_hist: HashMap<u64, [u64; 2]>,
+    /// Indels per cycle: cycle → [ins_fwd, ins_rev, del_fwd, del_rev].
+    pub ic: Vec<[u64; 4]>,
+}
+
+impl Default for BamStatAccum {
+    fn default() -> Self {
+        Self {
+            total_records: 0,
+            qc_failed: 0,
+            duplicates: 0,
+            non_primary: 0,
+            unmapped: 0,
+            non_unique: 0,
+            unique: 0,
+            read_1: 0,
+            read_2: 0,
+            forward: 0,
+            reverse: 0,
+            splice: 0,
+            non_splice: 0,
+            proper_pairs: 0,
+            proper_pair_diff_chrom: 0,
+            secondary: 0,
+            supplementary: 0,
+            mapped: 0,
+            paired_flagstat: 0,
+            read1_flagstat: 0,
+            read2_flagstat: 0,
+            first_fragments: 0,
+            last_fragments: 0,
+            properly_paired: 0,
+            both_mapped: 0,
+            singletons: 0,
+            mate_diff_chr: 0,
+            mate_diff_chr_mapq5: 0,
+            chrom_counts: HashMap::new(),
+            unplaced_unmapped: 0,
+            total_len: 0,
+            total_first_fragment_len: 0,
+            total_last_fragment_len: 0,
+            bases_mapped: 0,
+            bases_mapped_cigar: 0,
+            bases_duplicated: 0,
+            max_len: 0,
+            max_first_fragment_len: 0,
+            max_last_fragment_len: 0,
+            quality_sum: 0.0,
+            quality_count: 0,
+            mismatches: 0,
+            is_hist: HashMap::new(),
+            inward_pairs: 0,
+            outward_pairs: 0,
+            other_orientation: 0,
+            primary_count: 0,
+            primary_mapped: 0,
+            primary_duplicates: 0,
+            reads_mq0: 0,
+            reads_mapped_and_paired: 0,
+            rl_hist: HashMap::new(),
+            frl_hist: HashMap::new(),
+            lrl_hist: HashMap::new(),
+            mapq_hist: [0u64; 256],
+            ffq: Vec::new(),
+            lfq: Vec::new(),
+            gcf: [0u64; 101],
+            gcl: [0u64; 101],
+            fbc: Vec::new(),
+            lbc: Vec::new(),
+            fbc_ro: Vec::new(),
+            lbc_ro: Vec::new(),
+            ftc: [0u64; 5],
+            ltc: [0u64; 5],
+            id_hist: HashMap::new(),
+            ic: Vec::new(),
+        }
+    }
 }
 
 impl BamStatAccum {
@@ -316,7 +427,8 @@ impl BamStatAccum {
             let mate_unmapped = flags & BAM_FMUNMAP != 0;
 
             self.total_len += seq_len;
-            if is_paired && flags & BAM_FREAD2 != 0 {
+            let is_last_fragment = is_paired && flags & BAM_FREAD2 != 0;
+            if is_last_fragment {
                 self.total_last_fragment_len += seq_len;
                 if seq_len > self.max_last_fragment_len {
                     self.max_last_fragment_len = seq_len;
@@ -329,6 +441,14 @@ impl BamStatAccum {
             }
             if seq_len > self.max_len {
                 self.max_len = seq_len;
+            }
+
+            // RL/FRL/LRL: read length histograms (all primary reads)
+            *self.rl_hist.entry(seq_len).or_insert(0) += 1;
+            if is_last_fragment {
+                *self.lrl_hist.entry(seq_len).or_insert(0) += 1;
+            } else {
+                *self.frl_hist.entry(seq_len).or_insert(0) += 1;
             }
 
             if is_dup {
@@ -386,58 +506,54 @@ impl BamStatAccum {
                     }
                 }
 
-                // Insert size for paired primary reads where both mates are mapped
-                // on the same chromosome. Upstream samtools stats uses
-                // IS_PAIRED_AND_MAPPED (paired + both mapped) — does NOT require
-                // proper-pair flag. Both mates contribute (samtools divides by 2
-                // at output). We count both mates with abs(tlen) and store a
-                // raw insert-size histogram for 99th-percentile truncation at output.
+                // Insert size + orientation for paired primary reads where both
+                // mates are mapped on the same chromosome. Upstream samtools
+                // stats uses IS_PAIRED_AND_MAPPED (paired + both mapped).
+                // Both mates contribute (samtools divides by 2 at output).
+                // We combine insert size histogram and orientation in one block
+                // to store per-insert-size orientation breakdown.
                 if is_paired && !mate_unmapped {
                     let tid = record.tid();
                     let mtid = record.mtid();
                     if tid == mtid {
                         let tlen = record.insert_size();
-                        let abs_tlen = tlen.unsigned_abs() as u64;
-                        if abs_tlen > 0 {
-                            // Store in histogram for 99th-percentile truncation
-                            *self.insert_size_histogram.entry(abs_tlen).or_insert(0) += 1;
-                        }
-                    }
-                }
+                        let abs_tlen = tlen.unsigned_abs();
 
-                // Pair orientation for mapped paired reads where mate is also mapped.
-                // Matches upstream samtools stats (stats.c:1269-1294) exactly:
-                //   - Uses read1/read2 designation and relative position
-                //   - Counts BOTH mates (divide by 2 at output time)
-                //   - Only counts same-chromosome pairs
-                if is_paired && !mate_unmapped {
-                    let tid = record.tid();
-                    let mtid = record.mtid();
-
-                    if tid == mtid {
-                        let pos_fst = record.mpos() - record.pos(); // positive if mate downstream
+                        // Compute orientation
+                        let pos_fst = record.mpos() - record.pos();
                         let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
                         let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
                         let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
 
-                        if is_fwd * is_mfwd > 0 {
-                            // Same strand → "other"
+                        // orientation_idx: 1=inward, 2=outward, 3=other
+                        let orientation_idx = if is_fwd * is_mfwd > 0 {
                             self.other_orientation += 1;
+                            3usize
                         } else if is_fst * pos_fst > 0 {
                             if is_fst * is_fwd > 0 {
                                 self.inward_pairs += 1;
+                                1usize
                             } else {
                                 self.outward_pairs += 1;
+                                2usize
                             }
                         } else if is_fst * pos_fst < 0 {
                             if is_fst * is_fwd > 0 {
                                 self.outward_pairs += 1;
+                                2usize
                             } else {
                                 self.inward_pairs += 1;
+                                1usize
                             }
                         } else {
-                            // pos_fst == 0 (overlapping) → inward
                             self.inward_pairs += 1;
+                            1usize
+                        };
+
+                        if abs_tlen > 0 {
+                            let entry = self.is_hist.entry(abs_tlen).or_insert([0; 4]);
+                            entry[0] += 1; // total
+                            entry[orientation_idx] += 1;
                         }
                     }
                 }
@@ -453,6 +569,149 @@ impl BamStatAccum {
                     let base_qual_sum: f64 = quals.iter().map(|&q| f64::from(q)).sum::<f64>();
                     self.quality_sum += base_qual_sum;
                     self.quality_count += quals.len() as u64;
+                }
+            }
+
+            // =============================================================
+            // Histogram sections: primary + mapped + !qcfail + !dup
+            // (MAPQ, FFQ/LFQ, FBC/LBC, GCF/GCL, FTC/LTC, ID/IC, FBC_RO/LBC_RO)
+            // =============================================================
+            if is_mapped && !is_qcfail && !is_dup {
+                let is_reverse = flags & BAM_FREVERSE != 0;
+
+                // MAPQ histogram
+                self.mapq_hist[mapq as usize] += 1;
+
+                // Per-cycle quality, base composition, GC content, total bases
+                let seq = record.seq();
+                let quals = record.qual();
+                let read_len = seq.len();
+
+                // Determine which arrays to use (first vs last fragment)
+                // If paired: read2 = last, read1 = first. If SE: all = first.
+                let (qual_arr, base_arr, base_ro_arr, gc_arr, tc_arr) = if is_last_fragment {
+                    (
+                        &mut self.lfq,
+                        &mut self.lbc,
+                        &mut self.lbc_ro,
+                        &mut self.gcl,
+                        &mut self.ltc,
+                    )
+                } else {
+                    (
+                        &mut self.ffq,
+                        &mut self.fbc,
+                        &mut self.fbc_ro,
+                        &mut self.gcf,
+                        &mut self.ftc,
+                    )
+                };
+
+                // Ensure per-cycle arrays are large enough
+                if read_len > qual_arr.len() {
+                    qual_arr.resize(read_len, [0u64; 64]);
+                }
+                if read_len > base_arr.len() {
+                    base_arr.resize(read_len, [0u64; 6]);
+                }
+                if read_len > base_ro_arr.len() {
+                    base_ro_arr.resize(read_len, [0u64; 6]);
+                }
+
+                let mut gc_count: u64 = 0;
+
+                for i in 0..read_len {
+                    // Per-cycle quality
+                    let q = quals[i] as usize;
+                    let q_clamped = q.min(63);
+                    qual_arr[i][q_clamped] += 1;
+
+                    // Base index: A=0, C=1, G=2, T=3, N=4, Other=5
+                    let base = seq.encoded_base(i);
+                    let base_idx = match base {
+                        1 => 0,  // A
+                        2 => 1,  // C
+                        4 => 2,  // G
+                        8 => 3,  // T
+                        15 => 4, // N
+                        _ => 5,  // Other
+                    };
+
+                    // Per-cycle base composition (alignment order)
+                    base_arr[i][base_idx] += 1;
+
+                    // Per-cycle base composition (read-oriented: reversed for reverse strand)
+                    let ro_cycle = if is_reverse { read_len - 1 - i } else { i };
+                    base_ro_arr[ro_cycle][base_idx] += 1;
+
+                    // GC counting for GCF/GCL
+                    if base_idx == 1 || base_idx == 2 {
+                        gc_count += 1;
+                    }
+
+                    // Total base counters (FTC/LTC): only A, C, G, T, N
+                    if base_idx < 5 {
+                        tc_arr[base_idx] += 1;
+                    }
+                }
+
+                // GC content: percentage rounded to integer bucket 0-100
+                if read_len > 0 {
+                    let gc_pct = ((gc_count as f64 / read_len as f64) * 100.0).round() as usize;
+                    let gc_pct = gc_pct.min(100);
+                    gc_arr[gc_pct] += 1;
+                }
+
+                // Indel distribution (ID) and indels per cycle (IC) from CIGAR
+                use rust_htslib::bam::record::Cigar as C;
+                let cigar = record.cigar();
+                let mut cycle: usize = 0;
+
+                for op in cigar.iter() {
+                    match op {
+                        C::Match(n) | C::Equal(n) | C::Diff(n) => {
+                            cycle += *n as usize;
+                        }
+                        C::SoftClip(n) => {
+                            cycle += *n as usize;
+                        }
+                        C::Ins(n) => {
+                            let len = *n as u64;
+                            // ID: indel size distribution
+                            let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
+                            id_entry[0] += 1; // insertions
+
+                            // IC: indels per cycle
+                            if cycle >= self.ic.len() {
+                                self.ic.resize(cycle + 1, [0u64; 4]);
+                            }
+                            if is_reverse {
+                                self.ic[cycle][1] += 1; // ins_rev
+                            } else {
+                                self.ic[cycle][0] += 1; // ins_fwd
+                            }
+
+                            cycle += *n as usize; // I advances cycle
+                        }
+                        C::Del(n) => {
+                            let len = *n as u64;
+                            // ID: indel size distribution
+                            let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
+                            id_entry[1] += 1; // deletions
+
+                            // IC: indels per cycle
+                            if cycle >= self.ic.len() {
+                                self.ic.resize(cycle + 1, [0u64; 4]);
+                            }
+                            if is_reverse {
+                                self.ic[cycle][3] += 1; // del_rev
+                            } else {
+                                self.ic[cycle][2] += 1; // del_fwd
+                            }
+                            // D does NOT advance cycle
+                        }
+                        C::RefSkip(_) | C::HardClip(_) | C::Pad(_) => {}
+                    }
                 }
             }
         }
@@ -587,8 +846,11 @@ impl BamStatAccum {
         self.quality_sum += other.quality_sum;
         self.quality_count += other.quality_count;
         self.mismatches += other.mismatches;
-        for (isize_val, count) in other.insert_size_histogram {
-            *self.insert_size_histogram.entry(isize_val).or_insert(0) += count;
+        for (isize_val, counts) in other.is_hist {
+            let entry = self.is_hist.entry(isize_val).or_insert([0; 4]);
+            for i in 0..4 {
+                entry[i] += counts[i];
+            }
         }
         self.inward_pairs += other.inward_pairs;
         self.outward_pairs += other.outward_pairs;
@@ -598,6 +860,52 @@ impl BamStatAccum {
         self.primary_duplicates += other.primary_duplicates;
         self.reads_mq0 += other.reads_mq0;
         self.reads_mapped_and_paired += other.reads_mapped_and_paired;
+
+        // Histogram/distribution fields
+        for (len, count) in other.rl_hist {
+            *self.rl_hist.entry(len).or_insert(0) += count;
+        }
+        for (len, count) in other.frl_hist {
+            *self.frl_hist.entry(len).or_insert(0) += count;
+        }
+        for (len, count) in other.lrl_hist {
+            *self.lrl_hist.entry(len).or_insert(0) += count;
+        }
+        for i in 0..256 {
+            self.mapq_hist[i] += other.mapq_hist[i];
+        }
+
+        // Per-cycle quality arrays (FFQ/LFQ)
+        merge_vec_arrays_64(&mut self.ffq, other.ffq);
+        merge_vec_arrays_64(&mut self.lfq, other.lfq);
+
+        // GC content distributions
+        for i in 0..101 {
+            self.gcf[i] += other.gcf[i];
+            self.gcl[i] += other.gcl[i];
+        }
+
+        // Per-cycle base composition (FBC/LBC and read-oriented)
+        merge_vec_arrays_6(&mut self.fbc, other.fbc);
+        merge_vec_arrays_6(&mut self.lbc, other.lbc);
+        merge_vec_arrays_6(&mut self.fbc_ro, other.fbc_ro);
+        merge_vec_arrays_6(&mut self.lbc_ro, other.lbc_ro);
+
+        // Total base counters
+        for i in 0..5 {
+            self.ftc[i] += other.ftc[i];
+            self.ltc[i] += other.ltc[i];
+        }
+
+        // Indel distribution
+        for (len, counts) in other.id_hist {
+            let entry = self.id_hist.entry(len).or_insert([0; 2]);
+            entry[0] += counts[0];
+            entry[1] += counts[1];
+        }
+
+        // Indels per cycle
+        merge_vec_arrays_4(&mut self.ic, other.ic);
     }
 }
 
@@ -1600,6 +1908,46 @@ fn point_in(region_map: &HashMap<String, ChromIntervals>, chrom: &str, point: u6
 }
 
 // ===================================================================
+// Merge helpers for Vec<[u64; N]> per-cycle arrays
+// ===================================================================
+
+/// Merge two Vec<[u64; 64]> arrays element-wise, extending self if shorter.
+fn merge_vec_arrays_64(target: &mut Vec<[u64; 64]>, source: Vec<[u64; 64]>) {
+    if source.len() > target.len() {
+        target.resize(source.len(), [0u64; 64]);
+    }
+    for (i, arr) in source.into_iter().enumerate() {
+        for j in 0..64 {
+            target[i][j] += arr[j];
+        }
+    }
+}
+
+/// Merge two Vec<[u64; 6]> arrays element-wise, extending self if shorter.
+fn merge_vec_arrays_6(target: &mut Vec<[u64; 6]>, source: Vec<[u64; 6]>) {
+    if source.len() > target.len() {
+        target.resize(source.len(), [0u64; 6]);
+    }
+    for (i, arr) in source.into_iter().enumerate() {
+        for j in 0..6 {
+            target[i][j] += arr[j];
+        }
+    }
+}
+
+/// Merge two Vec<[u64; 4]> arrays element-wise, extending self if shorter.
+fn merge_vec_arrays_4(target: &mut Vec<[u64; 4]>, source: Vec<[u64; 4]>) {
+    if source.len() > target.len() {
+        target.resize(source.len(), [0u64; 4]);
+    }
+    for (i, arr) in source.into_iter().enumerate() {
+        for j in 0..4 {
+            target[i][j] += arr[j];
+        }
+    }
+}
+
+// ===================================================================
 // Converter methods: accumulator → result types for output functions
 // ===================================================================
 
@@ -1653,7 +2001,7 @@ impl BamStatAccum {
             quality_sum: self.quality_sum,
             quality_count: self.quality_count,
             mismatches: self.mismatches,
-            insert_size_histogram: self.insert_size_histogram,
+            is_hist: self.is_hist,
             inward_pairs: self.inward_pairs,
             outward_pairs: self.outward_pairs,
             other_orientation: self.other_orientation,
@@ -1662,6 +2010,23 @@ impl BamStatAccum {
             primary_duplicates: self.primary_duplicates,
             reads_mq0: self.reads_mq0,
             reads_mapped_and_paired: self.reads_mapped_and_paired,
+            // Histogram/distribution fields
+            rl_hist: self.rl_hist,
+            frl_hist: self.frl_hist,
+            lrl_hist: self.lrl_hist,
+            mapq_hist: self.mapq_hist,
+            ffq: self.ffq,
+            lfq: self.lfq,
+            gcf: self.gcf,
+            gcl: self.gcl,
+            fbc: self.fbc,
+            lbc: self.lbc,
+            fbc_ro: self.fbc_ro,
+            lbc_ro: self.lbc_ro,
+            ftc: self.ftc,
+            ltc: self.ltc,
+            id_hist: self.id_hist,
+            ic: self.ic,
         }
     }
 }

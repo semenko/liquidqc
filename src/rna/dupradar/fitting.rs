@@ -39,6 +39,21 @@ impl FitResult {
     }
 }
 
+/// Compute the unit deviance contribution for a binomial observation.
+///
+/// For binomial family: `2 * (y * log(y/mu) + (1-y) * log((1-y)/(1-mu)))`,
+/// handling y=0 and y=1 edge cases where terms vanish.
+fn binomial_deviance_unit(y: f64, mu: f64) -> f64 {
+    let mut d = 0.0;
+    if y > 0.0 {
+        d += y * (y / mu).ln();
+    }
+    if y < 1.0 {
+        d += (1.0 - y) * ((1.0 - y) / (1.0 - mu)).ln();
+    }
+    2.0 * d
+}
+
 /// Fit a logistic regression model: dupRate ~ log10(RPK)
 ///
 /// Uses IRLS (Iteratively Reweighted Least Squares) to solve the GLM
@@ -87,17 +102,57 @@ pub fn duprate_exp_fit(rpk: &[f64], dup_rate: &[f64]) -> Result<FitResult> {
 
     // Match R's glm() defaults for convergence
     let max_iter: usize = 25; // R default: control$maxit = 25
-    let tol: f64 = 1e-8; // R default: control$epsilon = 1e-8
+    let epsilon: f64 = 1e-8; // R default: control$epsilon = 1e-8
 
-    // Initialize with starting values (R's default initialization)
-    // Start with the mean of y transformed through the link
-    let y_mean: f64 = y_vals.iter().sum::<f64>() / n as f64;
-    let y_mean = y_mean.clamp(0.01, 0.99);
-    let eta_start = (y_mean / (1.0 - y_mean)).ln();
+    // --- Starting values matching R's binomial()$initialize ---
+    // R uses: mustart = (y + 0.5) / 2 for each observation
+    // Then converts to eta via the logit link, and performs one WLS step
+    // to get initial coefficients.
+    let mu_start: Vec<f64> = y_vals.iter().map(|&y| (y + 0.5) / 2.0).collect();
 
-    let mut beta0 = eta_start;
-    let mut beta1 = 0.0;
+    // Compute initial eta, weights, and working response from mustart
+    let mut sw = 0.0;
+    let mut swx = 0.0;
+    let mut swx2 = 0.0;
+    let mut swz = 0.0;
+    let mut swxz = 0.0;
 
+    for i in 0..n {
+        let xi = x_vals[i];
+        let yi = y_vals[i];
+        let mu = mu_start[i];
+        let eta = (mu / (1.0 - mu)).ln();
+        let v = mu * (1.0 - mu);
+        if v < 1e-20 {
+            continue;
+        }
+        let w = v;
+        let z = eta + (yi - mu) / v;
+
+        sw += w;
+        swx += w * xi;
+        swx2 += w * xi * xi;
+        swz += w * z;
+        swxz += w * xi * z;
+    }
+
+    let det = sw * swx2 - swx * swx;
+    anyhow::ensure!(
+        det.abs() > 1e-30,
+        "Singular matrix computing initial coefficients"
+    );
+    let mut beta0 = (swx2 * swz - swx * swxz) / det;
+    let mut beta1 = (sw * swxz - swx * swz) / det;
+
+    // Compute initial deviance for convergence checking
+    let mut dev = 0.0;
+    for i in 0..n {
+        let eta = beta0 + beta1 * x_vals[i];
+        let mu = (1.0 / (1.0 + (-eta).exp())).clamp(1e-10, 1.0 - 1e-10);
+        dev += binomial_deviance_unit(y_vals[i], mu);
+    }
+
+    // --- IRLS iterations with deviance-based convergence (matching R) ---
     let mut converged = false;
     for _iter in 0..max_iter {
         // Compute η, μ, and working quantities
@@ -146,17 +201,20 @@ pub fn duprate_exp_fit(rpk: &[f64], dup_rate: &[f64]) -> Result<FitResult> {
             anyhow::bail!("Singular matrix in IRLS iteration");
         }
 
-        let new_beta0 = (swx2 * swz - swx * swxz) / det;
-        let new_beta1 = (sw * swxz - swx * swz) / det;
+        beta0 = (swx2 * swz - swx * swxz) / det;
+        beta1 = (sw * swxz - swx * swz) / det;
 
-        // Check convergence
-        let d0 = (new_beta0 - beta0).abs();
-        let d1 = (new_beta1 - beta1).abs();
+        // Compute deviance: -2 * sum(y*log(mu) + (1-y)*log(1-mu))
+        let dev_old = dev;
+        dev = 0.0;
+        for i in 0..n {
+            let eta = beta0 + beta1 * x_vals[i];
+            let mu = (1.0 / (1.0 + (-eta).exp())).clamp(1e-10, 1.0 - 1e-10);
+            dev += binomial_deviance_unit(y_vals[i], mu);
+        }
 
-        beta0 = new_beta0;
-        beta1 = new_beta1;
-
-        if d0 < tol && d1 < tol {
+        // R's convergence criterion: |dev - devold| / (0.1 + |dev|) < epsilon
+        if (dev - dev_old).abs() / (0.1 + dev.abs()) < epsilon {
             converged = true;
             break;
         }
@@ -164,9 +222,9 @@ pub fn duprate_exp_fit(rpk: &[f64], dup_rate: &[f64]) -> Result<FitResult> {
 
     if !converged {
         log::warn!(
-            "IRLS logistic regression did not converge within {} iterations (tolerance: {:.0e})",
+            "IRLS logistic regression did not converge within {} iterations (epsilon: {:.0e})",
             max_iter,
-            tol
+            epsilon
         );
     }
 

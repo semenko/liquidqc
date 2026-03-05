@@ -18,7 +18,7 @@ use std::path::Path;
 ///
 /// Contains both the original RSeQC bam_stat fields and the additional
 /// fields needed for samtools-compatible flagstat, idxstats, and stats output.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BamStatResult {
     // --- RSeQC bam_stat fields ---
     /// Total number of records in the BAM file.
@@ -113,9 +113,9 @@ pub struct BamStatResult {
     pub quality_count: u64,
     /// Sum of NM tag values across mapped primary reads.
     pub mismatches: u64,
-    /// Raw insert-size histogram: abs(TLEN) → count for paired mapped reads.
+    /// Insert size with orientation breakdown: abs(TLEN) → [total, inward, outward, other].
     /// Both mates contribute; divide by 2 at output to match samtools stats.
-    pub insert_size_histogram: std::collections::HashMap<u64, u64>,
+    pub is_hist: HashMap<u64, [u64; 4]>,
     /// Inward-oriented pairs (FR).
     pub inward_pairs: u64,
     /// Outward-oriented pairs (RF).
@@ -132,6 +132,114 @@ pub struct BamStatResult {
     pub reads_mq0: u64,
     /// Number of primary, non-QC-fail, mapped, paired reads whose mate is also mapped.
     pub reads_mapped_and_paired: u64,
+
+    // --- samtools stats histogram/distribution fields ---
+    /// Read length histogram (all primary reads): length → count.
+    pub rl_hist: HashMap<u64, u64>,
+    /// First fragment read length histogram: length → count.
+    pub frl_hist: HashMap<u64, u64>,
+    /// Last fragment read length histogram: length → count.
+    pub lrl_hist: HashMap<u64, u64>,
+    /// MAPQ histogram (primary, mapped, !qcfail, !dup): quality 0-255.
+    pub mapq_hist: [u64; 256],
+    /// Per-cycle quality for first fragments: outer = cycle, inner = quality bucket counts.
+    pub ffq: Vec<[u64; 64]>,
+    /// Per-cycle quality for last fragments: outer = cycle, inner = quality bucket counts.
+    pub lfq: Vec<[u64; 64]>,
+    /// GC content distribution for first fragments (0-100%), 101 buckets.
+    pub gcf: [u64; 101],
+    /// GC content distribution for last fragments (0-100%), 101 buckets.
+    pub gcl: [u64; 101],
+    /// Per-cycle base composition for first fragments: [A, C, G, T, N, Other] per cycle.
+    pub fbc: Vec<[u64; 6]>,
+    /// Per-cycle base composition for last fragments: [A, C, G, T, N, Other] per cycle.
+    pub lbc: Vec<[u64; 6]>,
+    /// Per-cycle base composition (read-oriented) for first fragments.
+    pub fbc_ro: Vec<[u64; 6]>,
+    /// Per-cycle base composition (read-oriented) for last fragments.
+    pub lbc_ro: Vec<[u64; 6]>,
+    /// Total base counters for first fragments: [A, C, G, T, N].
+    pub ftc: [u64; 5],
+    /// Total base counters for last fragments: [A, C, G, T, N].
+    pub ltc: [u64; 5],
+    /// Indel distribution by size: length → [insertions, deletions].
+    pub id_hist: HashMap<u64, [u64; 2]>,
+    /// Indels per cycle: cycle → [ins_fwd, ins_rev, del_fwd, del_rev].
+    pub ic: Vec<[u64; 4]>,
+}
+
+impl Default for BamStatResult {
+    fn default() -> Self {
+        Self {
+            total_records: 0,
+            qc_failed: 0,
+            duplicates: 0,
+            non_primary: 0,
+            unmapped: 0,
+            non_unique: 0,
+            unique: 0,
+            read_1: 0,
+            read_2: 0,
+            forward: 0,
+            reverse: 0,
+            splice: 0,
+            non_splice: 0,
+            proper_pairs: 0,
+            proper_pair_diff_chrom: 0,
+            secondary: 0,
+            supplementary: 0,
+            mapped: 0,
+            paired_flagstat: 0,
+            read1_flagstat: 0,
+            read2_flagstat: 0,
+            first_fragments: 0,
+            last_fragments: 0,
+            properly_paired: 0,
+            both_mapped: 0,
+            singletons: 0,
+            mate_diff_chr: 0,
+            mate_diff_chr_mapq5: 0,
+            chrom_counts: HashMap::new(),
+            unplaced_unmapped: 0,
+            total_len: 0,
+            total_first_fragment_len: 0,
+            total_last_fragment_len: 0,
+            bases_mapped: 0,
+            bases_mapped_cigar: 0,
+            bases_duplicated: 0,
+            max_len: 0,
+            max_first_fragment_len: 0,
+            max_last_fragment_len: 0,
+            quality_sum: 0.0,
+            quality_count: 0,
+            mismatches: 0,
+            is_hist: HashMap::new(),
+            inward_pairs: 0,
+            outward_pairs: 0,
+            other_orientation: 0,
+            primary_count: 0,
+            primary_mapped: 0,
+            primary_duplicates: 0,
+            reads_mq0: 0,
+            reads_mapped_and_paired: 0,
+            rl_hist: HashMap::new(),
+            frl_hist: HashMap::new(),
+            lrl_hist: HashMap::new(),
+            mapq_hist: [0u64; 256],
+            ffq: Vec::new(),
+            lfq: Vec::new(),
+            gcf: [0u64; 101],
+            gcl: [0u64; 101],
+            fbc: Vec::new(),
+            lbc: Vec::new(),
+            fbc_ro: Vec::new(),
+            lbc_ro: Vec::new(),
+            ftc: [0u64; 5],
+            ltc: [0u64; 5],
+            id_hist: HashMap::new(),
+            ic: Vec::new(),
+        }
+    }
 }
 
 // ============================================================================
