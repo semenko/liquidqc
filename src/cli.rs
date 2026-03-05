@@ -36,9 +36,12 @@ pub enum Commands {
     /// - junction_saturation: Junction discovery saturation curves
     /// - inner_distance: Insert size estimation for paired-end data
     ///
-    /// Provide either --gtf or --bed (mutually exclusive). With --gtf all tools
-    /// run. With --bed only RSeQC tools run (dupRadar and featureCounts are
-    /// skipped). Disable individual tools via the YAML config file.
+    /// Provide --gtf for full analysis (dupRadar, featureCounts, and all RSeQC
+    /// tools). Provide --bed alone for RSeQC-only mode (dupRadar and
+    /// featureCounts are skipped). When both --gtf and --bed are provided,
+    /// --gtf is used for dupRadar/featureCounts and --bed is used for
+    /// read_distribution (matching the nf-core/rnaseq pipeline behavior where
+    /// GTF is converted to BED12 for RSeQC tools).
     ///
     /// Input alignment files must have duplicates marked (SAM flag 0x400) but NOT
     /// removed. Use tools like Picard MarkDuplicates or samblaster first.
@@ -62,29 +65,20 @@ pub struct RnaArgs {
     /// RSeQC tools. The GTF must contain exon features with gene_id attributes.
     /// CDS features are used for read_distribution UTR/CDS classification.
     /// Gzip-compressed files (.gtf.gz) are detected and decompressed automatically.
-    /// Mutually exclusive with --bed.
-    #[arg(
-        short,
-        long,
-        value_name = "GTF",
-        conflicts_with = "bed",
-        required_unless_present = "bed"
-    )]
+    /// Can be combined with --bed (BED is used for read_distribution when both
+    /// are provided, matching the nf-core/rnaseq pipeline behavior).
+    #[arg(short, long, value_name = "GTF", required_unless_present = "bed")]
     pub gtf: Option<String>,
 
     /// Path to a BED12 gene model file (plain or gzip-compressed).
     ///
-    /// When provided instead of --gtf, only RSeQC tools are run (dupRadar and
-    /// featureCounts are skipped because BED files lack gene-level grouping and
-    /// biotype information). Gzip-compressed files (.bed.gz) are detected and
-    /// decompressed automatically. Mutually exclusive with --gtf.
-    #[arg(
-        short,
-        long,
-        value_name = "BED",
-        conflicts_with = "gtf",
-        required_unless_present = "gtf"
-    )]
+    /// When provided alone (without --gtf), only RSeQC tools are run (dupRadar
+    /// and featureCounts are skipped because BED files lack gene-level grouping
+    /// and biotype information). When provided alongside --gtf, the BED file is
+    /// used for read_distribution while the GTF is used for dupRadar and
+    /// featureCounts. Gzip-compressed files (.bed.gz) are detected and
+    /// decompressed automatically.
+    #[arg(short, long, value_name = "BED", required_unless_present = "gtf")]
     pub bed: Option<String>,
 
     /// Library strandedness: 0=unstranded, 1=forward, 2=reverse
@@ -355,9 +349,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rna_gtf_bed_mutually_exclusive() {
-        // Providing both --gtf and --bed should fail
-        let result = Cli::try_parse_from([
+    fn test_rna_gtf_and_bed_together() {
+        // Providing both --gtf and --bed is now allowed: GTF for dupRadar/featureCounts,
+        // BED for read_distribution (matching nf-core/rnaseq behavior).
+        let cli = Cli::parse_from([
             "rustqc",
             "rna",
             "test.bam",
@@ -366,10 +361,14 @@ mod tests {
             "--bed",
             "model.bed",
         ]);
-        assert!(
-            result.is_err(),
-            "Expected error when both --gtf and --bed are provided"
-        );
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.gtf, Some("genes.gtf".to_string()));
+                assert_eq!(args.bed, Some("model.bed".to_string()));
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
+        }
     }
 
     #[test]

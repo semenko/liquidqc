@@ -38,7 +38,11 @@ pub struct GeneModel {
 impl GeneModel {
     /// Build a gene model from parsed GTF gene annotations.
     ///
-    /// Uses each gene's overall span and strand to create transcript intervals.
+    /// Creates one interval per **transcript** (not per gene) to match
+    /// upstream RSeQC's BED12-based model. Using gene-level spans would
+    /// include introns and inter-transcript gaps, causing reads in
+    /// non-transcript regions to dilute the strand signal.
+    ///
     /// GTF coordinates are 1-based inclusive; BED coordinates are 0-based
     /// half-open. Conversion: BED start = GTF start - 1, BED end = GTF end
     /// (since GTF end is inclusive and BED end is exclusive, the numeric value
@@ -48,22 +52,40 @@ impl GeneModel {
         let mut count: u64 = 0;
 
         for gene in genes.values() {
-            let strand = match gene.strand {
-                '+' => b'+',
-                '-' => b'-',
-                _ => continue, // Skip genes with unknown strand
-            };
-
-            // Convert 1-based inclusive GTF to 0-based half-open BED
-            let start = gene.start.saturating_sub(1);
-            let end = gene.end; // GTF inclusive end == BED exclusive end
-
-            model
-                .intervals
-                .entry(gene.chrom.clone())
-                .or_default()
-                .push(TranscriptInterval { start, end, strand });
-            count += 1;
+            // Use transcript-level intervals to match RSeQC's BED12 approach
+            if gene.transcripts.is_empty() {
+                // Fallback: use gene span if no transcripts were parsed
+                let strand = match gene.strand {
+                    '+' => b'+',
+                    '-' => b'-',
+                    _ => continue,
+                };
+                let start = gene.start.saturating_sub(1);
+                let end = gene.end;
+                model
+                    .intervals
+                    .entry(gene.chrom.clone())
+                    .or_default()
+                    .push(TranscriptInterval { start, end, strand });
+                count += 1;
+            } else {
+                for tx in &gene.transcripts {
+                    let strand = match tx.strand {
+                        '+' => b'+',
+                        '-' => b'-',
+                        _ => continue,
+                    };
+                    // Convert 1-based inclusive GTF to 0-based half-open BED
+                    let start = tx.start.saturating_sub(1);
+                    let end = tx.end;
+                    model
+                        .intervals
+                        .entry(tx.chrom.clone())
+                        .or_default()
+                        .push(TranscriptInterval { start, end, strand });
+                    count += 1;
+                }
+            }
         }
 
         // Sort intervals by start position for binary search
@@ -71,7 +93,7 @@ impl GeneModel {
             intervals.sort_by_key(|iv| iv.start);
         }
 
-        info!("Loaded {} gene intervals from GTF annotation", count);
+        info!("Loaded {} transcript intervals from GTF annotation", count);
         model
     }
 

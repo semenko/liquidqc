@@ -81,15 +81,18 @@ impl PreseqAccum {
     /// non-secondary, mapped read is counted with key `(tid, pos, mtid, mpos)`.
     /// Both mates of a pair contribute independently.
     ///
-    /// Only unmapped reads (tid < 0) are skipped internally.
+    /// The caller must filter to `tid >= 0` (matching upstream preseq's
+    /// `get_tid(aln) == -1` check). No flag-based filtering is applied —
+    /// secondary, supplementary, duplicate, and QC-fail reads are all counted.
     ///
     /// # Arguments
-    /// * `tid` - Target (chromosome) ID.
+    /// * `tid` - Target (chromosome) ID (must be >= 0).
     /// * `pos` - Alignment position.
     /// * `mtid` - Mate target ID.
     /// * `mpos` - Mate position.
     pub fn process_read(&mut self, tid: i32, pos: i64, mtid: i32, mpos: i64) {
-        // Only skip unmapped reads (tid == -1), matching preseq behavior
+        // Safety guard: caller should ensure tid >= 0 (matching upstream preseq's
+        // get_tid(aln) == -1 check). Return early if not.
         if tid < 0 {
             return;
         }
@@ -619,10 +622,7 @@ fn power_series_coeffs_defects(
 /// # Returns
 /// A new histogram from the bootstrap sample, along with the total reads and
 /// number of distinct molecules in the resample.
-fn bootstrap_resample(
-    histogram: &[(u64, u64)],
-    rng: &mut Mt,
-) -> (Vec<(u64, u64)>, u64, u64) {
+fn bootstrap_resample(histogram: &[(u64, u64)], rng: &mut Mt) -> (Vec<(u64, u64)>, u64, u64) {
     // Build parallel vectors of histogram indices and their counts (n_j values).
     let mut hist_indices: Vec<u64> = Vec::new();
     let mut hist_weights: Vec<u64> = Vec::new();

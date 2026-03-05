@@ -97,7 +97,7 @@ pub struct BamStatResult {
     pub total_last_fragment_len: u64,
     /// Sum of query lengths for mapped primary reads.
     pub bases_mapped: u64,
-    /// Sum of M/=/X CIGAR operations for mapped primary reads.
+    /// Sum of M/I/=/X CIGAR operations for mapped primary reads.
     pub bases_mapped_cigar: u64,
     /// Sum of query lengths for duplicate-flagged primary reads.
     pub bases_duplicated: u64,
@@ -107,18 +107,15 @@ pub struct BamStatResult {
     pub max_first_fragment_len: u64,
     /// Maximum last-fragment sequence length.
     pub max_last_fragment_len: u64,
-    /// Sum of average per-read base qualities.
+    /// Sum of individual base qualities across all primary non-QC-fail reads.
     pub quality_sum: f64,
-    /// Number of reads contributing to quality_sum.
+    /// Total number of bases contributing to quality_sum.
     pub quality_count: u64,
     /// Sum of NM tag values across mapped primary reads.
     pub mismatches: u64,
-    /// Sum of absolute TLEN for properly paired primary reads.
-    pub insert_size_sum: f64,
-    /// Sum of squared TLEN for insert size standard deviation.
-    pub insert_size_sq_sum: f64,
-    /// Number of reads contributing to insert size stats.
-    pub insert_size_count: u64,
+    /// Raw insert-size histogram: abs(TLEN) → count for paired mapped reads.
+    /// Both mates contribute; divide by 2 at output to match samtools stats.
+    pub insert_size_histogram: std::collections::HashMap<u64, u64>,
     /// Inward-oriented pairs (FR).
     pub inward_pairs: u64,
     /// Outward-oriented pairs (RF).
@@ -131,7 +128,7 @@ pub struct BamStatResult {
     pub primary_mapped: u64,
     /// Primary duplicate reads.
     pub primary_duplicates: u64,
-    /// Number of mapped reads with mapping quality 0 (all reads, not just primary).
+    /// Number of primary mapped reads with mapping quality 0.
     pub reads_mq0: u64,
     /// Number of primary, non-QC-fail, mapped, paired reads whose mate is also mapped.
     pub reads_mapped_and_paired: u64,

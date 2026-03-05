@@ -306,13 +306,27 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         rna::rseqc::common::parse_known_junctions_from_bed
     );
 
-    let rd_regions = build_rseqc_data!(
-        config.read_distribution.enabled,
-        "Building genomic region sets from GTF...",
-        rna::rseqc::read_distribution::build_regions_from_genes,
-        "Building genomic region sets from BED...",
-        rna::rseqc::read_distribution::build_regions_from_bed
-    );
+    // read_distribution: prefer BED when available (even if GTF is also provided).
+    // This matches nf-core/rnaseq pipeline behavior where the GTF is converted to
+    // BED12 for RSeQC tools. BED12 encodes exact transcript structures including
+    // thickStart/thickEnd for CDS boundaries, ensuring consistent region definitions.
+    let rd_regions = if config.read_distribution.enabled {
+        if let Some(ref bed_path) = args.bed {
+            info!("Building genomic region sets from BED...");
+            Some(rna::rseqc::read_distribution::build_regions_from_bed(
+                bed_path,
+            )?)
+        } else if let Some(ref genes) = genes {
+            info!("Building genomic region sets from GTF...");
+            Some(rna::rseqc::read_distribution::build_regions_from_genes(
+                genes,
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let exon_bitset = build_rseqc_data!(
         config.inner_distance.enabled,

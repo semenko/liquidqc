@@ -198,12 +198,9 @@ pub struct BamStatAccum {
     pub quality_count: u64,
     /// Sum of NM tag values across mapped primary reads.
     pub mismatches: u64,
-    /// Sum of absolute TLEN for properly paired primary reads (for mean insert size).
-    pub insert_size_sum: f64,
-    /// Sum of squared TLEN for insert size standard deviation.
-    pub insert_size_sq_sum: f64,
-    /// Number of reads contributing to insert size stats.
-    pub insert_size_count: u64,
+    /// Raw insert-size histogram: abs(TLEN) → count, for 99th percentile truncation.
+    /// Both mates contribute (divide by 2 at output, matching samtools stats).
+    pub insert_size_histogram: HashMap<u64, u64>,
     /// Inward-oriented pairs (FR).
     pub inward_pairs: u64,
     /// Outward-oriented pairs (RF).
@@ -216,7 +213,7 @@ pub struct BamStatAccum {
     pub primary_mapped: u64,
     /// Primary duplicate reads.
     pub primary_duplicates: u64,
-    /// All mapped reads with MAPQ = 0 (including secondary/supplementary).
+    /// Primary mapped reads with MAPQ = 0 (matching upstream samtools stats).
     pub reads_mq0: u64,
     /// Primary non-QC-fail mapped paired reads where mate is also mapped.
     pub reads_mapped_and_paired: u64,
@@ -256,11 +253,6 @@ impl BamStatAccum {
         }
         if is_mapped {
             self.mapped += 1;
-            // samtools stats: reads MQ0 counts all mapped reads (including
-            // secondary/supplementary) with MAPQ=0
-            if record.mapq() == 0 {
-                self.reads_mq0 += 1;
-            }
         }
         // samtools stats: "1st fragments" / "last fragments" count primary reads only
         // For paired reads: read2 flag -> last, everything else -> 1st
@@ -352,13 +344,22 @@ impl BamStatAccum {
                 self.primary_mapped += 1;
                 self.bases_mapped += seq_len;
 
-                // CIGAR-based mapped bases (M/=/X operations)
+                // samtools stats: reads MQ0 counts primary mapped reads with MAPQ=0
+                // (upstream stats.c: MQ0 is counted inside collect_orig_read_stats,
+                // which is only called for IS_ORIGINAL reads = non-secondary, non-supplementary)
+                if record.mapq() == 0 {
+                    self.reads_mq0 += 1;
+                }
+
+                // CIGAR-based mapped bases (M/I/=/X operations).
+                // Upstream samtools stats counts BAM_CMATCH, BAM_CINS, BAM_CEQUAL,
+                // BAM_CDIFF in nbases_mapped_cigar (stats.c:1336-1340).
                 use rust_htslib::bam::record::Cigar as C;
                 let cigar_mapped: u64 = record
                     .cigar()
                     .iter()
                     .map(|op| match op {
-                        C::Match(n) | C::Equal(n) | C::Diff(n) => u64::from(*n),
+                        C::Match(n) | C::Ins(n) | C::Equal(n) | C::Diff(n) => u64::from(*n),
                         _ => 0,
                     })
                     .sum();
@@ -385,68 +386,73 @@ impl BamStatAccum {
                     }
                 }
 
-                // Insert size for properly paired primary reads on the same
-                // chromosome. samtools stats counts insert size only for the read
-                // with positive TLEN to avoid double-counting, and excludes
-                // reads with TLEN > 65536 (outliers / structural variants).
-                if is_paired && flags & BAM_FPROPER_PAIR != 0 {
+                // Insert size for paired primary reads where both mates are mapped
+                // on the same chromosome. Upstream samtools stats uses
+                // IS_PAIRED_AND_MAPPED (paired + both mapped) — does NOT require
+                // proper-pair flag. Both mates contribute (samtools divides by 2
+                // at output). We count both mates with abs(tlen) and store a
+                // raw insert-size histogram for 99th-percentile truncation at output.
+                if is_paired && !mate_unmapped {
                     let tid = record.tid();
                     let mtid = record.mtid();
                     if tid == mtid {
                         let tlen = record.insert_size();
-                        if tlen > 0 && tlen <= 65536 {
-                            let abs_tlen = tlen as f64;
-                            self.insert_size_sum += abs_tlen;
-                            self.insert_size_sq_sum += abs_tlen * abs_tlen;
-                            self.insert_size_count += 1;
+                        let abs_tlen = tlen.unsigned_abs() as u64;
+                        if abs_tlen > 0 {
+                            // Store in histogram for 99th-percentile truncation
+                            *self.insert_size_histogram.entry(abs_tlen).or_insert(0) += 1;
                         }
                     }
                 }
 
                 // Pair orientation for mapped paired reads where mate is also mapped.
-                // samtools stats determines orientation based on leftmost position
-                // and only counts from the read with the smaller position (to avoid
-                // double-counting).
+                // Matches upstream samtools stats (stats.c:1269-1294) exactly:
+                //   - Uses read1/read2 designation and relative position
+                //   - Counts BOTH mates (divide by 2 at output time)
+                //   - Only counts same-chromosome pairs
                 if is_paired && !mate_unmapped {
-                    let pos = record.pos();
-                    let mpos = record.mpos();
                     let tid = record.tid();
                     let mtid = record.mtid();
 
-                    // Only count when this read is the leftmost (or when same
-                    // position, use read1 as tiebreaker)
-                    let is_leftmost = if tid != mtid {
-                        false // different chromosomes - skip orientation
-                    } else if pos != mpos {
-                        pos < mpos
-                    } else {
-                        flags & BAM_FREAD1 != 0 // tiebreaker: read1
-                    };
+                    if tid == mtid {
+                        let pos_fst = record.mpos() - record.pos(); // positive if mate downstream
+                        let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
+                        let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
+                        let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
 
-                    if is_leftmost {
-                        let this_rev = flags & BAM_FREVERSE != 0;
-                        let mate_rev = flags & BAM_FMREVERSE != 0;
-
-                        // Orientation based on strand of left and right read
-                        if !this_rev && mate_rev {
-                            self.inward_pairs += 1; // F...R -> inward
-                        } else if this_rev && !mate_rev {
-                            self.outward_pairs += 1; // R...F -> outward
+                        if is_fwd * is_mfwd > 0 {
+                            // Same strand → "other"
+                            self.other_orientation += 1;
+                        } else if is_fst * pos_fst > 0 {
+                            if is_fst * is_fwd > 0 {
+                                self.inward_pairs += 1;
+                            } else {
+                                self.outward_pairs += 1;
+                            }
+                        } else if is_fst * pos_fst < 0 {
+                            if is_fst * is_fwd > 0 {
+                                self.outward_pairs += 1;
+                            } else {
+                                self.inward_pairs += 1;
+                            }
                         } else {
-                            self.other_orientation += 1; // F...F or R...R
+                            // pos_fst == 0 (overlapping) → inward
+                            self.inward_pairs += 1;
                         }
                     }
                 }
             }
 
-            // Average quality for primary non-QC-fail reads
+            // Average quality for primary non-QC-fail reads.
+            // Upstream samtools stats computes per-BASE quality average:
+            // sum of all individual base qualities / total bases.
+            // (Not a per-read average of averages.)
             if !is_qcfail {
                 let quals = record.qual();
                 if !quals.is_empty() {
-                    let avg_q: f64 =
-                        quals.iter().map(|&q| f64::from(q)).sum::<f64>() / quals.len() as f64;
-                    self.quality_sum += avg_q;
-                    self.quality_count += 1;
+                    let base_qual_sum: f64 = quals.iter().map(|&q| f64::from(q)).sum::<f64>();
+                    self.quality_sum += base_qual_sum;
+                    self.quality_count += quals.len() as u64;
                 }
             }
         }
@@ -581,9 +587,9 @@ impl BamStatAccum {
         self.quality_sum += other.quality_sum;
         self.quality_count += other.quality_count;
         self.mismatches += other.mismatches;
-        self.insert_size_sum += other.insert_size_sum;
-        self.insert_size_sq_sum += other.insert_size_sq_sum;
-        self.insert_size_count += other.insert_size_count;
+        for (isize_val, count) in other.insert_size_histogram {
+            *self.insert_size_histogram.entry(isize_val).or_insert(0) += count;
+        }
         self.inward_pairs += other.inward_pairs;
         self.outward_pairs += other.outward_pairs;
         self.other_orientation += other.other_orientation;
@@ -1515,21 +1521,14 @@ impl RseqcAccumulators {
         // preseq: counts unique read fingerprints for library complexity.
         //
         // Matches upstream preseq's load_counts_BAM_pe behavior:
-        //   - Only skip SECONDARY reads (flag 0x100). preseq's `is_primary`
-        //     check is `!(flag & 0x100)` — does NOT filter supplementary (0x800).
-        //   - Must also be mapped (not flag 0x4).
+        //   - Only skip reads where get_tid(aln) == -1 (unmapped / no reference).
+        //   - Does NOT filter on any BAM flags — secondary (0x100), supplementary
+        //     (0x800), duplicate (0x400), QC-fail (0x200) are all counted.
         //   - ALL qualifying reads are counted with key (tid, pos, mtid, mpos).
         //     Both mates of a pair contribute independently.
-        //
-        // Unmapped reads (tid < 0) are additionally skipped inside process_read().
         if let Some(ref mut accum) = self.preseq {
-            if !record.is_secondary() && !record.is_unmapped() {
-                accum.process_read(
-                    record.tid(),
-                    record.pos(),
-                    record.mtid(),
-                    record.mpos(),
-                );
+            if record.tid() >= 0 {
+                accum.process_read(record.tid(), record.pos(), record.mtid(), record.mpos());
             }
         }
     }
@@ -1630,9 +1629,7 @@ impl BamStatAccum {
             quality_sum: self.quality_sum,
             quality_count: self.quality_count,
             mismatches: self.mismatches,
-            insert_size_sum: self.insert_size_sum,
-            insert_size_sq_sum: self.insert_size_sq_sum,
-            insert_size_count: self.insert_size_count,
+            insert_size_histogram: self.insert_size_histogram,
             inward_pairs: self.inward_pairs,
             outward_pairs: self.outward_pairs,
             other_orientation: self.other_orientation,

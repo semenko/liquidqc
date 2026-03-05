@@ -72,19 +72,19 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     // "sequences" = primary reads that passed QC
     let sequences = raw_total.saturating_sub(filtered);
 
-    // Average lengths
+    // Average lengths — use round() to match samtools' printf("%.0f") behavior
     let avg_len = if raw_total > 0 {
-        result.total_len as f64 / raw_total as f64
+        (result.total_len as f64 / raw_total as f64).round()
     } else {
         0.0
     };
     let avg_first = if result.first_fragments > 0 {
-        result.total_first_fragment_len as f64 / result.first_fragments as f64
+        (result.total_first_fragment_len as f64 / result.first_fragments as f64).round()
     } else {
         0.0
     };
     let avg_last = if result.last_fragments > 0 {
-        result.total_last_fragment_len as f64 / result.last_fragments as f64
+        (result.total_last_fragment_len as f64 / result.last_fragments as f64).round()
     } else {
         0.0
     };
@@ -96,23 +96,56 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         0.0
     };
 
-    // Insert size stats
-    let avg_insert = if result.insert_size_count > 0 {
-        result.insert_size_sum / result.insert_size_count as f64
-    } else {
-        0.0
-    };
-    let insert_sd = if result.insert_size_count > 1 {
-        let n = result.insert_size_count as f64;
-        let mean = result.insert_size_sum / n;
-        let variance = (result.insert_size_sq_sum / n) - (mean * mean);
-        if variance > 0.0 {
-            variance.sqrt()
+    // Insert size stats — 99th percentile truncation matching samtools stats.
+    // Both mates contribute to the histogram; total count / 2 = pairs.
+    // Samtools computes mean/SD from the "main bulk" (up to 99th percentile).
+    let (avg_insert, insert_sd) = {
+        let hist = &result.insert_size_histogram;
+        let total_count: u64 = hist.values().sum();
+        if total_count > 0 {
+            // Sort insert sizes for percentile computation
+            let mut sorted_isizes: Vec<(u64, u64)> = hist.iter().map(|(&k, &v)| (k, v)).collect();
+            sorted_isizes.sort_by_key(|&(k, _)| k);
+
+            // Find 99th percentile cutoff (isize_main_bulk = 0.99)
+            let bulk_limit = (total_count as f64 * 0.99).ceil() as u64;
+            let mut cumulative = 0u64;
+            let mut bulk_sum = 0.0f64;
+            let mut bulk_sq_sum = 0.0f64;
+            let mut bulk_count = 0u64;
+
+            for &(isize_val, count) in &sorted_isizes {
+                let remaining = bulk_limit.saturating_sub(cumulative);
+                if remaining == 0 {
+                    break;
+                }
+                let use_count = count.min(remaining);
+                let v = isize_val as f64;
+                bulk_sum += v * use_count as f64;
+                bulk_sq_sum += v * v * use_count as f64;
+                bulk_count += use_count;
+                cumulative += count;
+            }
+
+            if bulk_count > 0 {
+                let mean = bulk_sum / bulk_count as f64;
+                let sd = if bulk_count > 1 {
+                    let variance = (bulk_sq_sum / bulk_count as f64) - (mean * mean);
+                    if variance > 0.0 {
+                        variance.sqrt()
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+                (mean, sd)
+            } else {
+                (0.0, 0.0)
+            }
         } else {
-            0.0
+            (0.0, 0.0)
         }
-    } else {
-        0.0
     };
 
     // Error rate = mismatches / bases_mapped_cigar
@@ -232,12 +265,18 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         "insert size standard deviation:",
         fmt_1dp(insert_sd),
     )?;
-    sn_no_comment(&mut out, "inward oriented pairs:", result.inward_pairs)?;
-    sn_no_comment(&mut out, "outward oriented pairs:", result.outward_pairs)?;
+    // Divide orientation counts by 2 — upstream samtools stats counts both
+    // mates and applies a 0.5 factor at output (stats.c:1516-1518).
+    sn_no_comment(&mut out, "inward oriented pairs:", result.inward_pairs / 2)?;
+    sn_no_comment(
+        &mut out,
+        "outward oriented pairs:",
+        result.outward_pairs / 2,
+    )?;
     sn_no_comment(
         &mut out,
         "pairs with other orientation:",
-        result.other_orientation,
+        result.other_orientation / 2,
     )?;
     sn_no_comment(
         &mut out,

@@ -792,11 +792,11 @@ mod tests {
         let regions = build_regions_from_genes(&genes);
 
         // CDS should be empty for non-coding transcripts
-        let cds_bases = regions
-            .cds_exon
-            .get("CHR1")
-            .map_or(0, |c| c.total_bases());
-        assert_eq!(cds_bases, 0, "Non-coding transcripts should have no CDS exons");
+        let cds_bases = regions.cds_exon.get("CHR1").map_or(0, |c| c.total_bases());
+        assert_eq!(
+            cds_bases, 0,
+            "Non-coding transcripts should have no CDS exons"
+        );
 
         // + strand non-coding: all exon bases (200 bases) should be 5'UTR
         let utr5_bases = regions.utr_5.get("CHR1").map_or(0, |c| c.total_bases());

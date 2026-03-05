@@ -504,6 +504,11 @@ struct MateInfo {
     is_dup: bool,
     /// Whether this read is a multimapper (NH > 1)
     is_multi: bool,
+    /// Whether this read is a secondary alignment (flag 0x100).
+    /// Used to exclude secondary alignment fragments from the unique-mapper
+    /// RPKM denominator (N), matching featureCounts behaviour where
+    /// `countMultiMappingReads=FALSE` skips secondary alignment records entirely.
+    is_secondary: bool,
 }
 
 /// Key for the mate buffer, matching featureCounts' `SAM_pairer_get_read_full_name()`.
@@ -821,6 +826,7 @@ fn process_chromosome_batch(
 
             let is_reverse = flags & BAM_FREVERSE != 0;
             let is_read1 = flags & BAM_FREAD1 != 0;
+            let is_secondary = flags & BAM_FSECONDARY != 0;
 
             // Get the chromosome name
             let rec_tid = record.tid();
@@ -857,10 +863,17 @@ fn process_chromosome_batch(
             // --- Single-end counting ---
             if !paired {
                 result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
+                // featureCounts with countMultiMappingReads=FALSE skips secondary
+                // alignment records entirely, so they don't contribute to that
+                // run's stat-table total (and hence its RPKM denominator N).
+                if !is_secondary {
+                    result.n_unique_dup += 1;
+                }
                 if !is_dup {
                     result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
+                    if !is_secondary {
+                        result.n_unique_nodup += 1;
+                    }
                 }
                 result.total_fragments += 1;
 
@@ -911,12 +924,23 @@ fn process_chromosome_batch(
                 } else {
                     mate_info.is_multi
                 };
+                // Use read1's secondary status — featureCounts skips secondary
+                // alignment records when countMultiMappingReads=FALSE.
+                let frag_is_secondary = if is_read1 {
+                    is_secondary
+                } else {
+                    mate_info.is_secondary
+                };
 
                 result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
+                if !frag_is_secondary {
+                    result.n_unique_dup += 1;
+                }
                 if !frag_is_dup {
                     result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
+                    if !frag_is_secondary {
+                        result.n_unique_nodup += 1;
+                    }
                 }
 
                 // featureCounts union-with-both-end-preference voting: each gene
@@ -947,6 +971,7 @@ fn process_chromosome_batch(
                         gene_hits: std::mem::take(&mut gene_hits),
                         is_dup,
                         is_multi,
+                        is_secondary,
                     },
                 );
             }
@@ -1273,6 +1298,7 @@ pub fn count_reads(
 
             let is_reverse = flags & BAM_FREVERSE != 0;
             let is_read1 = flags & BAM_FREAD1 != 0;
+            let is_secondary = flags & BAM_FSECONDARY != 0;
 
             let tid = record.tid();
             if tid < 0 || tid as usize >= tid_to_name.len() {
@@ -1304,10 +1330,14 @@ pub fn count_reads(
 
             if !paired {
                 result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
+                if !is_secondary {
+                    result.n_unique_dup += 1;
+                }
                 if !is_dup {
                     result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
+                    if !is_secondary {
+                        result.n_unique_nodup += 1;
+                    }
                 }
                 result.total_fragments += 1;
 
@@ -1371,12 +1401,21 @@ pub fn count_reads(
                 } else {
                     mate_info.is_multi
                 };
+                let frag_is_secondary = if is_read1 {
+                    is_secondary
+                } else {
+                    mate_info.is_secondary
+                };
 
                 result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
+                if !frag_is_secondary {
+                    result.n_unique_dup += 1;
+                }
                 if !frag_is_dup {
                     result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
+                    if !frag_is_secondary {
+                        result.n_unique_nodup += 1;
+                    }
                 }
 
                 // featureCounts union-with-both-end-preference voting
@@ -1404,6 +1443,7 @@ pub fn count_reads(
                         gene_hits: std::mem::take(&mut gene_hits),
                         is_dup,
                         is_multi,
+                        is_secondary,
                     },
                 );
             }
@@ -1500,12 +1540,17 @@ pub fn count_reads(
                 // use the first mate seen (info) as the "read1" for dup/multi.
                 let frag_is_dup = info.is_dup;
                 let frag_is_multi = info.is_multi;
+                let frag_is_secondary = info.is_secondary;
 
                 merged.n_multi_dup += 1;
-                merged.n_unique_dup += 1;
+                if !frag_is_secondary {
+                    merged.n_unique_dup += 1;
+                }
                 if !frag_is_dup {
                     merged.n_multi_nodup += 1;
-                    merged.n_unique_nodup += 1;
+                    if !frag_is_secondary {
+                        merged.n_unique_nodup += 1;
+                    }
                 }
 
                 // Combine gene hits with featureCounts scoring
@@ -1536,10 +1581,14 @@ pub fn count_reads(
             merged.total_fragments += 1;
 
             merged.n_multi_dup += 1;
-            merged.n_unique_dup += 1;
+            if !mate_info.is_secondary {
+                merged.n_unique_dup += 1;
+            }
             if !mate_info.is_dup {
                 merged.n_multi_nodup += 1;
-                merged.n_unique_nodup += 1;
+                if !mate_info.is_secondary {
+                    merged.n_unique_nodup += 1;
+                }
             }
 
             if mate_info.gene_hits.is_empty() {
