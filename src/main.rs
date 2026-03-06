@@ -25,6 +25,47 @@ use rust_htslib::bam::Read as BamRead;
 
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 
+/// Common BAM filename suffixes added by alignment and duplicate-marking tools.
+///
+/// These are stripped (case-insensitively) from the BAM file stem to derive a
+/// clean sample name for output content (e.g., intercept/slope tables). Longer
+/// / more specific suffixes come first so they are matched greedily.
+const BAM_SUFFIXES_TO_STRIP: &[&str] = &[
+    ".Aligned.sortedByCoord.out.markDups",
+    ".Aligned.sortedByCoord.out",
+    ".Aligned.toTranscriptome.out",
+    ".markdup.sorted",
+    ".sorted.markdup",
+    ".markDups.sorted",
+    ".sorted.markDups",
+    ".mrkdup.sorted",
+    ".sorted.mrkdup",
+    ".dedup.sorted",
+    ".sorted.dedup",
+    ".markdup",
+    ".markDups",
+    ".mrkdup",
+    ".dedup",
+    ".sorted",
+];
+
+/// Derive a clean sample name from a BAM file stem.
+///
+/// Strips common alignment / duplicate-marking suffixes (case-insensitive) so
+/// that e.g. `GM12878_REP1.markdup.sorted` becomes `GM12878_REP1`. If no known
+/// suffix matches, the stem is returned unchanged.
+fn clean_sample_name(bam_stem: &str) -> String {
+    for suffix in BAM_SUFFIXES_TO_STRIP {
+        if bam_stem.len() >= suffix.len() {
+            let split = bam_stem.len() - suffix.len();
+            if bam_stem[split..].eq_ignore_ascii_case(suffix) {
+                return bam_stem[..split].to_string();
+            }
+        }
+    }
+    bam_stem.to_string()
+}
+
 fn main() -> Result<()> {
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
@@ -605,6 +646,7 @@ fn process_single_bam(
         .context("Input path has no filename")?
         .to_str()
         .context("Input filename is not valid UTF-8")?;
+    let sample_name = clean_sample_name(bam_stem);
 
     let bam_start = Instant::now();
     let config = params.config;
@@ -905,7 +947,11 @@ fn process_single_bam(
                         );
                         if config.dupradar.intercept_slope {
                             let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", bam_stem));
-                            rna::dupradar::plots::write_intercept_slope(fit, &bam_stem, &fit_path)?;
+                            rna::dupradar::plots::write_intercept_slope(
+                                fit,
+                                &sample_name,
+                                &fit_path,
+                            )?;
                             info!(
                                 "[{}] Fit results written to {}",
                                 bam_stem,
@@ -1023,7 +1069,11 @@ fn process_single_bam(
                 if config.dupradar.multiqc_intercept {
                     let mqc_intercept_path =
                         dr_dir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
-                    rna::dupradar::plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
+                    rna::dupradar::plots::write_mqc_intercept(
+                        fit,
+                        &sample_name,
+                        &mqc_intercept_path,
+                    )?;
                 }
 
                 if config.dupradar.multiqc_curve {
@@ -1582,4 +1632,68 @@ fn run_rseqc_single_pass(
     );
 
     Ok(accums)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_sample_name_markdup_sorted() {
+        assert_eq!(
+            clean_sample_name("GM12878_REP1.markdup.sorted"),
+            "GM12878_REP1"
+        );
+    }
+
+    #[test]
+    fn test_clean_sample_name_sorted_markdup() {
+        assert_eq!(clean_sample_name("SAMPLE.sorted.markdup"), "SAMPLE");
+    }
+
+    #[test]
+    fn test_clean_sample_name_star_suffix() {
+        assert_eq!(
+            clean_sample_name("MySample.Aligned.sortedByCoord.out.markDups"),
+            "MySample"
+        );
+    }
+
+    #[test]
+    fn test_clean_sample_name_star_no_markdups() {
+        assert_eq!(
+            clean_sample_name("MySample.Aligned.sortedByCoord.out"),
+            "MySample"
+        );
+    }
+
+    #[test]
+    fn test_clean_sample_name_case_insensitive() {
+        assert_eq!(clean_sample_name("SAMPLE.MARKDUP.SORTED"), "SAMPLE");
+    }
+
+    #[test]
+    fn test_clean_sample_name_no_suffix() {
+        assert_eq!(clean_sample_name("CleanName"), "CleanName");
+    }
+
+    #[test]
+    fn test_clean_sample_name_only_sorted() {
+        assert_eq!(clean_sample_name("data.sorted"), "data");
+    }
+
+    #[test]
+    fn test_clean_sample_name_dedup() {
+        assert_eq!(clean_sample_name("run1.dedup.sorted"), "run1");
+    }
+
+    #[test]
+    fn test_clean_sample_name_mrkdup() {
+        assert_eq!(clean_sample_name("abc.mrkdup"), "abc");
+    }
+
+    #[test]
+    fn test_clean_sample_name_empty_after_strip() {
+        assert_eq!(clean_sample_name(".sorted"), "");
+    }
 }
