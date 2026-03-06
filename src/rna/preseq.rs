@@ -346,15 +346,40 @@ fn interpolate(histogram: &[(u64, u64)], total_reads: u64, n_distinct: u64, targ
     if t >= n {
         return n_distinct as f64;
     }
-    let mut expected = n_distinct as f64;
+
+    // Upstream preseq uses a dense histogram (vector indexed 0..max_freq).
+    // We must produce numer values in the same index order to match upstream's
+    // accumulate(cbegin(numer), cend(numer), 0) which uses int accumulator.
+    // This truncates the running sum to int at EACH addition step.
+    let max_j = histogram.iter().map(|&(j, _)| j).max().unwrap_or(0) as usize;
+    let mut dense_hist = vec![0u64; max_j + 1];
     for &(j, n_j) in histogram {
-        if j > n {
-            continue;
+        if (j as usize) < dense_hist.len() {
+            dense_hist[j as usize] = n_j;
         }
-        let log_prob = ln_binomial(n - j, t) - ln_binomial(n, t);
-        expected -= n_j as f64 * log_prob.exp();
     }
-    expected
+
+    let denom = ln_binomial(n, t);
+
+    // Build numer array matching upstream: numer[i] for i=1..hist.size()
+    // Then accumulate with int truncation at each step
+    let mut acc: i32 = 0; // upstream uses accumulate(..., 0) which is int
+    for i in 1..dense_hist.len() {
+        let n_j = dense_hist[i];
+        if n_j == 0 {
+            continue; // numer[i] = 0, adding 0 to int doesn't change anything
+        }
+        let numer_val = if n < (i as u64) + t {
+            0.0
+        } else {
+            let x = ln_binomial(n - i as u64, t);
+            (x - denom).exp() * n_j as f64
+        };
+        // Upstream: acc (int) = acc (int) + numer_val (double)
+        // This promotes acc to double, adds, then truncates back to int
+        acc = (acc as f64 + numer_val) as i32;
+    }
+    n_distinct as f64 - acc as f64
 }
 
 // ============================================================================
@@ -486,14 +511,14 @@ fn qd_algorithm(ps_coeffs: &[f64]) -> Option<Vec<f64>> {
 /// * `degree` - Number of terms to use.
 ///
 /// # Returns
-/// The value of the continued fraction, or None if evaluation fails.
-fn evaluate_cf(cf_coeffs: &[f64], t: f64, degree: usize) -> Option<f64> {
+/// The value of the continued fraction. Upstream returns curr_num/curr_den
+/// unconditionally (no validity checks); the stability check handles rejection.
+fn evaluate_cf(cf_coeffs: &[f64], t: f64, degree: usize) -> f64 {
     let n = degree.min(cf_coeffs.len());
     if n == 0 {
-        return None;
+        return f64::NAN;
     }
 
-    // Euler's forward recurrence (matches preseq evaluate_on_diagonal):
     // Euler's forward recurrence, matching preseq's evaluate_on_diagonal:
     //   prev_num = 0, curr_num = cf[0]
     //   prev_den = 1, curr_den = 1
@@ -531,22 +556,10 @@ fn evaluate_cf(cf_coeffs: &[f64], t: f64, degree: usize) -> Option<f64> {
             prev_num /= rescale_factor;
             prev_den /= rescale_factor;
         }
-
-        if !curr_num.is_finite() || !curr_den.is_finite() {
-            return None;
-        }
     }
 
-    if curr_den.abs() < TOLERANCE {
-        return None;
-    }
-
-    let val = curr_num / curr_den;
-    if val.is_finite() {
-        Some(val)
-    } else {
-        None
-    }
+    // Upstream returns curr_num / curr_den unconditionally
+    curr_num / curr_den
 }
 
 /// Select the optimal degree for the continued fraction approximation.
@@ -590,11 +603,7 @@ fn select_degree(
         for i in 1..=n_test {
             let t = search_step * i as f64;
 
-            let cf_val = match evaluate_cf(cf_coeffs, t, degree) {
-                Some(v) => v,
-                None => return false,
-            };
-
+            let cf_val = evaluate_cf(cf_coeffs, t, degree);
             let val = t * cf_val;
 
             // Check non-negative and finite
@@ -667,30 +676,21 @@ fn select_degree(
 ///
 /// # Returns
 /// Expected number of distinct molecules at the target sample size.
+/// Upstream returns the value unconditionally; stability is checked on the full curve.
 fn extrapolate(
     cf_coeffs: &[f64],
     degree: usize,
     total_reads: u64,
     n_distinct: u64,
     target: f64,
-) -> Option<f64> {
+) -> f64 {
     let n = total_reads as f64;
     let s = n_distinct as f64;
 
-    if target <= n {
-        return Some(s);
-    }
-
     let fold = (target - n) / n;
-    let cf_val = evaluate_cf(cf_coeffs, fold, degree)?;
+    let cf_val = evaluate_cf(cf_coeffs, fold, degree);
     // preseq formula: initial_distinct + fold * CF(fold)
-    let result = s + fold * cf_val;
-
-    if result.is_finite() && result >= 0.0 {
-        Some(result)
-    } else {
-        None
-    }
+    s + fold * cf_val
 }
 
 // ============================================================================
@@ -946,6 +946,12 @@ pub fn estimate_complexity(
     let mut successful_bootstraps = 0u32;
     let max_iter = 100 * n_bootstraps as u64;
     let mut iter_count = 0u64;
+    #[cfg(test)]
+    let mut reject_empty = 0u64;
+    #[cfg(test)]
+    let mut reject_unstable = 0u64;
+    #[cfg(test)]
+    let mut accept_count = 0u64;
 
     while successful_bootstraps < n_bootstraps && iter_count < max_iter {
         iter_count += 1;
@@ -967,17 +973,41 @@ pub fn estimate_complexity(
             max_extrap,
             boot_defects,
         ) {
-            let stable = boot_curve.iter().all(|&(_, e)| e.is_finite() && e >= 0.0);
-            if stable {
-                for (i, &(_, expected)) in boot_curve.iter().enumerate() {
-                    if i < bootstrap_curves.len() {
-                        bootstrap_curves[i].push(expected);
+            // Upstream checks: cf.is_valid() (non-empty curve means degree was found)
+            // AND check_yield_estimates_stability on the full yield vector.
+            if !boot_curve.is_empty() {
+                let yield_vector: Vec<f64> = boot_curve.iter().map(|&(_, e)| e).collect();
+                if check_yield_estimates_stability(&yield_vector) {
+                    for (i, &(_, expected)) in boot_curve.iter().enumerate() {
+                        if i < bootstrap_curves.len() {
+                            bootstrap_curves[i].push(expected);
+                        }
+                    }
+                    successful_bootstraps += 1;
+                    #[cfg(test)]
+                    {
+                        accept_count += 1;
+                    }
+                } else {
+                    #[cfg(test)]
+                    {
+                        reject_unstable += 1;
                     }
                 }
-                successful_bootstraps += 1;
+            } else {
+                #[cfg(test)]
+                {
+                    reject_empty += 1;
+                }
             }
         }
     }
+
+    #[cfg(test)]
+    eprintln!(
+        "DIAGNOSTIC: bootstrap stats: iter={}, accepted={}, rejected_empty={}, rejected_unstable={}",
+        iter_count, accept_count, reject_empty, reject_unstable
+    );
 
     // Compute median and quantile confidence intervals (matching preseq's
     // vector_median_and_ci)
@@ -1019,6 +1049,44 @@ fn median_sorted(sorted: &[f64]) -> f64 {
     } else {
         (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
     }
+}
+
+/// Check yield estimates stability (matching upstream's check_yield_estimates_stability).
+///
+/// Checks that the yield estimates are:
+/// 1. Non-negative and finite
+/// 2. Monotonically increasing (non-decreasing)
+/// 3. Have negative second derivative (concavity)
+///
+/// Returns true if estimates are stable, false otherwise.
+fn check_yield_estimates_stability(estimates: &[f64]) -> bool {
+    if estimates.is_empty() {
+        return false;
+    }
+
+    // Check non-negative and finite
+    for &e in estimates {
+        if !e.is_finite() || e < 0.0 {
+            return false;
+        }
+    }
+
+    // Check monotonically increasing (non-decreasing)
+    for i in 1..estimates.len() {
+        if estimates[i] < estimates[i - 1] {
+            return false;
+        }
+    }
+
+    // Check negative second derivative (concavity)
+    // estimates[i] - estimates[i-1] should be decreasing (i.e. slope is decreasing)
+    for i in 2..estimates.len() {
+        if estimates[i] - estimates[i - 1] > estimates[i - 1] - estimates[i - 2] {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Compute a single complexity curve (point estimates only).
@@ -1086,7 +1154,8 @@ fn compute_curve(
         None => return Ok(Vec::new()),
     };
 
-    // Evaluate the curve
+    // Evaluate the curve — upstream pushes all values and rejects
+    // unstable curves afterwards via check_yield_estimates_stability.
     let mut curve = Vec::with_capacity(targets.len());
     for &target in targets {
         let expected = if target <= n {
@@ -1094,17 +1163,9 @@ fn compute_curve(
             interpolate(histogram, total_reads, interp_distinct, target)
         } else {
             // Extrapolation region: use original initial_distinct
-            match extrapolate(&cf_coeffs, degree, total_reads, extrap_distinct, target) {
-                Some(v) => v,
-                None => {
-                    // If extrapolation fails, stop the curve here
-                    break;
-                }
-            }
+            extrapolate(&cf_coeffs, degree, total_reads, extrap_distinct, target)
         };
 
-        // Sanity check: expected should be non-negative
-        let expected = expected.max(0.0);
         curve.push((target, expected));
     }
 
@@ -1513,11 +1574,10 @@ mod tests {
         // The caller multiplies by t to get the power series value: t * CF(t)
         let cf_coeffs = vec![100.0];
         let result = evaluate_cf(&cf_coeffs, 0.5, 1);
-        assert!(result.is_some());
         assert!(
-            (result.unwrap() - 100.0).abs() < 1e-6,
+            (result - 100.0).abs() < 1e-6,
             "evaluate_cf with single coeff should give c=100, got {}",
-            result.unwrap()
+            result
         );
 
         // With two terms [a, b]: CF = a / (1 + b*t) via Euler recurrence
@@ -1525,14 +1585,13 @@ mod tests {
         // with coefficients that don't cause division by zero.
         let cf_coeffs3 = vec![100.0, 0.5];
         let result3 = evaluate_cf(&cf_coeffs3, 1.0, 2);
-        assert!(result3.is_some());
         // h0=100, k0=1, h1=100+0.5*1.0*0=100, k1=1+0.5*1.0*1=1.5
         // CF = 100/1.5 = 66.667
         assert!(
-            (result3.unwrap() - 100.0 / 1.5).abs() < 1e-6,
+            (result3 - 100.0 / 1.5).abs() < 1e-6,
             "Two-term CF should give 100/1.5={}, got {}",
             100.0 / 1.5,
-            result3.unwrap()
+            result3
         );
     }
 
@@ -1605,6 +1664,113 @@ mod tests {
             );
             prev = expected;
         }
+    }
+
+    /// Verify preseq algorithm intermediates match upstream for the small PE benchmark histogram.
+    ///
+    /// The benchmark histogram is from `preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000`
+    /// on the small test BAM. Final bootstrap values are platform-dependent due to
+    /// std::binomial_distribution differences between libstdc++ (Linux) and libc++ (macOS).
+    /// On Linux, output should match upstream byte-for-byte.
+    #[test]
+    fn test_benchmark_histogram_intermediates() {
+        let hist: Vec<(u64, u64)> = vec![
+            (1, 23425),
+            (2, 443),
+            (3, 69),
+            (4, 28),
+            (5, 14),
+            (6, 5),
+            (8, 3),
+            (9, 2),
+            (10, 1),
+            (18, 1),
+        ];
+        let total_reads: u64 = 24800;
+        let n_distinct: u64 = 23991;
+
+        // Verify histogram totals
+        let hist_total: u64 = hist.iter().map(|&(j, n)| j * n).sum();
+        let hist_distinct: u64 = hist.iter().map(|&(_, n)| n).sum();
+        assert_eq!(hist_total, total_reads);
+        assert_eq!(hist_distinct, n_distinct);
+
+        // first_zero = 7 (gap at j=7), max_terms = 6
+        let first_zero = {
+            let max_j = hist.iter().map(|&(j, _)| j).max().unwrap() as usize;
+            let mut nj = vec![0u64; max_j + 2];
+            for &(j, n) in &hist {
+                nj[j as usize] = n;
+            }
+            (1..=max_j).find(|&j| nj[j] == 0).unwrap_or(max_j + 1)
+        };
+        assert_eq!(first_zero, 7);
+
+        let max_terms = {
+            let mt = std::cmp::min(100usize, first_zero - 1);
+            mt - (mt % 2)
+        };
+        assert_eq!(max_terms, 6);
+
+        // Power series coefficients: [+23425, -443, +69, -28, +14, -5]
+        let ps_coeffs = power_series_coeffs(&hist, max_terms);
+        assert_eq!(ps_coeffs, vec![23425.0, -443.0, 69.0, -28.0, 14.0, -5.0]);
+
+        // QD algorithm should succeed
+        let cf_coeffs = qd_algorithm(&ps_coeffs).expect("QD should succeed");
+        assert_eq!(cf_coeffs.len(), 6);
+
+        // Degree selection fails on this histogram (CF is unstable at degree 6)
+        // This matches upstream: all output comes from bootstrap curves
+        let degree = select_degree(&cf_coeffs, total_reads, max_terms, 1e10);
+        assert!(
+            degree.is_none(),
+            "Degree selection should fail for this histogram (matches upstream)"
+        );
+
+        // Interpolation at 12000 (below total) — integer truncation matching upstream
+        let interp_result = interpolate(&hist, total_reads, n_distinct, 12000.0);
+        assert!(
+            interp_result > 11700.0 && interp_result < 11800.0,
+            "Interpolation at 12000 should be ~11770, got {}",
+            interp_result
+        );
+
+        // Full bootstrap estimate
+        let config = PreseqConfig {
+            enabled: true,
+            max_extrap: 1e10,
+            step_size: 1e6,
+            n_bootstraps: 100,
+            confidence_level: 0.95,
+            seed: 1,
+            max_terms: 100,
+            max_segment_length: 100_000_000,
+            defects: false,
+        };
+
+        let result = estimate_complexity(&hist, total_reads, n_distinct, &config);
+        assert!(result.is_ok(), "estimate_complexity failed: {:?}", result);
+        let result = result.unwrap();
+
+        // Curve should have 9999 rows (1M to 9999M at 1M step)
+        assert_eq!(result.curve.len(), 9999, "Expected 9999 curve points");
+
+        // Sanity: curve should be roughly in the right ballpark at 1M
+        // Upstream: 613221.1. Platform-dependent, so allow wide tolerance.
+        let (_, expected_1m, lower_1m, upper_1m) = result.curve[0];
+        assert!(
+            expected_1m > 500_000.0 && expected_1m < 800_000.0,
+            "Expected ~600k at 1M, got {:.1}",
+            expected_1m
+        );
+        assert!(lower_1m < expected_1m, "Lower CI should be below estimate");
+        assert!(upper_1m > expected_1m, "Upper CI should be above estimate");
+
+        eprintln!(
+            "Benchmark comparison at 1M: expected={:.1} lower={:.1} upper={:.1} (upstream: 613221.1 / 499291.6 / 751901.7)",
+            expected_1m, lower_1m, upper_1m
+        );
     }
 
     #[test]
