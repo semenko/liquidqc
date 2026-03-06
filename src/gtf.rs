@@ -151,6 +151,8 @@ struct TranscriptBuilder {
     exons: Vec<(u64, u64)>,
     /// CDS intervals: (start, end), 1-based inclusive
     cds: Vec<(u64, u64)>,
+    /// start_codon intervals: (start, end), 1-based inclusive
+    start_codons: Vec<(u64, u64)>,
     /// stop_codon intervals: (start, end), 1-based inclusive
     stop_codons: Vec<(u64, u64)>,
 }
@@ -193,8 +195,12 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
 
         let feature_type = fields[2];
 
-        // We care about exon and CDS features
-        if feature_type != "exon" && feature_type != "CDS" && feature_type != "stop_codon" {
+        // We care about exon, CDS, start_codon, and stop_codon features
+        if feature_type != "exon"
+            && feature_type != "CDS"
+            && feature_type != "start_codon"
+            && feature_type != "stop_codon"
+        {
             continue;
         }
 
@@ -271,12 +277,14 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
             strand,
             exons: Vec::new(),
             cds: Vec::new(),
+            start_codons: Vec::new(),
             stop_codons: Vec::new(),
         });
 
         match feature_type {
             "exon" => builder.exons.push((start, end)),
             "CDS" => builder.cds.push((start, end)),
+            "start_codon" => builder.start_codons.push((start, end)),
             "stop_codon" => builder.stop_codons.push((start, end)),
             _ => unreachable!(),
         }
@@ -304,19 +312,54 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         let tx_start = builder.exons.first().map(|e| e.0).unwrap_or(0);
         let tx_end = builder.exons.last().map(|e| e.1).unwrap_or(0);
 
-        // Compute CDS range from all CDS features for this transcript
+        // Compute CDS range (thickStart/thickEnd) using start_codon/stop_codon
+        // positions with strand-aware logic matching the Perl gtf2bed script
+        // used by upstream nf-core/rnaseq.
+        //
+        // For + strand: thick_start = start_codon start, thick_end = stop_codon end
+        // For - strand: thick_start = stop_codon start, thick_end = start_codon end
+        // Missing codons fall back to transcript boundaries (tx_start/tx_end).
+        // Transcripts with CDS features but no codon features get tx_start/tx_end.
         let (cds_start, cds_end) = if builder.cds.is_empty() {
             (None, None)
         } else {
-            let mut cs = builder.cds.iter().map(|c| c.0).min().unwrap_or(0);
-            let mut ce = builder.cds.iter().map(|c| c.1).max().unwrap_or(0);
-            // Extend CDS range to include stop codon (GTF CDS features exclude
-            // the stop codon, but BED12 thickStart/thickEnd includes it)
-            for &(s, e) in &builder.stop_codons {
-                cs = cs.min(s);
-                ce = ce.max(e);
+            let has_start_codon = !builder.start_codons.is_empty();
+            let has_stop_codon = !builder.stop_codons.is_empty();
+
+            let thick_start;
+            let thick_end;
+
+            if has_start_codon || has_stop_codon {
+                // At least one codon feature exists — use strand-aware logic
+                let start_codon_start = builder.start_codons.iter().map(|c| c.0).min();
+                let start_codon_end = builder.start_codons.iter().map(|c| c.1).max();
+                let stop_codon_start = builder.stop_codons.iter().map(|c| c.0).min();
+                let stop_codon_end = builder.stop_codons.iter().map(|c| c.1).max();
+
+                match builder.strand {
+                    '+' => {
+                        // + strand: thick_start = start_codon start, thick_end = stop_codon end
+                        thick_start = start_codon_start.unwrap_or(tx_start);
+                        thick_end = stop_codon_end.unwrap_or(tx_end);
+                    }
+                    '-' => {
+                        // - strand: thick_start = stop_codon start, thick_end = start_codon end
+                        thick_start = stop_codon_start.unwrap_or(tx_start);
+                        thick_end = start_codon_end.unwrap_or(tx_end);
+                    }
+                    _ => {
+                        // Unknown strand: fall back to transcript boundaries
+                        thick_start = tx_start;
+                        thick_end = tx_end;
+                    }
+                }
+            } else {
+                // CDS features but no codon features: use transcript boundaries
+                thick_start = tx_start;
+                thick_end = tx_end;
             }
-            (Some(cs), Some(ce))
+
+            (Some(thick_start), Some(thick_end))
         };
 
         let transcript = Transcript {
@@ -467,13 +510,17 @@ mod tests {
 
     #[test]
     fn test_parse_gtf_transcripts_basic() {
+        // T1 has CDS + start_codon + stop_codon → precise CDS range
+        // T2 has no CDS features → non-coding
         let (path, _f) = write_temp_gtf(
             "\
 chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\texon\t300\t400\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\texon\t100\t250\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T2\";\n\
 chr1\ttest\tCDS\t120\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
-chr1\ttest\tCDS\t300\t380\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+chr1\ttest\tCDS\t300\t380\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstart_codon\t120\t122\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstop_codon\t381\t383\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
         );
 
         let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
@@ -497,8 +544,11 @@ chr1\ttest\tCDS\t300\t380\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
         assert_eq!(t1.exons, vec![(100, 200), (300, 400)]);
         assert_eq!(t1.start, 100);
         assert_eq!(t1.end, 400);
+        // + strand with start_codon and stop_codon:
+        // thick_start = start_codon start = 120
+        // thick_end = stop_codon end = 383
         assert_eq!(t1.cds_start, Some(120));
-        assert_eq!(t1.cds_end, Some(380));
+        assert_eq!(t1.cds_end, Some(383));
 
         let t2 = gene
             .transcripts
@@ -547,6 +597,8 @@ chr1\ttest\tCDS\t500\t600\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T_orphan\";\
 
     #[test]
     fn test_parse_gtf_multi_gene_transcripts() {
+        // G1/T1: CDS but no codon features → falls back to tx_start/tx_end
+        // G2/T2: non-coding (no CDS)
         let (path, _f) = write_temp_gtf(
             "\
 chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
@@ -560,8 +612,9 @@ chr2\ttest\texon\t700\t800\t.\t-\t.\tgene_id \"G2\"; transcript_id \"T2\";\n",
 
         let g1 = &genes["G1"];
         assert_eq!(g1.transcripts.len(), 1);
-        assert_eq!(g1.transcripts[0].cds_start, Some(120));
-        assert_eq!(g1.transcripts[0].cds_end, Some(180));
+        // CDS features but no codon features → tx_start=100, tx_end=200
+        assert_eq!(g1.transcripts[0].cds_start, Some(100));
+        assert_eq!(g1.transcripts[0].cds_end, Some(200));
 
         let g2 = &genes["G2"];
         assert_eq!(g2.transcripts.len(), 1);
@@ -572,38 +625,44 @@ chr2\ttest\texon\t700\t800\t.\t-\t.\tgene_id \"G2\"; transcript_id \"T2\";\n",
 
     #[test]
     fn test_stop_codon_extends_cds_range_forward_strand() {
-        // On + strand, stop_codon comes after the last CDS
+        // On + strand with start_codon and stop_codon:
+        // thick_start = start_codon start, thick_end = stop_codon end
         let (path, _f) = write_temp_gtf(
             "\
 chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\texon\t3000\t4000\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\tCDS\t1200\t2000\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\tCDS\t3000\t3500\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstart_codon\t1200\t1202\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\tstop_codon\t3501\t3503\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
         );
 
         let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
         let t1 = &genes["G1"].transcripts[0];
-        // CDS start unchanged, CDS end extended to include stop codon
+        // + strand: thick_start = start_codon start = 1200
+        //           thick_end = stop_codon end = 3503
         assert_eq!(t1.cds_start, Some(1200));
         assert_eq!(t1.cds_end, Some(3503));
     }
 
     #[test]
     fn test_stop_codon_extends_cds_range_reverse_strand() {
-        // On - strand, stop_codon comes before the first CDS
+        // On - strand with start_codon and stop_codon:
+        // thick_start = stop_codon start, thick_end = start_codon end
         let (path, _f) = write_temp_gtf(
             "\
 chr1\ttest\texon\t1000\t2000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\texon\t3000\t4000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\tCDS\t1500\t2000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\tCDS\t3000\t3800\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstart_codon\t3798\t3800\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
 chr1\ttest\tstop_codon\t1497\t1499\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
         );
 
         let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
         let t1 = &genes["G1"].transcripts[0];
-        // CDS start extended to include stop codon, CDS end unchanged
+        // - strand: thick_start = stop_codon start = 1497
+        //           thick_end = start_codon end = 3800
         assert_eq!(t1.cds_start, Some(1497));
         assert_eq!(t1.cds_end, Some(3800));
     }

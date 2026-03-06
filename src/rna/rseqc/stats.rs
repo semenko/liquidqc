@@ -419,8 +419,11 @@ fn write_ffq_lfq<W: std::io::Write>(
     desc: &str,
     data: &[[u64; 64]],
 ) -> Result<()> {
-    // Determine max quality observed across all cycles
-    let max_q = data
+    // Determine max quality observed across all cycles.
+    // Upstream samtools stats bumps max_qual by 1 (stats.c:1616:
+    // `if (max_qual+1 < nquals) max_qual++`) to include one extra
+    // trailing zero column beyond the highest observed quality.
+    let max_q_observed = data
         .iter()
         .flat_map(|row| {
             row.iter()
@@ -431,6 +434,11 @@ fn write_ffq_lfq<W: std::io::Write>(
         })
         .max()
         .unwrap_or(0);
+    let max_q = if max_q_observed + 1 < 64 {
+        max_q_observed + 1
+    } else {
+        max_q_observed
+    };
 
     writeln!(
         out,
@@ -486,10 +494,15 @@ fn write_gc_content<W: std::io::Write>(
     Ok(())
 }
 
-/// Write GCC or GCT section (ACGT content per cycle as percentages).
+/// Write GCC section (ACGT content per cycle as percentages).
 ///
 /// Combines first-fragment and last-fragment base counts to produce
 /// per-cycle percentages of A, C, G, T, N, Other.
+///
+/// Upstream samtools stats uses only A+C+G+T as the denominator (not
+/// including N or Other). N and Other are then expressed as a percentage
+/// of that ACGT-only total, so the six columns can sum to more than 100%.
+/// Cycles where `acgt_sum == 0` are skipped entirely (matching upstream).
 fn write_gcc<W: std::io::Write>(
     out: &mut W,
     tag: &str,
@@ -515,12 +528,13 @@ fn write_gcc<W: std::io::Write>(
                 combined[j] += lbc[cycle][j];
             }
         }
-        let total: u64 = combined.iter().sum();
-        // 1-based cycle numbering; output A%, C%, G%, T%, N%, O% (6 columns, matching upstream)
-        if total > 0 {
+        // Denominator is A+C+G+T only (first 4 elements), matching upstream
+        // samtools stats.c which computes acgt_sum without N or Other.
+        let acgt_sum: u64 = combined[..4].iter().sum();
+        if acgt_sum > 0 {
             let pcts: Vec<f64> = combined
                 .iter()
-                .map(|&c| 100.0 * c as f64 / total as f64)
+                .map(|&c| 100.0 * c as f64 / acgt_sum as f64)
                 .collect();
             writeln!(
                 out,
@@ -533,13 +547,8 @@ fn write_gcc<W: std::io::Write>(
                 pcts[4],
                 pcts[5]
             )?;
-        } else {
-            writeln!(
-                out,
-                "{tag}\t{}\t0.00\t0.00\t0.00\t0.00\t0.00\t0.00",
-                cycle + 1
-            )?;
         }
+        // Cycles with acgt_sum == 0 are skipped (matching upstream `if (!acgt_sum) continue`)
     }
     Ok(())
 }
@@ -584,6 +593,10 @@ fn write_gct<W: std::io::Write>(
 ///
 /// Upstream samtools stats outputs percentages (not raw counts) with
 /// 6 columns: A%, C%, G%, T%, N%, Other%.
+///
+/// The denominator is A+C+G+T only (not including N or Other), matching
+/// upstream samtools stats.c. N and Other are expressed as a percentage
+/// of the ACGT-only total. Cycles where `acgt_sum == 0` are skipped.
 fn write_base_counts<W: std::io::Write>(
     out: &mut W,
     tag: &str,
@@ -595,11 +608,13 @@ fn write_base_counts<W: std::io::Write>(
         "# {tag}, ACGT content per cycle for {desc}. Use `plot-bamstats -p <outdir> <file>` to generate plots"
     )?;
     for (cycle, row) in data.iter().enumerate() {
-        let total: u64 = row.iter().sum();
-        if total > 0 {
+        // Denominator is A+C+G+T only (first 4 elements), matching upstream
+        // samtools stats.c which computes acgt_sum without N or Other.
+        let acgt_sum: u64 = row[..4].iter().sum();
+        if acgt_sum > 0 {
             let pcts: Vec<f64> = row
                 .iter()
-                .map(|&c| 100.0 * c as f64 / total as f64)
+                .map(|&c| 100.0 * c as f64 / acgt_sum as f64)
                 .collect();
             writeln!(
                 out,
@@ -612,13 +627,8 @@ fn write_base_counts<W: std::io::Write>(
                 pcts[4],
                 pcts[5]
             )?;
-        } else {
-            writeln!(
-                out,
-                "{tag}\t{}\t0.00\t0.00\t0.00\t0.00\t0.00\t0.00",
-                cycle + 1
-            )?;
         }
+        // Cycles with acgt_sum == 0 are skipped (matching upstream)
     }
     Ok(())
 }

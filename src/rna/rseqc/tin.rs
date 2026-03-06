@@ -5,7 +5,7 @@
 //! RSeQC's `tin.py` tool.
 
 use rust_htslib::bam;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 
@@ -70,8 +70,12 @@ pub struct TinResult {
     pub tx_start: u64,
     /// Transcript end (0-based, exclusive).
     pub tx_end: u64,
-    /// Computed TIN score (0-100), or NaN if below coverage threshold.
+    /// Computed TIN score (0-100), or 0.0 if below coverage threshold.
     pub tin: f64,
+    /// Whether the transcript passed the minimum coverage threshold.
+    /// Only transcripts with `passed_threshold == true` contribute to
+    /// summary statistics, matching upstream RSeQC's `sample_TINs` list.
+    pub passed_threshold: bool,
 }
 
 /// Collection of all TIN results for a BAM file.
@@ -101,21 +105,14 @@ impl TinResults {
 impl TinIndex {
     /// Build TIN index from GTF gene annotations.
     ///
-    /// Uses the longest transcript per gene (by exonic bases) as the
-    /// representative transcript.
+    /// Emits every transcript from every gene, matching RSeQC's
+    /// per-transcript behaviour when given a BED file derived from
+    /// the same GTF.
     pub fn from_genes(genes: &IndexMap<String, Gene>, sample_size: usize) -> Self {
         let mut index = TinIndex::default();
 
         for gene in genes.values() {
-            // Find the longest transcript by total exonic bases
-            let best_tx = gene.transcripts.iter().max_by_key(|tx| {
-                tx.exons
-                    .iter()
-                    .map(|(s, e)| e.saturating_sub(*s))
-                    .sum::<u64>()
-            });
-
-            if let Some(tx) = best_tx {
+            for tx in &gene.transcripts {
                 let exon_regions: Vec<(u64, u64)> = tx
                     .exons
                     .iter()
@@ -138,7 +135,7 @@ impl TinIndex {
                 let tx_end = exon_regions.last().map(|r| r.1).unwrap_or(0);
 
                 index.add_transcript(TranscriptSampling {
-                    gene_id: gene.gene_id.clone(),
+                    gene_id: tx.transcript_id.clone(),
                     chrom,
                     chrom_upper,
                     tx_start,
@@ -314,21 +311,24 @@ fn sample_exonic_positions(exon_regions: &[(u64, u64)], n: usize) -> Vec<u64> {
 
 /// Per-read accumulator for TIN computation.
 ///
-/// Tracks coverage at sampled positions and read start counts
-/// per transcript during the BAM pass.
+/// Tracks coverage at sampled positions and unique read start positions
+/// per transcript during the BAM pass. Unique start tracking matches
+/// RSeQC's `check_min_reads()`, which uses a `set()` of read start
+/// positions.
 #[derive(Debug)]
 pub struct TinAccum {
     /// Per-transcript per-slot coverage counts.
     /// Indexed as `coverage[tx_idx][slot_idx]`.
     pub coverage: Vec<Vec<u32>>,
-    /// Per-transcript read start counts.
-    pub read_starts: Vec<u32>,
+    /// Per-transcript unique read start positions.
+    /// Upstream RSeQC counts unique positions, not total reads.
+    pub unique_starts: Vec<HashSet<u64>>,
     /// Number of sampled slots per transcript.
     #[allow(dead_code)]
     pub n_samples: Vec<u32>,
     /// Minimum MAPQ threshold.
     pub mapq_cut: u8,
-    /// Minimum coverage threshold.
+    /// Minimum coverage threshold (unique read start positions).
     pub min_cov: u32,
 }
 
@@ -347,7 +347,7 @@ impl TinAccum {
 
         TinAccum {
             coverage,
-            read_starts: vec![0u32; n_transcripts],
+            unique_starts: vec![HashSet::new(); n_transcripts],
             n_samples,
             mapq_cut,
             min_cov,
@@ -408,7 +408,7 @@ impl TinAccum {
             }
             // Read start falls within this transcript's exonic region
             if read_start >= tx_start && read_start < tx_end {
-                self.read_starts[tx_idx as usize] += 1;
+                self.unique_starts[tx_idx as usize].insert(read_start);
             }
         }
 
@@ -433,7 +433,7 @@ impl TinAccum {
             for (j, count) in other_cov.into_iter().enumerate() {
                 self.coverage[i][j] += count;
             }
-            self.read_starts[i] += other.read_starts[i];
+            self.unique_starts[i].extend(other.unique_starts[i].iter());
         }
     }
 
@@ -442,22 +442,24 @@ impl TinAccum {
         let mut transcripts = Vec::with_capacity(index.transcripts.len());
 
         for (i, tx) in index.transcripts.iter().enumerate() {
-            let read_starts = self.read_starts[i];
+            let n_unique_starts = self.unique_starts[i].len() as u32;
             let coverage = &self.coverage[i];
 
-            // Require minimum coverage threshold
-            if read_starts < self.min_cov {
+            // Upstream: `if len(read_count) > cutoff` -- strictly greater
+            if n_unique_starts <= self.min_cov {
                 transcripts.push(TinResult {
                     gene_id: tx.gene_id.clone(),
                     chrom: tx.chrom.clone(),
                     tx_start: tx.tx_start,
                     tx_end: tx.tx_end,
                     tin: 0.0,
+                    passed_threshold: false,
                 });
                 continue;
             }
 
-            let tin = compute_tin(coverage);
+            let n_total = coverage.len();
+            let tin = compute_tin(coverage, n_total);
 
             transcripts.push(TinResult {
                 gene_id: tx.gene_id.clone(),
@@ -465,6 +467,7 @@ impl TinAccum {
                 tx_start: tx.tx_start,
                 tx_end: tx.tx_end,
                 tin,
+                passed_threshold: true,
             });
         }
 
@@ -474,17 +477,26 @@ impl TinAccum {
 
 /// Compute TIN score from coverage vector using Shannon entropy.
 ///
-/// TIN = 100 * exp(H) / n_nonzero
-/// where H = -sum(P_i * ln(P_i)) for non-zero positions.
-fn compute_tin(coverage: &[u32]) -> f64 {
+/// Matches upstream RSeQC's `tin_score()`:
+///   cvg_eff = [c for c in cvg if c > 0]
+///   entropy = shannon_entropy(cvg_eff)
+///   tin = 100 * exp(entropy) / l
+///
+/// where `l` is the total number of sampled positions (including zeros),
+/// NOT just the nonzero count. A transcript with many uncovered positions
+/// gets a lower TIN because the denominator is larger.
+fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
+    if n_total_positions == 0 {
+        return 0.0;
+    }
+
     let nonzero: Vec<f64> = coverage
         .iter()
         .filter(|&&c| c > 0)
         .map(|&c| c as f64)
         .collect();
 
-    let n = nonzero.len();
-    if n <= 1 {
+    if nonzero.is_empty() {
         return 0.0;
     }
 
@@ -493,7 +505,7 @@ fn compute_tin(coverage: &[u32]) -> f64 {
         return 0.0;
     }
 
-    // Shannon entropy
+    // Shannon entropy over non-zero positions only (matching upstream)
     let entropy: f64 = nonzero
         .iter()
         .map(|&c| {
@@ -502,8 +514,9 @@ fn compute_tin(coverage: &[u32]) -> f64 {
         })
         .sum();
 
-    // TIN = 100 * exp(H) / n_nonzero
-    100.0 * entropy.exp() / n as f64
+    // Upstream: tin = 100 * exp(entropy) / l
+    // where l = total number of sampled positions (not just nonzero)
+    100.0 * entropy.exp() / n_total_positions as f64
 }
 
 /// Get aligned blocks from a BAM record's CIGAR string.
@@ -545,12 +558,10 @@ pub fn write_tin(results: &TinResults, output_path: &Path) -> Result<()> {
     writeln!(f, "geneID\tchrom\ttx_start\ttx_end\tTIN")?;
 
     for r in &results.transcripts {
-        if r.tin == 0.0 {
-            continue; // Skip transcripts below coverage threshold
-        }
+        // Upstream prints all transcripts -- those below threshold get 0.0
         writeln!(
             f,
-            "{}\t{}\t{}\t{}\t{:.2}",
+            "{}\t{}\t{}\t{}\t{}",
             r.gene_id, r.chrom, r.tx_start, r.tx_end, r.tin
         )?;
     }
@@ -568,7 +579,7 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
     let scores: Vec<f64> = results
         .transcripts
         .iter()
-        .filter(|r| r.tin > 0.0)
+        .filter(|r| r.passed_threshold)
         .map(|r| r.tin)
         .collect();
 
@@ -587,7 +598,7 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
     };
 
     writeln!(f, "Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)")?;
-    writeln!(f, "{}\t{:.2}\t{:.2}\t{:.2}", bam_name, mean, median, stdev)?;
+    writeln!(f, "{}\t{}\t{}\t{}", bam_name, mean, median, stdev)?;
 
     Ok(())
 }
@@ -637,7 +648,7 @@ mod tests {
     fn test_compute_tin_uniform() {
         // Uniform coverage → max TIN
         let cov = vec![10, 10, 10, 10, 10, 10, 10, 10, 10, 10];
-        let tin = compute_tin(&cov);
+        let tin = compute_tin(&cov, cov.len());
         assert!(
             (tin - 100.0).abs() < 0.01,
             "Uniform coverage TIN should be ~100: {tin}"
@@ -645,10 +656,23 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_tin_uniform_with_zeros() {
+        // Uniform coverage but only 5 of 10 positions covered
+        // TIN = 100 * exp(H) / 10; H entropy over 5 equal values -> exp(H)=5
+        // TIN = 100 * 5 / 10 = 50
+        let cov = vec![10, 10, 10, 10, 10, 0, 0, 0, 0, 0];
+        let tin = compute_tin(&cov, cov.len());
+        assert!(
+            (tin - 50.0).abs() < 0.01,
+            "Half-covered uniform TIN should be ~50: {tin}"
+        );
+    }
+
+    #[test]
     fn test_compute_tin_degraded() {
         // 5' degradation: high at start, low at end
         let cov = vec![100, 80, 60, 40, 20, 10, 5, 2, 1, 1];
-        let tin = compute_tin(&cov);
+        let tin = compute_tin(&cov, cov.len());
         assert!(
             tin > 0.0 && tin < 100.0,
             "Degraded TIN should be between 0 and 100: {tin}"
@@ -658,15 +682,19 @@ mod tests {
     #[test]
     fn test_compute_tin_all_zero() {
         let cov = vec![0, 0, 0, 0, 0];
-        let tin = compute_tin(&cov);
+        let tin = compute_tin(&cov, cov.len());
         assert_eq!(tin, 0.0);
     }
 
     #[test]
     fn test_compute_tin_single_nonzero() {
-        // Only one position covered → TIN = 0
+        // Only one position covered out of 5 -> entropy=0 -> exp(0)=1
+        // TIN = 100 * 1 / 5 = 20
         let cov = vec![0, 0, 100, 0, 0];
-        let tin = compute_tin(&cov);
-        assert_eq!(tin, 0.0, "Single position coverage should give TIN=0");
+        let tin = compute_tin(&cov, cov.len());
+        assert!(
+            (tin - 20.0).abs() < 0.01,
+            "Single position coverage should give TIN=20: {tin}"
+        );
     }
 }

@@ -424,9 +424,10 @@ pub fn build_regions_from_bed(bed_path: &str) -> Result<RegionSets> {
 /// - **Introns**: gaps between consecutive exon blocks per transcript
 /// - **TSS/TES flanking**: upstream/downstream of transcript start/end (strand-aware)
 ///
-/// Non-coding transcripts (no CDS) have a virtual CDS at `tx_end` (matching
-/// BED12 `thickStart == thickEnd == txEnd`), so all exon bases become UTR:
-/// 5'UTR on + strand, 3'UTR on - strand. This matches upstream RSeQC behavior.
+/// Non-coding transcripts (no CDS) have a virtual CDS spanning the entire
+/// transcript (`tx_start` to `tx_end`), matching the Perl gtf2bed convention
+/// where `thickStart == txStart` and `thickEnd == txEnd`. This means all
+/// exon bases become CDS exon bases rather than UTR.
 pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
     let mut regions = RegionSets::default();
 
@@ -440,10 +441,11 @@ pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
             let exon_ends: Vec<u64> = tx.exons.iter().map(|&(_, e)| e).collect(); // GTF end inclusive -> BED end exclusive = same value
 
             // CDS range (0-based half-open).
-            // Non-coding transcripts: synthesize cds_start = cds_end = tx_end,
-            // matching BED12 convention where thickStart == thickEnd == txEnd.
-            // This causes all exon bases to become UTR (5'UTR on +, 3'UTR on -),
-            // exactly matching upstream RSeQC's getUTR() behavior.
+            // Non-coding transcripts: synthesize cds_start = tx_start and
+            // cds_end = tx_end, so the entire transcript span is treated as
+            // CDS-like. This means all exon bases become CDS exon bases
+            // (instead of UTR), matching the Perl gtf2bed convention where
+            // non-coding transcripts have thickStart=txStart, thickEnd=txEnd.
             let tx_start = tx.start - 1; // GTF 1-based -> 0-based
             let tx_end = tx.end; // GTF inclusive end -> exclusive end
 
@@ -451,8 +453,9 @@ pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
                 if let (Some(cds_s), Some(cds_e)) = (tx.cds_start, tx.cds_end) {
                     (cds_s - 1, cds_e) // GTF 1-based inclusive -> 0-based half-open
                 } else {
-                    // Non-coding: virtual CDS at tx_end (matches BED12 thickStart==thickEnd==txEnd)
-                    (tx_end, tx_end)
+                    // Non-coding: treat entire transcript as CDS-like
+                    // (matches Perl gtf2bed thickStart=txStart, thickEnd=txEnd)
+                    (tx_start, tx_end)
                 };
 
             // CDS exons: intersection of exon blocks with CDS range
@@ -743,12 +746,13 @@ mod tests {
     }
 
     #[test]
-    fn test_noncoding_transcript_exons_as_utr() {
+    fn test_noncoding_transcript_exons_as_cds() {
         use crate::gtf::{Gene, Transcript};
 
         // Non-coding transcript on + strand: exons at [101,200] and [301,400] (1-based inclusive)
         // tx_start=101, tx_end=400 (1-based). No CDS.
-        // Upstream RSeQC: thickStart=thickEnd=txEnd → all exon bases become 5'UTR on + strand
+        // With gtf2bed convention: thickStart=txStart, thickEnd=txEnd →
+        // all exon bases become CDS exon bases.
         let tx_plus = Transcript {
             transcript_id: "TX_NC_PLUS".to_string(),
             chrom: "chr1".to_string(),
@@ -761,7 +765,7 @@ mod tests {
         };
 
         // Non-coding transcript on - strand: exons at [501,600] and [701,800] (1-based inclusive)
-        // All exon bases should become 3'UTR on - strand
+        // All exon bases should also become CDS exon bases.
         let tx_minus = Transcript {
             transcript_id: "TX_NC_MINUS".to_string(),
             chrom: "chr1".to_string(),
@@ -791,25 +795,18 @@ mod tests {
 
         let regions = build_regions_from_genes(&genes);
 
-        // CDS should be empty for non-coding transcripts
+        // Non-coding transcripts: all exon bases should be CDS exons (400 total)
         let cds_bases = regions.cds_exon.get("CHR1").map_or(0, |c| c.total_bases());
         assert_eq!(
-            cds_bases, 0,
-            "Non-coding transcripts should have no CDS exons"
+            cds_bases, 400,
+            "Non-coding transcript exons should all be CDS exons"
         );
 
-        // + strand non-coding: all exon bases (200 bases) should be 5'UTR
+        // No UTR for non-coding transcripts (CDS spans entire transcript)
         let utr5_bases = regions.utr_5.get("CHR1").map_or(0, |c| c.total_bases());
-        assert_eq!(
-            utr5_bases, 200,
-            "Non-coding + strand exons should all be 5'UTR"
-        );
+        assert_eq!(utr5_bases, 0, "Non-coding transcripts should have no 5'UTR");
 
-        // - strand non-coding: all exon bases (200 bases) should be 3'UTR
         let utr3_bases = regions.utr_3.get("CHR1").map_or(0, |c| c.total_bases());
-        assert_eq!(
-            utr3_bases, 200,
-            "Non-coding - strand exons should all be 3'UTR"
-        );
+        assert_eq!(utr3_bases, 0, "Non-coding transcripts should have no 3'UTR");
     }
 }

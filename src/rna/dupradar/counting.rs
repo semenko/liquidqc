@@ -1542,11 +1542,11 @@ pub fn count_reads(
         }
 
         // Handle remaining singletons (mates whose partner was never seen).
-        // These are classified as "Unassigned_Singleton" to match featureCounts
-        // behavior — unmatched mates are not assigned to genes.
+        // These reads were already classified individually through
+        // classify_read_fc() when first encountered, so we do NOT
+        // increment fc_singleton here (that would double-count).
         for (_key, mate_info) in still_unmatched.drain() {
             merged.total_fragments += 1;
-            merged.fc_singleton += 1;
             // Include singletons in library size counts for RPKM calculation.
             // R dupRadar's analyzeDuprates() uses N = sum(stat[,2]) - Unmapped
             // as its RPKM denominator, which includes all mapped fragments.

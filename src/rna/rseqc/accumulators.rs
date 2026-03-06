@@ -515,16 +515,8 @@ impl BamStatAccum {
             if is_mapped && is_paired && !is_qcfail && !mate_unmapped {
                 self.reads_mapped_and_paired += 1;
             }
-            // Cache CIGAR once per mapped read — reused for bases_mapped_cigar,
-            // indel distribution (ID/IC), and coverage pileup (COV).
-            use rust_htslib::bam::record::Cigar as C;
-            let cached_cigar = if is_mapped {
-                Some(record.cigar())
-            } else {
-                None
-            };
-
             if is_mapped {
+                use rust_htslib::bam::record::Cigar as C;
                 self.primary_mapped += 1;
                 self.bases_mapped += seq_len;
 
@@ -535,7 +527,7 @@ impl BamStatAccum {
                     self.reads_mq0 += 1;
                 }
 
-                let cigar = cached_cigar.as_ref().unwrap();
+                let cigar = record.cigar();
 
                 // CIGAR-based mapped bases (M/I/=/X operations).
                 // Upstream samtools stats counts BAM_CMATCH, BAM_CINS, BAM_CEQUAL,
@@ -781,130 +773,172 @@ impl BamStatAccum {
                     }
                 }
             }
+        } // if is_primary
 
-            // =============================================================
-            // Indel distribution (ID) and indels per cycle (IC) from CIGAR.
-            // Requires mapped reads (CIGAR is meaningless for unmapped).
-            // Upstream samtools stats calls count_indels after the unmapped
-            // check but does NOT exclude duplicates or qcfail.
-            // =============================================================
-            if is_mapped {
-                let is_reverse = flags & BAM_FREVERSE != 0;
-                let cigar = cached_cigar.as_ref().unwrap();
-                let mut cycle: usize = 0;
+        // =============================================================
+        // Indel distribution (ID) and indels per cycle (IC) from CIGAR.
+        //
+        // Upstream samtools stats calls count_indels() AFTER the
+        // secondary-read early return (line 1206-1210) and the
+        // IS_UNMAPPED return (line 1255), but OUTSIDE IS_ORIGINAL().
+        // This means: all mapped, non-secondary reads are included
+        // (supplementary, duplicate, qcfail all contribute).
+        //
+        // IC uses first-fragment/last-fragment read order (not
+        // forward/reverse strand) and read-oriented cycle indices,
+        // matching upstream count_indels().
+        // =============================================================
+        if is_mapped && !is_secondary {
+            use rust_htslib::bam::record::Cigar as C;
+            let is_reverse = flags & BAM_FREVERSE != 0;
+            let read_len = record.seq_len();
+            // Upstream order: paired ? (read1?FIRST:0)+(read2?LAST:0) : FIRST
+            let order: u32 = if is_paired {
+                (if flags & BAM_FREAD1 != 0 { 1 } else { 0 })
+                    + (if flags & BAM_FREAD2 != 0 { 2 } else { 0 })
+            } else {
+                1 // unpaired → FIRST
+            };
+            let cigar = record.cigar();
+            let mut icycle: usize = 0;
 
-                for op in cigar.iter() {
-                    match op {
-                        C::Match(n) | C::Equal(n) | C::Diff(n) => {
-                            cycle += *n as usize;
+            for op in cigar.iter() {
+                match op {
+                    C::Ins(n) => {
+                        let ncig = *n as usize;
+                        let len = *n as u64;
+                        // ID: indel size distribution
+                        let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
+                        id_entry[0] += 1; // insertions
+
+                        // IC: indels per cycle (read-oriented index)
+                        let idx = if is_reverse {
+                            // Reverse strand: read_len - icycle - ncig
+                            read_len.saturating_sub(icycle + ncig)
+                        } else {
+                            icycle
+                        };
+                        if idx >= self.ic.len() {
+                            self.ic.resize(idx + 1, [0u64; 4]);
                         }
-                        C::SoftClip(n) => {
-                            cycle += *n as usize;
+                        if order == 1 {
+                            self.ic[idx][0] += 1; // ins_1st
                         }
-                        C::Ins(n) => {
-                            let len = *n as u64;
-                            // ID: indel size distribution
-                            let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
-                            id_entry[0] += 1; // insertions
-
-                            // IC: indels per cycle
-                            if cycle >= self.ic.len() {
-                                self.ic.resize(cycle + 1, [0u64; 4]);
-                            }
-                            if is_reverse {
-                                self.ic[cycle][1] += 1; // ins_rev
-                            } else {
-                                self.ic[cycle][0] += 1; // ins_fwd
-                            }
-
-                            cycle += *n as usize; // I advances cycle
+                        if order == 2 {
+                            self.ic[idx][1] += 1; // ins_2nd
                         }
-                        C::Del(n) => {
-                            let len = *n as u64;
-                            // ID: indel size distribution
-                            let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
-                            id_entry[1] += 1; // deletions
 
-                            // IC: indels per cycle
-                            if cycle >= self.ic.len() {
-                                self.ic.resize(cycle + 1, [0u64; 4]);
-                            }
-                            if is_reverse {
-                                self.ic[cycle][3] += 1; // del_rev
-                            } else {
-                                self.ic[cycle][2] += 1; // del_fwd
-                            }
-                            // D does NOT advance cycle
-                        }
-                        C::RefSkip(_) | C::HardClip(_) | C::Pad(_) => {}
+                        icycle += ncig; // I advances cycle
                     }
+                    C::Del(n) => {
+                        let len = *n as u64;
+                        // ID: indel size distribution
+                        let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
+                        id_entry[1] += 1; // deletions
+
+                        // IC: indels per cycle (read-oriented index)
+                        let idx = if is_reverse {
+                            // Reverse strand: read_len - icycle - 1
+                            if icycle == 0 {
+                                // Discard meaningless deletions at cycle 0
+                                // (upstream: "if (idx<0) continue;")
+                                continue;
+                            }
+                            read_len.saturating_sub(icycle + 1)
+                        } else {
+                            if icycle == 0 {
+                                continue;
+                            }
+                            icycle - 1
+                        };
+                        if idx >= self.ic.len() {
+                            self.ic.resize(idx + 1, [0u64; 4]);
+                        }
+                        if order == 1 {
+                            self.ic[idx][2] += 1; // del_1st
+                        }
+                        if order == 2 {
+                            self.ic[idx][3] += 1; // del_2nd
+                        }
+                        // D does NOT advance cycle
+                    }
+                    C::Match(n) | C::Equal(n) | C::Diff(n) => {
+                        icycle += *n as usize;
+                    }
+                    C::SoftClip(n) => {
+                        icycle += *n as usize;
+                    }
+                    C::RefSkip(_) | C::HardClip(_) | C::Pad(_) => {}
                 }
             }
+        }
 
-            // =============================================================
-            // COV: Coverage distribution via round-buffer pileup.
-            // Walk CIGAR M/=/X ops, increment depth at each covered
-            // reference position. Flush positions behind the read start.
-            // Only for mapped reads (CIGAR is meaningless for unmapped).
-            // =============================================================
-            if is_mapped {
-                let tid = record.tid();
-                let pos = record.pos(); // 0-based
-                let buf_size = self.cov_buf.len();
-                let buf_mask = buf_size - 1; // assumes power-of-2
+        // =============================================================
+        // COV: Coverage distribution via round-buffer pileup.
+        //
+        // Upstream samtools stats performs the coverage pileup AFTER
+        // the secondary-read early return but OUTSIDE IS_ORIGINAL().
+        // This means: all mapped, non-secondary reads are included
+        // (supplementary, duplicate, qcfail all contribute to depth).
+        // =============================================================
+        if is_mapped && !is_secondary {
+            use rust_htslib::bam::record::Cigar as C;
+            let tid = record.tid();
+            let pos = record.pos(); // 0-based
+            let buf_size = self.cov_buf.len();
+            let buf_mask = buf_size - 1; // assumes power-of-2
 
-                // Flush if chromosome changed
-                if tid != self.cov_buf_tid {
-                    self.flush_cov_buf_all();
-                    self.cov_buf_tid = tid;
-                    self.cov_buf_start = pos;
+            // Flush if chromosome changed
+            if tid != self.cov_buf_tid {
+                self.flush_cov_buf_all();
+                self.cov_buf_tid = tid;
+                self.cov_buf_start = pos;
+            }
+
+            // Flush positions before this read's start
+            while self.cov_buf_start < pos {
+                let idx = (self.cov_buf_start as usize) & buf_mask;
+                let depth = self.cov_buf[idx];
+                if depth > 0 {
+                    *self.cov_hist.entry(depth).or_insert(0) += 1;
+                    self.cov_buf[idx] = 0;
                 }
+                self.cov_buf_start += 1;
+            }
 
-                // Flush positions before this read's start
-                while self.cov_buf_start < pos {
-                    let idx = (self.cov_buf_start as usize) & buf_mask;
-                    let depth = self.cov_buf[idx];
-                    if depth > 0 {
-                        *self.cov_hist.entry(depth).or_insert(0) += 1;
-                        self.cov_buf[idx] = 0;
-                    }
-                    self.cov_buf_start += 1;
-                }
-
-                // Walk CIGAR and increment depth for M/=/X ops
-                let cigar = cached_cigar.as_ref().unwrap();
-                let mut ref_pos = pos;
-                for op in cigar.iter() {
-                    match op {
-                        C::Match(n) | C::Equal(n) | C::Diff(n) => {
-                            for _ in 0..*n {
-                                // Check buffer capacity
-                                if (ref_pos - self.cov_buf_start) as usize >= buf_size {
-                                    // Need to flush some old positions
-                                    let flush_to = ref_pos - buf_size as i64 + 1;
-                                    while self.cov_buf_start < flush_to {
-                                        let idx = (self.cov_buf_start as usize) & buf_mask;
-                                        let depth = self.cov_buf[idx];
-                                        if depth > 0 {
-                                            *self.cov_hist.entry(depth).or_insert(0) += 1;
-                                            self.cov_buf[idx] = 0;
-                                        }
-                                        self.cov_buf_start += 1;
+            // Walk CIGAR and increment depth for M/=/X ops
+            let cigar = record.cigar();
+            let mut ref_pos = pos;
+            for op in cigar.iter() {
+                match op {
+                    C::Match(n) | C::Equal(n) | C::Diff(n) => {
+                        for _ in 0..*n {
+                            // Check buffer capacity
+                            if (ref_pos - self.cov_buf_start) as usize >= buf_size {
+                                // Need to flush some old positions
+                                let flush_to = ref_pos - buf_size as i64 + 1;
+                                while self.cov_buf_start < flush_to {
+                                    let idx = (self.cov_buf_start as usize) & buf_mask;
+                                    let depth = self.cov_buf[idx];
+                                    if depth > 0 {
+                                        *self.cov_hist.entry(depth).or_insert(0) += 1;
+                                        self.cov_buf[idx] = 0;
                                     }
+                                    self.cov_buf_start += 1;
                                 }
-                                let idx = (ref_pos as usize) & buf_mask;
-                                self.cov_buf[idx] += 1;
-                                ref_pos += 1;
                             }
+                            let idx = (ref_pos as usize) & buf_mask;
+                            self.cov_buf[idx] += 1;
+                            ref_pos += 1;
                         }
-                        C::Del(n) | C::RefSkip(n) => {
-                            ref_pos += *n as i64;
-                        }
-                        C::Ins(_) | C::SoftClip(_) | C::HardClip(_) | C::Pad(_) => {}
                     }
+                    C::Del(n) | C::RefSkip(n) => {
+                        ref_pos += *n as i64;
+                    }
+                    C::Ins(_) | C::SoftClip(_) | C::HardClip(_) | C::Pad(_) => {}
                 }
-            } // if is_mapped (COV)
-        } // if is_primary
+            }
+        } // if is_mapped && !is_secondary (COV)
 
         // =================================================================
         // RSeQC bam_stat cascade (original logic, with early returns)
@@ -1129,28 +1163,21 @@ impl BamStatAccum {
 // infer_experiment accumulator
 // -------------------------------------------------------------------
 
-/// infer_experiment accumulator — strand protocol inference via sampling.
+/// infer_experiment accumulator — strand protocol inference.
+///
+/// Processes ALL reads (no sampling cap). Upstream RSeQC `infer_experiment.py`
+/// samples 200K reads, but since RustQC processes in a single pass, processing
+/// all reads gives equivalent-or-better results on small data and avoids
+/// sampling divergence on large data.
 #[derive(Debug, Default)]
 pub struct InferExpAccum {
     /// Paired-end strand class counts (keys: "1++", "1--", "2+-", "2-+", etc.)
     pub p_strandness: HashMap<String, u64>,
     /// Single-end strand class counts (keys: "++", "--", "+-", "-+", etc.)
     pub s_strandness: HashMap<String, u64>,
-    /// Number of usable reads sampled so far.
-    pub count: u64,
-    /// Maximum reads to sample.
-    pub sample_size: u64,
 }
 
 impl InferExpAccum {
-    /// Create a new accumulator with the given sample size.
-    pub fn new(sample_size: u64) -> Self {
-        InferExpAccum {
-            sample_size,
-            ..Default::default()
-        }
-    }
-
     /// Process a single BAM record.
     pub fn process_read(
         &mut self,
@@ -1159,25 +1186,14 @@ impl InferExpAccum {
         model: &GeneModel,
         mapq_cut: u8,
     ) {
-        // Already reached sample size
-        if self.count >= self.sample_size {
-            return;
-        }
-
         let flags = record.flags();
 
-        // Skip QC-fail, dup, secondary, supplementary, unmapped.
-        //
-        // Upstream RSeQC does not explicitly filter supplementary (0x800), but
-        // supplementary alignments represent chimeric read fragments with
-        // partial mappings (heavy soft clipping) that produce unreliable strand
-        // signals. Including them inflates the "failed to determine" fraction
-        // because they often overlap genes on multiple strands. Filtering them
-        // matches the intent of sampling only well-mapped primary alignments.
+        // Skip QC-fail, dup, secondary, unmapped.
+        // Upstream RSeQC does not filter supplementary (0x800), so we don't
+        // either — this matches the upstream filter set exactly.
         if flags & BAM_FQCFAIL != 0
             || flags & BAM_FDUP != 0
             || flags & BAM_FSECONDARY != 0
-            || flags & BAM_FSUPPLEMENTARY != 0
             || flags & BAM_FUNMAP != 0
         {
             return;
@@ -1233,18 +1249,13 @@ impl InferExpAccum {
             let key = format!("{}{}", map_strand, strand_str);
             *self.s_strandness.entry(key).or_insert(0) += 1;
         }
-
-        self.count += 1;
     }
 
     /// Merge another accumulator into this one.
     ///
-    /// Raw counts are accumulated without scaling. Each parallel worker
-    /// independently caps at `sample_size`, so the merged total may exceed
-    /// `sample_size`. This is fine because `into_result()` computes fractions
-    /// from raw counts — the absolute count doesn't matter, only the
-    /// proportions. Avoiding intermediate scaling prevents cumulative
-    /// rounding errors from repeated merge steps.
+    /// Raw counts are accumulated without scaling. `into_result()` computes
+    /// fractions from raw counts — the absolute count doesn't matter, only
+    /// the proportions.
     pub fn merge(&mut self, other: InferExpAccum) {
         for (key, count) in other.p_strandness {
             *self.p_strandness.entry(key).or_insert(0) += count;
@@ -1252,7 +1263,6 @@ impl InferExpAccum {
         for (key, count) in other.s_strandness {
             *self.s_strandness.entry(key).or_insert(0) += count;
         }
-        self.count += other.count;
     }
 }
 
@@ -1981,7 +1991,7 @@ impl RseqcAccumulators {
                 None
             },
             infer_exp: if config.infer_experiment_enabled {
-                Some(InferExpAccum::new(config.infer_experiment_sample_size))
+                Some(InferExpAccum::default())
             } else {
                 None
             },
