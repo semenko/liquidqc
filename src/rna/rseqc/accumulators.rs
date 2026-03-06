@@ -592,16 +592,26 @@ impl BamStatAccum {
             }
 
             // =============================================================
-            // Histogram sections: primary + mapped + !qcfail + !dup
-            // (MAPQ, FFQ/LFQ, FBC/LBC, GCF/GCL, FTC/LTC, ID/IC, FBC_RO/LBC_RO)
+            // MAPQ histogram: primary + mapped + !qcfail + !dup
+            // (matches samtools stats.c:1239 five-flag exclusion)
             // =============================================================
             if is_mapped && !is_qcfail && !is_dup {
+                self.mapq_hist[mapq as usize] += 1;
+            }
+
+            // =============================================================
+            // Per-cycle quality & base composition histograms:
+            // FFQ/LFQ, FBC/LBC, GCF/GCL, FTC/LTC, FBC_RO/LBC_RO
+            //
+            // Upstream samtools stats includes duplicates, unmapped, and
+            // qcfail reads in these histograms (collect_orig_read_stats
+            // has no such checks). Only secondary+supplementary are
+            // excluded (via IS_ORIGINAL), which is already handled by
+            // the outer is_primary guard.
+            // =============================================================
+            {
                 let is_reverse = flags & BAM_FREVERSE != 0;
 
-                // MAPQ histogram
-                self.mapq_hist[mapq as usize] += 1;
-
-                // Per-cycle quality, base composition, GC content, total bases
                 let seq = record.seq();
                 let quals = record.qual();
                 let read_len = seq.len();
@@ -680,9 +690,17 @@ impl BamStatAccum {
                     let gc_pct = gc_pct.min(100);
                     gc_arr[gc_pct] += 1;
                 }
+            }
 
-                // Indel distribution (ID) and indels per cycle (IC) from CIGAR
+            // =============================================================
+            // Indel distribution (ID) and indels per cycle (IC) from CIGAR.
+            // Requires mapped reads (CIGAR is meaningless for unmapped).
+            // Upstream samtools stats calls count_indels after the unmapped
+            // check but does NOT exclude duplicates or qcfail.
+            // =============================================================
+            if is_mapped {
                 use rust_htslib::bam::record::Cigar as C;
+                let is_reverse = flags & BAM_FREVERSE != 0;
                 let cigar = record.cigar();
                 let mut cycle: usize = 0;
 

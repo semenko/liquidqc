@@ -95,50 +95,58 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         0.0
     };
 
-    // Insert size stats — 99th percentile truncation matching samtools stats.
+    // Insert size stats — 99th percentile truncation matching samtools stats.c.
     // Each pair is counted once (upstream mate only), capped at 8000.
-    // Samtools computes mean/SD from the "main bulk" (up to 99th percentile).
+    //
+    // Upstream samtools stats.c logic (report_stats, lines 1492-1522):
+    //   1. nisize = total count across ALL bins (including isize=0)
+    //   2. Iterate bins: accumulate bulk count and weighted sum.
+    //      Stop (including current bin) when bulk/nisize > 0.99.
+    //      Then nisize = bulk (truncated count).
+    //   3. mean = weighted_sum / nisize
+    //   4. SD loop runs from isize=1 to ibulk-1 (skips isize=0):
+    //      sd = sqrt( sum(count[i] * (i - mean)^2) / nisize )  [population SD]
     let (avg_insert, insert_sd) = {
-        // Build a flat insert-size histogram from is_hist (total column = index 0)
         let total_count: u64 = result.is_hist.values().map(|v| v[0]).sum();
         if total_count > 0 {
-            // Sort insert sizes for percentile computation
             let mut sorted_isizes: Vec<(u64, u64)> =
                 result.is_hist.iter().map(|(&k, v)| (k, v[0])).collect();
             sorted_isizes.sort_by_key(|&(k, _)| k);
 
-            // Find 99th percentile cutoff (isize_main_bulk = 0.99)
-            let bulk_limit = (total_count as f64 * 0.99).ceil() as u64;
-            let mut cumulative = 0u64;
-            let mut bulk_sum = 0.0f64;
-            let mut bulk_sq_sum = 0.0f64;
+            // Phase 1: Find 99th percentile cutoff and compute mean.
+            // Include entire bins; stop when cumulative/total > 0.99.
             let mut bulk_count = 0u64;
+            let mut weighted_sum = 0.0f64;
+            let mut ibulk: u64 = 0; // exclusive upper bound for SD loop
 
             for &(isize_val, count) in &sorted_isizes {
-                let remaining = bulk_limit.saturating_sub(cumulative);
-                if remaining == 0 {
+                if count > 0 {
+                    ibulk = isize_val + 1;
+                }
+                bulk_count += count;
+                weighted_sum += isize_val as f64 * count as f64;
+
+                if bulk_count as f64 / total_count as f64 > 0.99 {
                     break;
                 }
-                let use_count = count.min(remaining);
-                let v = isize_val as f64;
-                bulk_sum += v * use_count as f64;
-                bulk_sq_sum += v * v * use_count as f64;
-                bulk_count += use_count;
-                cumulative += count;
             }
 
             if bulk_count > 0 {
-                let mean = bulk_sum / bulk_count as f64;
-                let sd = if bulk_count > 1 {
-                    let variance = (bulk_sq_sum / bulk_count as f64) - (mean * mean);
-                    if variance > 0.0 {
-                        variance.sqrt()
-                    } else {
-                        0.0
+                let mean = weighted_sum / bulk_count as f64;
+
+                // Phase 2: SD — population SD, loop from isize=1 (skip 0).
+                let mut sd_sum = 0.0f64;
+                for &(isize_val, count) in &sorted_isizes {
+                    if isize_val == 0 {
+                        continue; // upstream SD loop starts at isize=1
                     }
-                } else {
-                    0.0
-                };
+                    if isize_val >= ibulk {
+                        break;
+                    }
+                    let diff = isize_val as f64 - mean;
+                    sd_sum += count as f64 * diff * diff;
+                }
+                let sd = (sd_sum / bulk_count as f64).sqrt();
                 (mean, sd)
             } else {
                 (0.0, 0.0)
@@ -423,7 +431,7 @@ fn write_ffq_lfq<W: std::io::Write>(
         "# Use `plot-bamstats -p <outdir> <file>` to generate plots"
     )?;
     for (cycle, row) in data.iter().enumerate() {
-        write!(out, "{tag}\t{cycle}")?;
+        write!(out, "{tag}\t{}", cycle + 1)?; // 1-based cycle numbering
         for &count in row.iter().take(max_q + 1) {
             write!(out, "\t{count}")?;
         }
@@ -479,6 +487,7 @@ fn write_gcc<W: std::io::Write>(
             }
         }
         let total: u64 = combined.iter().sum();
+        // 1-based cycle numbering; only output A%, C%, G%, T% (4 columns, matching upstream)
         if total > 0 {
             let pcts: Vec<f64> = combined
                 .iter()
@@ -486,17 +495,24 @@ fn write_gcc<W: std::io::Write>(
                 .collect();
             writeln!(
                 out,
-                "{tag}\t{cycle}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
-                pcts[0], pcts[1], pcts[2], pcts[3], pcts[4], pcts[5]
+                "{tag}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                cycle + 1,
+                pcts[0],
+                pcts[1],
+                pcts[2],
+                pcts[3]
             )?;
         } else {
-            writeln!(out, "{tag}\t{cycle}\t0.00\t0.00\t0.00\t0.00\t0.00\t0.00")?;
+            writeln!(out, "{tag}\t{}\t0.00\t0.00\t0.00\t0.00", cycle + 1)?;
         }
     }
     Ok(())
 }
 
-/// Write FBC or LBC section (ACGT raw counts per cycle).
+/// Write FBC or LBC section (ACGT content per cycle as percentages).
+///
+/// Upstream samtools stats outputs percentages (not raw counts) with
+/// 6 columns: A%, C%, G%, T%, N%, Other%.
 fn write_base_counts<W: std::io::Write>(
     out: &mut W,
     tag: &str,
@@ -508,11 +524,30 @@ fn write_base_counts<W: std::io::Write>(
         "# {tag}, ACGT content per cycle for {desc}. Use `plot-bamstats -p <outdir> <file>` to generate plots"
     )?;
     for (cycle, row) in data.iter().enumerate() {
-        writeln!(
-            out,
-            "{tag}\t{cycle}\t{}\t{}\t{}\t{}\t{}\t{}",
-            row[0], row[1], row[2], row[3], row[4], row[5]
-        )?;
+        let total: u64 = row.iter().sum();
+        if total > 0 {
+            let pcts: Vec<f64> = row
+                .iter()
+                .map(|&c| 100.0 * c as f64 / total as f64)
+                .collect();
+            writeln!(
+                out,
+                "{tag}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                cycle + 1, // 1-based
+                pcts[0],
+                pcts[1],
+                pcts[2],
+                pcts[3],
+                pcts[4],
+                pcts[5]
+            )?;
+        } else {
+            writeln!(
+                out,
+                "{tag}\t{}\t0.00\t0.00\t0.00\t0.00\t0.00\t0.00",
+                cycle + 1
+            )?;
+        }
     }
     Ok(())
 }
@@ -578,11 +613,13 @@ fn write_length_hist<W: std::io::Write>(
         return Ok(());
     }
 
-    let min_len = *hist.keys().min().unwrap_or(&0);
-    let max_len = *hist.keys().max().unwrap_or(&0);
-    for len in min_len..=max_len {
-        let count = hist.get(&len).copied().unwrap_or(0);
-        writeln!(out, "{tag}\t{len}\t{count}")?;
+    let mut lengths: Vec<u64> = hist.keys().copied().collect();
+    lengths.sort();
+    for len in lengths {
+        let count = hist[&len];
+        if count > 0 {
+            writeln!(out, "{tag}\t{len}\t{count}")?;
+        }
     }
     Ok(())
 }
@@ -623,10 +660,13 @@ fn write_indel_dist<W: std::io::Write>(
         return Ok(());
     }
 
-    let max_len = *id_hist.keys().max().unwrap_or(&0);
-    for len in 1..=max_len {
-        let counts = id_hist.get(&len).copied().unwrap_or([0; 2]);
-        writeln!(out, "ID\t{len}\t{}\t{}", counts[0], counts[1])?;
+    let mut sizes: Vec<u64> = id_hist.keys().copied().collect();
+    sizes.sort();
+    for len in sizes {
+        let counts = id_hist[&len];
+        if counts[0] > 0 || counts[1] > 0 {
+            writeln!(out, "ID\t{len}\t{}\t{}", counts[0], counts[1])?;
+        }
     }
     Ok(())
 }
@@ -638,11 +678,18 @@ fn write_indel_cycle<W: std::io::Write>(out: &mut W, ic: &[[u64; 4]]) -> Result<
         "# IC, indels per cycle. Use `plot-bamstats -p <outdir> <file>` to generate plots"
     )?;
     for (cycle, row) in ic.iter().enumerate() {
-        writeln!(
-            out,
-            "IC\t{cycle}\t{}\t{}\t{}\t{}",
-            row[0], row[1], row[2], row[3]
-        )?;
+        // Only output cycles with non-zero indel counts (matching upstream)
+        if row[0] > 0 || row[1] > 0 || row[2] > 0 || row[3] > 0 {
+            writeln!(
+                out,
+                "IC\t{}\t{}\t{}\t{}\t{}",
+                cycle + 1, // 1-based cycle numbering
+                row[0],
+                row[1],
+                row[2],
+                row[3]
+            )?;
+        }
     }
     Ok(())
 }
