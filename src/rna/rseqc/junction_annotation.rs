@@ -224,15 +224,15 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
     writeln!(f, "pdf(\"{}.splice_events.pdf\")", prefix)?;
     writeln!(
         f,
-        "events=c({:.3},{:.3},{:.3})",
+        "events=c({},{},{})",
         e_partial_pct, e_novel_pct, e_known_pct
     )?;
     writeln!(
         f,
         "pie(events,col=c(2,3,4),init.angle=30,angle=c(60,120,150),density=c(70,70,70),main=\"splicing events\",labels=c(\"partial_novel {}%\",\"complete_novel {}%\",\"known {}%\"))",
-        e_partial_pct.round() as u64,
-        e_novel_pct.round() as u64,
-        e_known_pct.round() as u64
+        e_partial_pct as u64,
+        e_novel_pct as u64,
+        e_known_pct as u64
     )?;
     writeln!(f, "dev.off()")?;
 
@@ -240,15 +240,15 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
     writeln!(f, "pdf(\"{}.splice_junction.pdf\")", prefix)?;
     writeln!(
         f,
-        "junction=c({:.3},{:.3},{:.3})",
+        "junction=c({},{},{})",
         j_partial_pct, j_novel_pct, j_known_pct
     )?;
     writeln!(
         f,
         "pie(junction,col=c(2,3,4),init.angle=30,angle=c(60,120,150),density=c(70,70,70),main=\"splicing junctions\",labels=c(\"partial_novel {}%\",\"complete_novel {}%\",\"known {}%\"))",
-        j_partial_pct.round() as u64,
-        j_novel_pct.round() as u64,
-        j_known_pct.round() as u64
+        j_partial_pct as u64,
+        j_novel_pct as u64,
+        j_known_pct as u64
     )?;
     writeln!(f, "dev.off()")?;
 

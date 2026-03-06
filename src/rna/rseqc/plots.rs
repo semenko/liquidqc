@@ -421,7 +421,7 @@ where
         let lx = cx as f64 + label_r * mid_angle.cos();
         let ly = cy as f64 - label_r * mid_angle.sin();
 
-        let label_text = format!("{} {}%", label, pct.round() as u64);
+        let label_text = format!("{} {}%", label, pct as u64);
         let label_style =
             TextStyle::from(("sans-serif", ps(10.0) as f64).into_font()).color(&BLACK);
 

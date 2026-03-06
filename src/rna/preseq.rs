@@ -900,7 +900,7 @@ pub fn estimate_complexity(
     // Build the evaluation grid: starts at step_size, goes to max_extrap
     let mut targets: Vec<f64> = Vec::new();
     let mut t = step;
-    while t <= max_extrap {
+    while t < max_extrap {
         targets.push(t);
         t += step;
     }

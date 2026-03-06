@@ -499,7 +499,7 @@ pub fn write_summary(result: &InnerDistanceResult, path: &str) -> Result<()> {
     writeln!(file, "Unknown chromosome: {}", unknown_chrom)?;
     writeln!(file, "Read pair overlap: {}", overlap)?;
 
-    // Compute mean/median/sd from histogram
+    // Compute mean from histogram
     if !result.histogram.is_empty() {
         let total: u64 = result.histogram.iter().map(|&(_, _, c)| c).sum();
         if total > 0 {
@@ -515,6 +515,58 @@ pub fn write_summary(result: &InnerDistanceResult, path: &str) -> Result<()> {
                 .sum::<f64>()
                 / total as f64;
             writeln!(file, "Mean inner distance: {:.2}", mean)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Write the upstream-compatible mean TSV file (Name, Mean, Median, sd).
+///
+/// This matches the output format of upstream RSeQC's inner_distance.py,
+/// which reconstructs fragment sizes from histogram bins (bin center = start + step/2,
+/// repeated by count) and computes mean/median/sd via R's functions.
+pub fn write_mean_file(result: &InnerDistanceResult, sample_name: &str, path: &str) -> Result<()> {
+    let mut file = std::fs::File::create(path)
+        .with_context(|| format!("Failed to create mean file: {}", path))?;
+
+    writeln!(file, "Name\tMean\tMedian\tsd")?;
+
+    if !result.histogram.is_empty() {
+        let total: u64 = result.histogram.iter().map(|&(_, _, c)| c).sum();
+        if total > 0 {
+            let step = if result.histogram.len() > 1 {
+                result.histogram[1].0 - result.histogram[0].0
+            } else {
+                5
+            };
+
+            // Reconstruct the fragment size values from histogram bins,
+            // matching R's rep(c(centers), times=c(counts))
+            let mut values: Vec<f64> = Vec::with_capacity(total as usize);
+            for &(start, _, count) in &result.histogram {
+                let center = start as f64 + step as f64 / 2.0;
+                for _ in 0..count {
+                    values.push(center);
+                }
+            }
+
+            let n = values.len() as f64;
+            let mean: f64 = values.iter().sum::<f64>() / n;
+
+            // Median: sort and pick middle (R's default median)
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = if values.len() % 2 == 0 {
+                (values[values.len() / 2 - 1] + values[values.len() / 2]) / 2.0
+            } else {
+                values[values.len() / 2]
+            };
+
+            // SD: R uses sample SD (n-1 denominator)
+            let variance: f64 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
+            let sd = variance.sqrt();
+
+            writeln!(file, "{}\t{}\t{}\t{}", sample_name, mean, median, sd)?;
         }
     }
 

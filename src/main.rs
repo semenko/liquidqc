@@ -1362,6 +1362,9 @@ fn write_rseqc_outputs(
         let summary_path = format!("{prefix}.inner_distance_summary.txt");
         rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
 
+        let mean_path = format!("{prefix}.inner_distance_mean.txt");
+        rna::rseqc::inner_distance::write_mean_file(&results, bam_stem, &mean_path)?;
+
         info!(
             "[{}] inner_distance: {} read pairs processed",
             bam_stem, results.total_pairs
