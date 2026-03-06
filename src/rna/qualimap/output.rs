@@ -194,15 +194,9 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         return (f64::NAN, f64::NAN, f64::NAN);
     }
 
-    // Sort by mean coverage descending, take top N.
-    // Qualimap's pickTranscripts() uses a threshold: include all transcripts
-    // with coverage >= the Nth-best coverage (can yield more than N when ties
-    // exist at the boundary).
+    // Sort by mean coverage descending, take top N
     qualifying.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    if qualifying.len() > NUM_TRANSCRIPTS_FOR_BIAS {
-        let min_coverage = qualifying[NUM_TRANSCRIPTS_FOR_BIAS].0;
-        qualifying.retain(|&(cov, _)| cov >= min_coverage);
-    }
+    qualifying.truncate(NUM_TRANSCRIPTS_FOR_BIAS);
 
     let mut five_prime_biases = Vec::with_capacity(qualifying.len());
     let mut three_prime_biases = Vec::with_capacity(qualifying.len());
@@ -234,13 +228,18 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         let whole_mean = whole_sum / len as f64;
 
         // Qualimap pushes bias values for all qualifying transcripts unconditionally
-        // (lines 247-249 of TranscriptDataHandler.java). The 5'-3' ratio may
-        // produce Infinity or NaN when three_mean == 0. Java's StatUtils.percentile
-        // includes these values and Arrays.sort places NaN at the end, which
-        // affects the median position. We match this behavior exactly.
+        // (lines 247-249 of TranscriptDataHandler.java). Since pickTranscripts()
+        // already ensures mean >= 1.0, whole_mean is always positive. The 5'-3'
+        // ratio may produce infinity or NaN when three_mean == 0; Java's
+        // StatUtils.percentile handles these via Arrays.sort which places NaN
+        // at the end. We filter NaN values since they don't contribute meaningful
+        // information to the median.
         five_prime_biases.push(five_mean / whole_mean);
         three_prime_biases.push(three_mean / whole_mean);
-        five_three_biases.push(five_mean / three_mean);
+        let ratio = five_mean / three_mean;
+        if !ratio.is_nan() {
+            five_three_biases.push(ratio);
+        }
     }
 
     let five = median(&mut five_prime_biases);
@@ -251,24 +250,14 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
 }
 
 /// Compute the median of a slice of f64 values.
-///
-/// Matches Java's `Arrays.sort(double[])` ordering: NaN values sort to the end
-/// (after positive infinity). This is important for the 5'-3' bias calculation
-/// where NaN values from zero-coverage 3' ends affect the median position.
 fn median(values: &mut [f64]) -> f64 {
     if values.is_empty() {
         return f64::NAN;
     }
-    // Java's Arrays.sort ordering: -Inf < negatives < -0.0 < +0.0 < positives < +Inf < NaN
-    // Rust's f64::total_cmp provides the same IEEE 754 total ordering.
-    values.sort_by(|a, b| a.total_cmp(b));
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = values.len();
     if n.is_multiple_of(2) {
-        let a = values[n / 2 - 1];
-        let b = values[n / 2];
-        // If either value is NaN, the average would be NaN. This matches
-        // Apache Commons Math StatUtils.percentile behavior.
-        (a + b) / 2.0
+        (values[n / 2 - 1] + values[n / 2]) / 2.0
     } else {
         values[n / 2]
     }

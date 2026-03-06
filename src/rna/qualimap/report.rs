@@ -344,7 +344,7 @@ fn write_summary_section(html: &mut String, data: &ReportData) {
         table_row(
             html,
             "Number of aligned pairs (without duplicates):",
-            &format_with_commas(data.both_proper),
+            &format_with_commas(data.both_proper / 2),
         );
     }
 
