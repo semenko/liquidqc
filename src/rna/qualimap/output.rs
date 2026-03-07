@@ -166,20 +166,17 @@ fn compute_coverage_profile(entries: &[&TranscriptCoverageEntry]) -> [f64; NUM_B
 ///
 /// Returns (5' bias, 3' bias, 5'-3' bias) as medians across all qualifying
 /// transcripts.
-fn compute_bias(
-    entries: &[TranscriptCoverageEntry],
-    java_ordered_indices: &[usize],
-) -> (f64, f64, f64) {
+fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
     use std::collections::HashMap;
 
     // Step 1: Pick best transcript per gene (highest mean coverage).
     // Qualimap selects one transcript per gene, then filters by length >= 500
     // and mean >= 1.0, then takes the top 1000 by mean coverage.
-    // Iterate in Java HashMap order so that ties (same mean coverage) are
-    // broken the same way as qualimap's pickTranscripts().
+    // Use flat insertion order (not java_ordered_indices which is for coverage
+    // profile TreeMap output).  For ties in mean coverage, the last entry in
+    // insertion order wins, matching qualimap's HashMap iteration behavior.
     let mut best_per_gene: HashMap<u32, &TranscriptCoverageEntry> = HashMap::new();
-    for &idx in java_ordered_indices {
-        let entry = &entries[idx];
+    for entry in entries {
         if entry.coverage.len() < MIN_TRANSCRIPT_LENGTH_FOR_BIAS || entry.mean_coverage < 1.0 {
             continue;
         }
@@ -233,16 +230,16 @@ fn compute_bias(
         let three_mean = three_prime_sum / NUM_PRIME_BASES as f64;
         let whole_mean = whole_sum / len as f64;
 
-        // Qualimap pushes bias values for all qualifying transcripts unconditionally
-        // (lines 247-249 of TranscriptDataHandler.java). Since pickTranscripts()
-        // already ensures mean >= 1.0, whole_mean is always positive. The 5'-3'
-        // ratio may produce Infinity or NaN when three_mean == 0. Java includes
-        // these values in the array and StatUtils.percentile (via Arrays.sort)
-        // places NaN at the end. We must include them to match the array length
-        // and thus the median position.
         five_prime_biases.push(five_mean / whole_mean);
         three_prime_biases.push(three_mean / whole_mean);
-        five_three_biases.push(five_mean / three_mean);
+        // The 5'/3' ratio can be Infinity or NaN when three_mean == 0.
+        // Filter NaN values only (not Infinity) to match upstream qualimap
+        // behavior — Java's StatUtils.percentile handles Infinity correctly
+        // via Arrays.sort but NaN would produce meaningless results.
+        let ratio = five_mean / three_mean;
+        if !ratio.is_nan() {
+            five_three_biases.push(ratio);
+        }
     }
 
     let five = median(&mut five_prime_biases);
@@ -254,31 +251,18 @@ fn compute_bias(
 
 /// Compute the median of a slice of f64 values.
 ///
-/// Matches Apache Commons Math 2.0 `StatUtils.percentile(array, 50)` behavior:
-/// - Sorts using Java's `Double.compareTo` ordering (NaN after +Infinity)
-/// - Uses the percentile algorithm: `pos = p * (n + 1) / 100` with linear interpolation
+/// Qualimap uses Apache Commons Math 2.0 `StatUtils.percentile(array, 50)`,
+/// which filters NaN values and computes a standard median.
 fn median(values: &mut [f64]) -> f64 {
     if values.is_empty() {
         return f64::NAN;
     }
-    // Java's Double.compareTo: -0 < +0, NaN > everything (including +Infinity)
-    values.sort_by(|a, b| a.total_cmp(b));
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = values.len();
-
-    // Apache Commons Math 2.0 Percentile algorithm for p=50:
-    // pos = p * (n + 1) / 100 = 50 * (n + 1) / 100 = (n + 1) / 2
-    let pos = (n + 1) as f64 / 2.0;
-
-    if pos < 1.0 {
-        values[0]
-    } else if pos >= n as f64 {
-        values[n - 1]
+    if n.is_multiple_of(2) {
+        (values[n / 2 - 1] + values[n / 2]) / 2.0
     } else {
-        let lower = pos.floor() as usize;
-        let frac = pos - pos.floor();
-        let d0 = values[lower - 1]; // 1-based to 0-based
-        let d1 = values[lower];
-        d0 + frac * (d1 - d0)
+        values[n / 2]
     }
 }
 
@@ -451,7 +435,7 @@ pub fn write_qualimap_results(
     let high_profile = compute_coverage_profile(&high_entries);
 
     // --- Compute bias ---
-    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries, &java_ordered_indices);
+    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries);
 
     // --- Compute mean coverage histogram ---
     let coverage_histogram = compute_mean_coverage_histogram(&entries);

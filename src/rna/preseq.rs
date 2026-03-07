@@ -364,8 +364,7 @@ fn interpolate(histogram: &[(u64, u64)], total_reads: u64, n_distinct: u64, targ
     // Build numer array matching upstream: numer[i] for i=1..hist.size()
     // Then accumulate with int truncation at each step
     let mut acc: i32 = 0; // upstream uses accumulate(..., 0) which is int
-    for i in 1..dense_hist.len() {
-        let n_j = dense_hist[i];
+    for (i, &n_j) in dense_hist.iter().enumerate().skip(1) {
         if n_j == 0 {
             continue; // numer[i] = 0, adding 0 to int doesn't change anything
         }

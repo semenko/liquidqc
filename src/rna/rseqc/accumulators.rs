@@ -266,11 +266,14 @@ pub struct BamStatAccum {
     /// Coverage distribution: depth → number of reference positions at that depth.
     /// Populated from a round buffer pileup during sorted BAM processing.
     pub cov_hist: HashMap<u32, u64>,
-    /// Round buffer for coverage pileup: tracks depth at reference positions.
-    /// buf[pos % ROUND_BUF_SIZE] = depth at that position.
+    /// Circular buffer for coverage pileup, matching upstream samtools design.
+    /// `cov_buf[cov_buf_idx]` corresponds to reference position `cov_buf_pos`.
+    /// The buffer grows dynamically to accommodate `max_read_length * 5`.
     cov_buf: Vec<u32>,
-    /// Current left-most unflushed position in the round buffer.
-    cov_buf_start: i64,
+    /// Index into `cov_buf` corresponding to `cov_buf_pos`.
+    cov_buf_idx: usize,
+    /// Reference position of the element at `cov_buf[cov_buf_idx]`.
+    cov_buf_pos: i64,
     /// Current chromosome tid for round buffer tracking.
     cov_buf_tid: i32,
 }
@@ -348,8 +351,9 @@ impl Default for BamStatAccum {
             ic: Vec::new(),
             chk: [0u32; 3],
             cov_hist: HashMap::new(),
-            cov_buf: vec![0u32; 1 << 16], // 65536 positions round buffer
-            cov_buf_start: 0,
+            cov_buf: vec![0u32; 1500], // matches upstream samtools: nbases * 5 = 300 * 5
+            cov_buf_idx: 0,
+            cov_buf_pos: 0,
             cov_buf_tid: -1,
         }
     }
@@ -772,8 +776,8 @@ impl BamStatAccum {
                     if gc_idx_max >= ngc {
                         gc_idx_max = ngc - 1;
                     }
-                    for i in gc_idx_min..gc_idx_max {
-                        gc_arr[i] += 1;
+                    for item in gc_arr.iter_mut().take(gc_idx_max).skip(gc_idx_min) {
+                        *item += 1;
                     }
                 }
             }
@@ -878,68 +882,71 @@ impl BamStatAccum {
         }
 
         // =============================================================
-        // COV: Coverage distribution via round-buffer pileup.
+        // COV: Coverage distribution via circular-buffer pileup.
         //
-        // Upstream samtools stats performs the coverage pileup AFTER
-        // the secondary-read early return but OUTSIDE IS_ORIGINAL().
-        // This means: all mapped, non-secondary reads are included
-        // (supplementary, duplicate, qcfail all contribute to depth).
+        // Matches upstream samtools stats: a circular buffer tracks
+        // per-position depth.  The buffer is flushed up to the current
+        // read's start position BEFORE CIGAR processing, and each
+        // M/=/X block is inserted as a contiguous range (no inner
+        // flush needed).  The buffer is dynamically grown to
+        // max_read_len * 5 so a single alignment block always fits.
+        //
+        // Included reads: mapped, non-secondary (supplementary,
+        // duplicate, qcfail all contribute to depth).
         // =============================================================
         if is_mapped && !is_secondary {
             use rust_htslib::bam::record::Cigar as C;
             let tid = record.tid();
             let pos = record.pos(); // 0-based
-            let buf_size = self.cov_buf.len();
-            let buf_mask = buf_size - 1; // assumes power-of-2
+            let seq_len = record.seq_len();
 
-            // Flush if chromosome changed
-            if tid != self.cov_buf_tid {
-                self.flush_cov_buf_all();
-                self.cov_buf_tid = tid;
-                self.cov_buf_start = pos;
-            }
-
-            // Flush positions before this read's start
-            while self.cov_buf_start < pos {
-                let idx = (self.cov_buf_start as usize) & buf_mask;
-                let depth = self.cov_buf[idx];
-                if depth > 0 {
-                    *self.cov_hist.entry(depth).or_insert(0) += 1;
-                    self.cov_buf[idx] = 0;
+            // Skip reads with no sequence (upstream samtools returns early
+            // for zero-length seqs before reaching COV).
+            if seq_len > 0 {
+                // Grow buffer to max_read_len * 5 if needed.
+                // When growing, linearise the circular data just like
+                // upstream samtools: copy [idx..old_size] then [0..idx]
+                // into a fresh buffer, and reset idx to 0.
+                let need = seq_len * 5;
+                if need > self.cov_buf.len() {
+                    let old_size = self.cov_buf.len();
+                    let mut new_buf = vec![0u32; need];
+                    let head = old_size - self.cov_buf_idx; // elements from idx to end
+                    new_buf[..head].copy_from_slice(&self.cov_buf[self.cov_buf_idx..]);
+                    new_buf[head..head + self.cov_buf_idx]
+                        .copy_from_slice(&self.cov_buf[..self.cov_buf_idx]);
+                    self.cov_buf = new_buf;
+                    self.cov_buf_idx = 0;
                 }
-                self.cov_buf_start += 1;
-            }
+                let buf_size = self.cov_buf.len();
 
-            // Walk CIGAR and increment depth for M/=/X ops
-            let cigar = record.cigar();
-            let mut ref_pos = pos;
-            for op in cigar.iter() {
-                match op {
-                    C::Match(n) | C::Equal(n) | C::Diff(n) => {
-                        for _ in 0..*n {
-                            // Check buffer capacity
-                            if (ref_pos - self.cov_buf_start) as usize >= buf_size {
-                                // Need to flush some old positions
-                                let flush_to = ref_pos - buf_size as i64 + 1;
-                                while self.cov_buf_start < flush_to {
-                                    let idx = (self.cov_buf_start as usize) & buf_mask;
-                                    let depth = self.cov_buf[idx];
-                                    if depth > 0 {
-                                        *self.cov_hist.entry(depth).or_insert(0) += 1;
-                                        self.cov_buf[idx] = 0;
-                                    }
-                                    self.cov_buf_start += 1;
-                                }
-                            }
-                            let idx = (ref_pos as usize) & buf_mask;
-                            self.cov_buf[idx] += 1;
-                            ref_pos += 1;
+                // Flush entire buffer on chromosome change
+                if tid != self.cov_buf_tid {
+                    self.flush_cov_buf_all();
+                    self.cov_buf_tid = tid;
+                    self.cov_buf_pos = pos;
+                    self.cov_buf_idx = 0;
+                }
+
+                // Flush positions from cov_buf_pos up to (but not
+                // including) the current read's start.
+                self.cov_buf_flush_to(pos, buf_size);
+
+                // Walk CIGAR: insert each M/=/X block as a contiguous range
+                let cigar = record.cigar();
+                let mut ref_pos = pos;
+                for op in cigar.iter() {
+                    match op {
+                        C::Match(n) | C::Equal(n) | C::Diff(n) => {
+                            let len = *n as i64;
+                            self.cov_buf_insert(ref_pos, ref_pos + len, buf_size);
+                            ref_pos += len;
                         }
+                        C::Del(n) | C::RefSkip(n) => {
+                            ref_pos += *n as i64;
+                        }
+                        C::Ins(_) | C::SoftClip(_) | C::HardClip(_) | C::Pad(_) => {}
                     }
-                    C::Del(n) | C::RefSkip(n) => {
-                        ref_pos += *n as i64;
-                    }
-                    C::Ins(_) | C::SoftClip(_) | C::HardClip(_) | C::Pad(_) => {}
                 }
             }
         } // if is_mapped && !is_secondary (COV)
@@ -1015,16 +1022,75 @@ impl BamStatAccum {
 
     /// Flush all remaining positions in the coverage round buffer into cov_hist.
     /// Must be called after processing all reads (or when switching chromosomes).
-    pub fn flush_cov_buf_all(&mut self) {
-        let buf_size = self.cov_buf.len();
-        for i in 0..buf_size {
-            let depth = self.cov_buf[i];
-            if depth > 0 {
-                *self.cov_hist.entry(depth).or_insert(0) += 1;
-                self.cov_buf[i] = 0;
+    /// Flush the circular buffer from `cov_buf_pos` up to (but not including) `pos`.
+    /// Each slot's depth is recorded in `cov_hist` and the slot is zeroed.
+    /// Matches upstream `round_buffer_flush` logic from samtools stats.c.
+    fn cov_buf_flush_to(&mut self, pos: i64, buf_size: usize) {
+        if pos - self.cov_buf_pos >= buf_size as i64 {
+            // Gap exceeds buffer size.  Match upstream samtools exactly:
+            // flush `size - 1` positions (from cov_buf_pos to
+            // cov_buf_pos + size - 2), leaving the LAST slot untouched.
+            // Then advance idx by `size - 1` and jump pos.
+            //
+            // Upstream (stats.c round_buffer_flush lines 334-366):
+            //   pos = rbuf.pos + size - 1;          // cap at last slot
+            //   ito = lidx2ridx(start, size, rbuf.pos, pos-1);
+            //   // flush from start to ito (size-1 slots)
+            //   rbuf.start = lidx2ridx(start, size, rbuf.pos, pos);
+            //   rbuf.pos = new_pos;
+            let flush_count = buf_size - 1; // flush all but the last slot
+            for _ in 0..flush_count {
+                let depth = self.cov_buf[self.cov_buf_idx];
+                if depth > 0 {
+                    *self.cov_hist.entry(depth).or_insert(0) += 1;
+                    self.cov_buf[self.cov_buf_idx] = 0;
+                }
+                self.cov_buf_idx += 1;
+                if self.cov_buf_idx >= buf_size {
+                    self.cov_buf_idx = 0;
+                }
+            }
+            // idx now points to the ONE unflushed slot (the last position
+            // in the old window).  Jump pos to the new read position.
+            self.cov_buf_pos = pos;
+        } else {
+            // Normal case: flush slot by slot.
+            while self.cov_buf_pos < pos {
+                let depth = self.cov_buf[self.cov_buf_idx];
+                if depth > 0 {
+                    *self.cov_hist.entry(depth).or_insert(0) += 1;
+                    self.cov_buf[self.cov_buf_idx] = 0;
+                }
+                self.cov_buf_idx += 1;
+                if self.cov_buf_idx >= buf_size {
+                    self.cov_buf_idx = 0;
+                }
+                self.cov_buf_pos += 1;
             }
         }
-        self.cov_buf_start = 0;
+    }
+
+    /// Insert a contiguous reference range `[from, to)` into the circular buffer,
+    /// incrementing depth for each position. The range must fit within `buf_size`.
+    fn cov_buf_insert(&mut self, from: i64, to: i64, buf_size: usize) {
+        for ref_pos in from..to {
+            // Map ref_pos to buffer index: offset from cov_buf_idx by (ref_pos - cov_buf_pos)
+            let offset = (ref_pos - self.cov_buf_pos) as usize;
+            let idx = (self.cov_buf_idx + offset) % buf_size;
+            self.cov_buf[idx] += 1;
+        }
+    }
+
+    /// Flush the entire circular buffer and reset tracking state.
+    pub fn flush_cov_buf_all(&mut self) {
+        for slot in self.cov_buf.iter_mut() {
+            if *slot > 0 {
+                *self.cov_hist.entry(*slot).or_insert(0) += 1;
+                *slot = 0;
+            }
+        }
+        self.cov_buf_idx = 0;
+        self.cov_buf_pos = 0;
         self.cov_buf_tid = -1;
     }
 

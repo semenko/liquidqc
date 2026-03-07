@@ -449,18 +449,18 @@ impl TinAccum {
             None => return,
         };
 
-        // Find overlapping transcripts via read start
-        let read_end = blocks.last().map(|b| b.1).unwrap_or(read_start);
+        // Find overlapping transcripts via read start.
+        // chrom_spans is sorted by tx_start.  We need all transcripts
+        // where tx_start <= read_start < tx_end.
+        //
+        // 1. partition_point finds the first span where tx_start > read_start.
+        //    All spans before that point have tx_start <= read_start.
+        // 2. Scan those candidates and check tx_end > read_start.
+        let span_end = chrom_spans.partition_point(|s| s.0 <= read_start);
 
-        // Binary search for first transcript that could overlap
-        let span_start = chrom_spans.partition_point(|s| s.1 <= read_start);
-
-        for &(tx_start, tx_end, tx_idx) in &chrom_spans[span_start..] {
-            if tx_start >= read_end {
-                break;
-            }
-            // Read start falls within this transcript's exonic region
-            if read_start >= tx_start && read_start < tx_end {
+        for &(_tx_start, tx_end, tx_idx) in &chrom_spans[..span_end] {
+            // _tx_start <= read_start is guaranteed by the partition_point
+            if read_start < tx_end {
                 self.unique_starts[tx_idx as usize].insert(read_start);
             }
         }

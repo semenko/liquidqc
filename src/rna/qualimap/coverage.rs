@@ -340,7 +340,7 @@ mod tests {
     fn test_merge() {
         let mut cov1 = TranscriptCoverage::new();
         let tx = make_tx_info(100, 200);
-        cov1.add_coverage(&[(120, 150)], &[tx.clone()], 0);
+        cov1.add_coverage(&[(120, 150)], std::slice::from_ref(&tx), 0);
 
         let mut cov2 = TranscriptCoverage::new();
         cov2.add_coverage(&[(130, 160)], &[tx], 0);

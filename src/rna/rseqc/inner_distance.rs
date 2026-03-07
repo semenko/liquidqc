@@ -556,7 +556,7 @@ pub fn write_mean_file(result: &InnerDistanceResult, sample_name: &str, path: &s
 
             // Median: sort and pick middle (R's default median)
             values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let median = if values.len() % 2 == 0 {
+            let median = if values.len().is_multiple_of(2) {
                 (values[values.len() / 2 - 1] + values[values.len() / 2]) / 2.0
             } else {
                 values[values.len() / 2]

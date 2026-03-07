@@ -1050,10 +1050,12 @@ mod tests {
 
     #[test]
     fn test_counters_merge() {
-        let mut c1 = QualimapCounters::default();
-        c1.primary_alignments = 10;
-        c1.exonic_reads = 5;
-        c1.intronic_reads = 3;
+        let mut c1 = QualimapCounters {
+            primary_alignments: 10,
+            exonic_reads: 5,
+            intronic_reads: 3,
+            ..Default::default()
+        };
 
         let c2 = QualimapCounters {
             primary_alignments: 20,

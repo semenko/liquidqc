@@ -151,8 +151,10 @@ pub struct BamStatResult {
     /// GC content step-function for last fragments, 200 bins (samtools ngc=200).
     pub gcl: [u64; 200],
     /// Per-cycle base composition for first fragments: [A, C, G, T, N, Other] per cycle.
+    #[allow(dead_code)]
     pub fbc: Vec<[u64; 6]>,
     /// Per-cycle base composition for last fragments: [A, C, G, T, N, Other] per cycle.
+    #[allow(dead_code)]
     pub lbc: Vec<[u64; 6]>,
     /// Per-cycle base composition (read-oriented) for first fragments.
     pub fbc_ro: Vec<[u64; 6]>,
