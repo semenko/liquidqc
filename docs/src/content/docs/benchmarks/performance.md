@@ -17,9 +17,12 @@ counts for your hardware.
 - **Leave all tools enabled** unless you have a specific reason not to.
   The full run completes in ~10 minutes for a large BAM -- far faster than
   running the equivalent traditional tools separately.
-- **Disabling TIN** provides the single largest speedup (roughly halves
-  runtime). Disabling read_duplication alongside TIN brings it under
-  5 minutes.
+- **Disabling TIN** provides the single largest speedup. TIN's large
+  per-transcript data structures (~1 GB+) cause cache thrashing that slows
+  every other tool in the pipeline. Removing it alone roughly halves the
+  total runtime.
+- **Disabling TIN + read_duplication** together brings the runtime under
+  2.5 minutes.
 - **Thread count:** `-t 8` to `-t 25` is the productive range for human
   data. Beyond the number of chromosomes, extra threads are mostly idle.
   For small genomes, the ceiling is lower (see [CPU count table](#effect-of-cpu-count) below).
@@ -70,68 +73,78 @@ the single-tool run and the no-tools baseline.
 | junction_saturation   |      35s |            1s |
 | dupradar              |      35s |            1s |
 | featurecounts         |      33s |           ~0s |
-| **All tools enabled** | **631s** |               |
+| **All tools enabled** | **637s** |               |
 
-> **Why don't the marginal costs add up to 631s?**
+> **Why don't the marginal costs add up to 637s?**
 > Two reasons. First, the shared BAM decode baseline (34s) is paid once
 > regardless of how many tools are active. Second -- and more importantly --
-> **TIN** runs as a separate post-counting phase that performs random-access
-> BAM lookups for every transcript. When TIN is enabled, this additional
-> pass dominates the total runtime. The single-tool cost of TIN appears low
-> (5s marginal) because the TIN-only run processes far fewer transcripts
-> than a full run where all counting tools feed transcript-level data into
-> the TIN phase.
+> **TIN** has per-transcript data structures (`coverage` arrays and
+> `unique_starts` hash sets for ~230K transcripts) that consume over 1 GB
+> of RAM. When combined with the data structures of all other tools, the
+> aggregate working set exceeds CPU cache capacity, causing **cache
+> thrashing** that slows the per-read processing of _every_ tool. TIN's
+> apparent marginal cost when run alone (5s) is low because TIN's data
+> structures alone still fit reasonably in cache. But in a full run with all
+> tools active, adding TIN pushes the combined working set over a
+> performance cliff.
 
 ## All tools enabled
 
-With every tool active, the total runtime is **631 seconds** (10 minutes 31 seconds).
+With every tool active, the total runtime is **637 seconds** (10 minutes 37 seconds)
+using **4.5 GB peak RSS**.
 
-## Cumulative removal: stripping tools from slowest to fastest
+## Cumulative removal: stripping tools by impact
 
-Starting from a full run with all 15 tools, tools were removed one at a time
-in order of their individual marginal cost (most expensive first). This shows
-how the total runtime decreases as tools are stripped away.
+Starting from a full run with all 15 tools, tools were removed one at a time.
+TIN and read_duplication are removed first (the two highest-impact tools),
+then remaining tools in order of marginal cost. Both wall-clock time and
+peak memory (RSS) are shown.
 
-| Step | Tool removed          | Tools remaining | Run time |     Delta |
-| ---: | --------------------- | --------------: | -------: | --------: |
-|    0 | _(none -- all tools)_ |              15 |     631s |           |
-|    1 | read_duplication      |              14 |     390s |     -241s |
-|    2 | infer_experiment      |              13 |     359s |      -31s |
-|    3 | bam_stat              |              12 |     358s |       -1s |
-|    4 | samtools_stats        |              11 |     356s |       -2s |
-|    5 | idxstats              |              10 |     358s |       +2s |
-|    6 | flagstat              |               9 |     340s |      -18s |
-|    7 | qualimap              |               8 |     314s |      -26s |
-|    8 | junction_annotation   |               7 |     300s |      -14s |
-|    9 | inner_distance        |               6 |     284s |      -16s |
-|   10 | preseq                |               5 |     276s |       -8s |
-|   11 | tin                   |               4 |      36s | **-240s** |
-|   12 | read_distribution     |               3 |      36s |        0s |
-|   13 | junction_saturation   |               2 |      34s |       -2s |
-|   14 | dupradar              |               1 |      34s |        0s |
-|   15 | featurecounts         |               0 |      34s |        0s |
+| Step | Tool removed          | Tools remaining | Run time | Peak RSS |     Delta |
+| ---: | --------------------- | --------------: | -------: | -------: | --------: |
+|    0 | _(none -- all tools)_ |              15 |     637s |   4.5 GB |           |
+|    1 | tin                   |              14 |     397s |   4.5 GB | **-240s** |
+|    2 | read_duplication      |              13 |     142s |   2.7 GB | **-256s** |
+|    3 | infer_experiment      |              12 |     117s |   2.7 GB |      -25s |
+|    4 | bam_stat              |              11 |     119s |   2.2 GB |       +2s |
+|    5 | samtools_stats        |              10 |     121s |   1.8 GB |       +2s |
+|    6 | flagstat              |               9 |     123s |   2.4 GB |       +3s |
+|    7 | idxstats              |               8 |      99s |   2.2 GB |      -25s |
+|    8 | qualimap              |               7 |      73s |   2.0 GB |      -25s |
+|    9 | junction_annotation   |               6 |      62s |   1.8 GB |      -11s |
+|   10 | inner_distance        |               5 |      49s |   1.4 GB |      -13s |
+|   11 | preseq                |               4 |      40s |   1.0 GB |       -9s |
+|   12 | read_distribution     |               3 |      39s |   1.0 GB |        0s |
+|   13 | junction_saturation   |               2 |      36s |   0.7 GB |       -3s |
+|   14 | dupradar              |               1 |      37s |   0.7 GB |        0s |
+|   15 | featurecounts         |               0 |      35s |   0.6 GB |       -1s |
 
 ### Key observations
 
-**TIN dominates the runtime.** The single largest drop occurs at step 11 when
-TIN is removed -- the total plummets from 276s to 36s (a **240-second reduction**).
-TIN runs as a separate post-counting pass that performs random-access BAM lookups
-for every transcript. Even though its marginal cost when run alone appears small
-(5s), in the context of a full run it becomes the dominant bottleneck because
-the counting phase feeds it data for all transcripts.
+**TIN's impact is driven by memory pressure, not computation.** When TIN
+is the only tool enabled, it adds just 5 seconds of marginal compute time.
+But in a full run, removing TIN saves 240 seconds. This paradox is explained
+by **cache thrashing**: TIN allocates ~1 GB of data structures (per-transcript
+hash sets and coverage arrays for ~230K transcripts in GENCODE v46). When
+combined with the working sets of all other tools, the aggregate memory
+exceeds CPU L3 cache, causing every tool's per-read processing to slow down
+from cache misses. Removing TIN shrinks the working set enough for the
+remaining tools to run efficiently.
 
 **read_duplication is the most expensive counting-phase tool.** Removing it
-saves 241s (step 1), cutting the runtime from 631s to 390s. This tool maintains
-per-read sequence hashing for duplication detection, which is computationally
-intensive.
+saves 256s (step 2), cutting the runtime from 397s to 142s. This tool
+maintains per-read sequence hashing (SipHash over every base) for
+duplication detection, which is both computationally intensive and
+memory-hungry.
 
 **The "samtools" group (bam_stat, flagstat, idxstats, samtools_stats) is cheap.**
 These tools add minimal overhead individually because they compute simple
 per-read counters with no complex data structures.
 
-**Post-TIN removal, the baseline overhead dominates.** Once TIN and the expensive
-counting tools are stripped away, the runtime converges to the ~34s BAM decode
-baseline.
+**Memory scales with enabled tools.** Peak RSS drops from 4.5 GB (all tools)
+to 0.6 GB (no tools). The largest single memory consumers are TIN
+(~1 GB for per-transcript hash sets and sampled-position indices) and
+read_duplication (~1 GB for sequence hash tables).
 
 ## Disabling tools
 
@@ -183,12 +196,12 @@ falls back to a single counting thread.
 
 | Organism                  | Primary sequences | Useful threads (single BAM) |
 | ------------------------- | ----------------: | --------------------------: |
-| Human (GRCh38)            |                25 |                       ~25   |
-| Mouse (GRCm39)            |                22 |                       ~22   |
-| Zebrafish (GRCz11)        |                26 |                       ~26   |
-| _Drosophila_ (BDGP6)     |                 7 |                        ~7   |
-| _C. elegans_ (WBcel235)   |                 7 |                        ~7   |
-| _S. cerevisiae_ (R64-1-1) |                17 |                       ~17   |
+| Human (GRCh38)            |                25 |                         ~25 |
+| Mouse (GRCm39)            |                22 |                         ~22 |
+| Zebrafish (GRCz11)        |                26 |                         ~26 |
+| _Drosophila_ (BDGP6)      |                 7 |                          ~7 |
+| _C. elegans_ (WBcel235)   |                 7 |                          ~7 |
+| _S. cerevisiae_ (R64-1-1) |                17 |                         ~17 |
 
 ### CPU scaling benchmarks
 
@@ -205,5 +218,3 @@ _Benchmarks in progress -- this table will be updated with timing data._
 |      16 |          |                     |
 |      25 |          |                     |
 |      32 |          |                     |
-
-
