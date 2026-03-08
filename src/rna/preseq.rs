@@ -1415,7 +1415,7 @@ mod tests {
 
         // Manually insert a dangling mate
         accum.dangling_mates.insert(
-            b"read1".to_vec(),
+            1u64,
             MateInfo {
                 tid: 0,
                 start: 100,
@@ -1437,7 +1437,7 @@ mod tests {
 
         // Mate 1 on chr0 (in accum1's dangling)
         accum1.dangling_mates.insert(
-            b"read1".to_vec(),
+            1u64,
             MateInfo {
                 tid: 0,
                 start: 100,
@@ -1447,7 +1447,7 @@ mod tests {
 
         // Mate 2 on chr1 (in accum2's dangling) — different chromosome
         accum2.dangling_mates.insert(
-            b"read1".to_vec(),
+            1u64,
             MateInfo {
                 tid: 1,
                 start: 300,
@@ -1469,7 +1469,7 @@ mod tests {
 
         // Mate 1 on chr0
         accum1.dangling_mates.insert(
-            b"read1".to_vec(),
+            1u64,
             MateInfo {
                 tid: 0,
                 start: 100,
@@ -1479,7 +1479,7 @@ mod tests {
 
         // Mate 2 also on chr0, nearby
         accum2.dangling_mates.insert(
-            b"read1".to_vec(),
+            1u64,
             MateInfo {
                 tid: 0,
                 start: 150,
@@ -1501,7 +1501,7 @@ mod tests {
 
         // Mate 1 on chr0
         accum1.dangling_mates.insert(
-            b"read1".to_vec(),
+            1u64,
             MateInfo {
                 tid: 0,
                 start: 0,
@@ -1511,7 +1511,7 @@ mod tests {
 
         // Mate 2 also on chr0 but far away (merged len > 5000)
         accum2.dangling_mates.insert(
-            b"read1".to_vec(),
+            1u64,
             MateInfo {
                 tid: 0,
                 start: 6000,
