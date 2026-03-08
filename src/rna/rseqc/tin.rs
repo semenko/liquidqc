@@ -399,6 +399,17 @@ pub struct TinAccum {
     pub min_cov: u32,
     /// Reusable scratch buffer for aligned blocks, avoids per-read allocation.
     blocks_buf: Vec<(u64, u64)>,
+    /// Last chromosome seen -- used to detect chromosome transitions and
+    /// reset the cursors below.
+    cursor_chrom: String,
+    /// Cursor into `chrom_spans` for the current chromosome. Since the BAM
+    /// is coordinate-sorted, each read's span_end is >= the previous read's,
+    /// so we only need to search forward from here.
+    cursor_span: usize,
+    /// Cursor into `chrom_positions` for the current chromosome. The leftmost
+    /// aligned-block start of each read is >= the previous read's, so we
+    /// search forward from here.
+    cursor_pos: usize,
 }
 
 impl TinAccum {
@@ -422,6 +433,9 @@ impl TinAccum {
             mapq_cut,
             min_cov,
             blocks_buf: Vec::with_capacity(8),
+            cursor_chrom: String::new(),
+            cursor_span: 0,
+            cursor_pos: 0,
         }
     }
 
@@ -464,14 +478,25 @@ impl TinAccum {
             None => return,
         };
 
+        // Reset cursors on chromosome transition.
+        if chrom_upper != self.cursor_chrom {
+            self.cursor_chrom.clear();
+            self.cursor_chrom.push_str(chrom_upper);
+            self.cursor_span = 0;
+            self.cursor_pos = 0;
+        }
+
         // Find overlapping transcripts via read start.
         // chrom_spans is sorted by tx_start.  We need all transcripts
         // where tx_start <= read_start < tx_end.
         //
-        // 1. partition_point finds the first span where tx_start > read_start.
-        //    All spans before that point have tx_start <= read_start.
-        // 2. Scan those candidates and check tx_end > read_start.
-        let span_end = chrom_spans.partition_point(|s| s.0 <= read_start);
+        // Since reads are coordinate-sorted, read_start is monotonically
+        // non-decreasing.  The partition_point (first span where
+        // tx_start > read_start) can only move forward, so we search
+        // from cursor_span instead of 0.
+        let span_end = self.cursor_span
+            + chrom_spans[self.cursor_span..].partition_point(|s| s.0 <= read_start);
+        self.cursor_span = span_end;
 
         for &(_tx_start, tx_end, tx_idx) in &chrom_spans[..span_end] {
             // _tx_start <= read_start is guaranteed by the partition_point
@@ -494,9 +519,23 @@ impl TinAccum {
         // Sampled positions are 1-based; aligned blocks are 0-based half-open
         // [block_start, block_end). A 1-based position P is covered iff
         // P-1 >= block_start && P-1 < block_end, i.e., P > block_start && P <= block_end.
+        //
+        // Since reads are coordinate-sorted, block_start values are
+        // monotonically non-decreasing across reads.  We advance cursor_pos
+        // forward rather than binary-searching from scratch each time.
+        let mut first_block = true;
         for &(block_start, block_end) in blocks.iter() {
-            // Binary search for first 1-based position > block_start
-            let pos_start = chrom_positions.partition_point(|p| p.0 <= block_start);
+            // Advance cursor to first position > block_start.
+            // cursor_pos only moves forward across reads on the same chromosome.
+            let base = self.cursor_pos;
+            let pos_start = base + chrom_positions[base..].partition_point(|p| p.0 <= block_start);
+
+            // Update cursor from the first aligned block (leftmost), since
+            // the next read's first block_start >= this read's first block_start.
+            if first_block {
+                self.cursor_pos = pos_start;
+                first_block = false;
+            }
 
             for &(pos, tx_idx, slot_idx) in &chrom_positions[pos_start..] {
                 if pos > block_end {
