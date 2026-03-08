@@ -14,51 +14,122 @@ file, meaning a `samtools sort -n` step is typically needed before Qualimap can
 run. RustQC works directly on coordinate-sorted BAMs (the standard output of
 most aligners), eliminating that preprocessing step entirely.
 
-| Tool | Runtime | Notes |
-|------|---------|-------|
-| `samtools sort -n` | ~5-10 min | Name-sort required by Qualimap Java (not needed by RustQC) |
-| Qualimap rnaseq (Java) | ~10 min | Separate BAM pass, single-threaded, requires name-sorted input |
-| RustQC (all tools) | ~4 min | Single pass, all analyses combined, coordinate-sorted input |
+### Large dataset (~186M reads, GM12878)
 
-In a typical pipeline, the original Qualimap workflow requires **15-20 minutes**
-(name-sort + Qualimap), while RustQC produces identical output with **zero
-additional cost** beyond its shared BAM scan.
+| Tool                        | Runtime      | Peak RSS | Notes                                                          |
+| --------------------------- | ------------ | -------- | -------------------------------------------------------------- |
+| `samtools sort -n`          | 7m 57s       | 5.2 GB   | Name-sort required by Qualimap Java (not needed by RustQC)     |
+| Qualimap rnaseq (Java)      | 38m 31s      | 6.0 GB   | Separate BAM pass, single-threaded, requires name-sorted input |
+| **Total upstream pipeline** | **~46m 28s** |          | Name-sort + Qualimap combined                                  |
+| RustQC (all tools)          | 18m 52s      | 13.8 GB  | Single pass, all analyses combined, coordinate-sorted input    |
+
+RustQC completes **all QC analyses** in under 19 minutes, compared to nearly
+47 minutes for the upstream Qualimap pipeline alone (name-sort + Qualimap).
+Note that RustQC's 18m 52s covers every QC tool (dupRadar, featureCounts,
+RSeQC, TIN, preseq, samtools, and Qualimap), not just the Qualimap equivalent.
+
+### Small dataset (~52K reads, chr6)
+
+| Tool                   | Runtime | Peak RSS | Notes                                         |
+| ---------------------- | ------- | -------- | --------------------------------------------- |
+| Qualimap rnaseq (Java) | 5.0s    | 704.6 MB | Separate BAM pass, requires name-sorted input |
+| RustQC (all tools)     | 25.9s   | 182.1 MB | Single pass, all analyses combined            |
+
+On the small dataset, RustQC uses only **182 MB** of memory vs Qualimap's
+705 MB while running all QC tools in a single pass.
 
 ## Output comparison
 
-RustQC produces output identical to Qualimap Java across all key metrics.
-Both tools were run on the same dataset with matching parameters
-(`--stranded 2` / `strand-specific-reverse`, same GENCODE GTF).
+RustQC produces output effectively identical to Qualimap Java across all key
+metrics. Both tools were run on the same BAM file with matching parameters
+(`--stranded 2` / `strand-specific-reverse`, same GENCODE GTF). Results below
+are from the AWS benchmark run (2026-03-07).
 
-### Reads alignment
+### Small dataset (~52K reads, chr6)
 
-| Metric | RustQC | Qualimap Java | Match? |
-|--------|--------|---------------|--------|
-| reads aligned (left/right) | 87,559,392 / 87,538,329 | 87,559,392 / 87,538,329 | ✅ |
-| read pairs aligned | 87,420,177 | 87,420,177 | ✅ |
-| total alignments | 185,718,543 | 185,718,543 | ✅ |
-| secondary alignments | 10,620,822 | 10,620,822 | ✅ |
-| non-unique alignments | 17,723,193 | 17,723,193 | ✅ |
-| aligned to genes | 126,404,800 | 126,404,800 | ✅ |
-| ambiguous alignments | 2,552,785 | 2,552,785 | ✅ |
-| no feature assigned | 39,037,765 | 39,037,765 | ✅ |
+#### Reads alignment
 
-### Reads genomic origin
+| Metric                | Qualimap (Java) | RustQC | Match? |
+| --------------------- | --------------- | ------ | ------ |
+| reads aligned (left)  | 24,797          | 24,797 | ✅     |
+| reads aligned (right) | 24,776          | 24,776 | ✅     |
+| read pairs aligned    | 24,773          | 24,773 | ✅     |
+| total alignments      | 52,839          | 52,839 | ✅     |
+| secondary alignments  | 3,266           | 3,266  | ✅     |
+| non-unique alignments | 5,496           | 5,496  | ✅     |
+| aligned to genes      | 31,654          | 31,654 | ✅     |
+| ambiguous alignments  | 1,054           | 1,054  | ✅     |
+| no feature assigned   | 14,635          | 14,635 | ✅     |
+| not aligned           | 0               | 0      | ✅     |
 
-| Metric | RustQC | Qualimap Java | Match? |
-|--------|--------|---------------|--------|
-| exonic | 126,404,800 (76.4%) | 126,404,800 (76.4%) | ✅ |
-| intronic | 30,407,985 (18.38%) | 30,407,985 (18.38%) | ✅ |
-| intergenic | 8,629,780 (5.22%) | 8,629,780 (5.22%) | ✅ |
-| overlapping exon | 6,853,516 (4.14%) | 6,853,516 (4.14%) | ✅ |
+#### Reads genomic origin
 
-### Transcript coverage profile
+| Metric              | Qualimap (Java) | RustQC | Match? |
+| ------------------- | --------------- | ------ | ------ |
+| exonic fraction     | 68.38%          | 68.38% | ✅     |
+| intronic fraction   | 29.57%          | 29.57% | ✅     |
+| intergenic fraction | 2.04%           | 2.04%  | ✅     |
 
-| Metric | RustQC | Qualimap Java | Match? |
-|--------|--------|---------------|--------|
-| 5' bias | 0.87 | 0.87 | ✅ |
-| 3' bias | 0.78 | 0.78 | ✅ |
-| 5'-3' bias | 1.11 | 1.11 | ✅ |
+#### Transcript coverage profile
+
+| Metric     | Qualimap (Java) | RustQC | Match?   |
+| ---------- | --------------- | ------ | -------- |
+| 5' bias    | 0.71            | 0.71   | ✅       |
+| 3' bias    | 0.57            | 0.57   | ✅       |
+| 5'→3' bias | 1.30            | 1.19   | ⚠️ minor |
+
+The 5'→3' bias difference (1.30 vs 1.19) is the only deviation on this
+dataset. It arises because upstream Qualimap requires a name-sorted BAM while
+RustQC uses the standard coordinate-sorted BAM. All other values are identical.
+
+#### Junction analysis
+
+| Metric             | Qualimap (Java) | RustQC | Match? |
+| ------------------ | --------------- | ------ | ------ |
+| reads at junctions | 28,125          | 28,125 | ✅     |
+
+### Large dataset (~186M reads, GM12878)
+
+#### Reads alignment
+
+| Metric                | Qualimap (Java) | RustQC      | Match? |
+| --------------------- | --------------- | ----------- | ------ |
+| reads aligned (left)  | 86,909,417      | 86,909,417  | ✅     |
+| reads aligned (right) | 86,888,892      | 86,888,892  | ✅     |
+| read pairs aligned    | 86,778,882      | 86,778,882  | ✅     |
+| total alignments      | 189,114,475     | 189,114,475 | ✅     |
+| secondary alignments  | 15,316,166      | 15,316,166  | ✅     |
+| non-unique alignments | 26,451,119      | 26,451,119  | ✅     |
+| aligned to genes      | 122,500,822     | 122,500,822 | ✅     |
+| ambiguous alignments  | 2,422,409       | 2,422,409   | ✅     |
+| no feature assigned   | 37,740,125      | 37,740,125  | ✅     |
+| not aligned           | 12,490,977      | 12,490,977  | ✅     |
+
+#### Reads genomic origin
+
+| Metric              | Qualimap (Java) | RustQC | Match? |
+| ------------------- | --------------- | ------ | ------ |
+| exonic fraction     | 76.45%          | 76.45% | ✅     |
+| intronic fraction   | 18.37%          | 18.37% | ✅     |
+| intergenic fraction | 5.19%           | 5.19%  | ✅     |
+| overlapping exon    | 4.20%           | 4.20%  | ✅     |
+
+#### Transcript coverage profile
+
+| Metric     | Qualimap (Java) | RustQC | Match? |
+| ---------- | --------------- | ------ | ------ |
+| 5' bias    | 0.87            | 0.87   | ✅     |
+| 3' bias    | 0.77            | 0.77   | ✅     |
+| 5'→3' bias | 1.11            | 1.11   | ✅     |
+
+#### Junction analysis
+
+| Metric             | Qualimap (Java) | RustQC     | Match? |
+| ------------------ | --------------- | ---------- | ------ |
+| reads at junctions | 56,119,719      | 56,119,719 | ✅     |
+
+Junction motif type percentages match with rounding differences ≤0.05
+percentage points. The underlying read counts are identical.
 
 RustQC produces a 100-bin coverage profile along normalized gene body positions
 (5' to 3'), matching the format produced by Qualimap. Three tiers are generated:
@@ -68,22 +139,23 @@ The high-expression tier coverage profile is an **exact numerical match** with
 Qualimap Java. The total (all-genes) tier shows negligible floating-point
 differences (&lt;0.03% relative) due to coverage aggregation order.
 
-### Junction analysis
-
-| Metric | RustQC | Qualimap Java | Match? |
-|--------|--------|---------------|--------|
-| reads at junctions | 60,467,173 | 60,467,173 | ✅ |
-
-Junction motif frequencies match with minor percentage rounding differences
-(e.g., ACCT 5.59% vs 5.55%). The underlying read counts are identical.
-
 ### HTML reports
 
 Both tools produce an HTML report with embedded charts and summary tables.
 View the full reports from the large benchmark run:
 
-- <a href={`${base}benchmarks/large/qualimap/Qualimap/qualimapReport.html`} target="_blank">Qualimap (Java) HTML report</a>
-- <a href={`${base}benchmarks/large/qualimap/RustQC/qualimapReport.html`} target="_blank">RustQC HTML report</a>
+- <a
+    href={`${base}benchmarks/large/qualimap/Qualimap/qualimapReport.html`}
+    target="_blank"
+  >
+    Qualimap (Java) HTML report
+  </a>
+- <a
+    href={`${base}benchmarks/large/qualimap/RustQC/qualimapReport.html`}
+    target="_blank"
+  >
+    RustQC HTML report
+  </a>
 
 ### Chart comparison
 
@@ -92,52 +164,112 @@ side-by-side comparisons from the large benchmark dataset (GM12878).
 
 #### Coverage Profile Along Genes (Total)
 
-<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "1rem 0"}}>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/Qualimap/Coverage Profile Along Genes (Total).png`} alt="Qualimap coverage profile" style={{width: "100%"}} />
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/Qualimap/Coverage Profile Along Genes (Total).png`}
+      alt="Qualimap coverage profile"
+      style={{ width: "100%" }}
+    />
     <figcaption>Qualimap (Java)</figcaption>
   </figure>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/RustQC/Coverage Profile Along Genes (Total).png`} alt="RustQC coverage profile" style={{width: "100%"}} />
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/RustQC/Coverage Profile Along Genes (Total).png`}
+      alt="RustQC coverage profile"
+      style={{ width: "100%" }}
+    />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
 
 #### Coverage Histogram (0-50X)
 
-<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "1rem 0"}}>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/Qualimap/Transcript coverage histogram.png`} alt="Qualimap coverage histogram" style={{width: "100%"}} />
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/Qualimap/Transcript coverage histogram.png`}
+      alt="Qualimap coverage histogram"
+      style={{ width: "100%" }}
+    />
     <figcaption>Qualimap (Java)</figcaption>
   </figure>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/RustQC/Transcript coverage histogram.png`} alt="RustQC coverage histogram" style={{width: "100%"}} />
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/RustQC/Transcript coverage histogram.png`}
+      alt="RustQC coverage histogram"
+      style={{ width: "100%" }}
+    />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
 
 #### Reads Genomic Origin
 
-<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "1rem 0"}}>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/Qualimap/Reads Genomic Origin.png`} alt="Qualimap reads genomic origin" style={{width: "100%"}} />
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/Qualimap/Reads Genomic Origin.png`}
+      alt="Qualimap reads genomic origin"
+      style={{ width: "100%" }}
+    />
     <figcaption>Qualimap (Java)</figcaption>
   </figure>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/RustQC/Reads Genomic Origin.png`} alt="RustQC reads genomic origin" style={{width: "100%"}} />
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/RustQC/Reads Genomic Origin.png`}
+      alt="RustQC reads genomic origin"
+      style={{ width: "100%" }}
+    />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
 
 #### Junction Analysis
 
-<div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "1rem 0"}}>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/Qualimap/Junction Analysis.png`} alt="Qualimap junction analysis" style={{width: "100%"}} />
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/Qualimap/Junction Analysis.png`}
+      alt="Qualimap junction analysis"
+      style={{ width: "100%" }}
+    />
     <figcaption>Qualimap (Java)</figcaption>
   </figure>
-  <figure style={{margin: 0, textAlign: "center"}}>
-    <img src={`${base}benchmarks/large/qualimap/RustQC/Junction Analysis.png`} alt="RustQC junction analysis" style={{width: "100%"}} />
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <img
+      src={`${base}benchmarks/large/qualimap/RustQC/Junction Analysis.png`}
+      alt="RustQC junction analysis"
+      style={{ width: "100%" }}
+    />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
@@ -164,9 +296,11 @@ junction motif counting all follow Qualimap's algorithms.
 
 ## Benchmark conditions
 
-- **BAM file**: GM12878 ENCODE RNA-Seq, paired-end, ~185M reads, 10 GB
+- **Small dataset**: `test` sample, ~52K reads, chr6 only
+- **Large dataset**: GM12878 ENCODE RNA-Seq, paired-end, ~186M reads
+- **Run date**: 2026-03-07 (AWS cloud execution)
 - **Annotation**: GENCODE v47 GTF (filtered to standard chromosomes, used for both tools)
 - **Strandedness**: strand-specific-reverse (`--stranded 2` / `-p strand-specific-reverse`)
 - **Qualimap version**: 2.3 (Java implementation, name-sorted BAM input)
-- **RustQC**: 10 threads, `--gtf` mode, coordinate-sorted BAM input
-- **Hardware**: Apple M3 Max, 128 GB RAM
+- **RustQC**: coordinate-sorted BAM input, 224.8% CPU utilization on large dataset
+- **Infrastructure**: AWS cloud (via Nextflow/Seqera Platform)

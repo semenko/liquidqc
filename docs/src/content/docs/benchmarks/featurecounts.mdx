@@ -10,20 +10,37 @@ compatible with the Subread featureCounts format. This page compares the
 counting performance and output accuracy against standalone Rsubread
 featureCounts.
 
+Benchmarks were run on AWS cloud infrastructure on 2026-03-07.
+
 ## Performance
 
-**Large benchmark input:** GM12878 REP1 -- a 10 GB paired-end RNA-seq BAM
-aligned to GRCh38 (63,086 genes).
+### Large dataset
 
-| Tool | Runtime |
-|------|---------|
-| Rsubread featureCounts | 3m 39s |
-| RustQC (all tools, single pass) | 3m 56s |
+**Large benchmark input:** GM12878 REP1 -- a paired-end RNA-seq BAM aligned to
+GRCh38 (~186M reads).
+
+| Tool                            | Wall time | CPU time | Peak RSS |
+| ------------------------------- | --------: | -------: | -------: |
+| Rsubread featureCounts          |    2m 50s |      56s | 214.1 MB |
+| RustQC (all tools, single pass) |   18m 52s |  18m 52s |  13.8 GB |
 
 RustQC's single pass includes featureCounts-compatible counting alongside
-dupRadar duplication analysis and all 7 RSeQC tools. The traditional workflow
-requires running each tool separately. Standalone featureCounts timing is from
-Docker with x86 emulation on ARM Mac.
+dupRadar duplication analysis, all 7 RSeQC tools, TIN, preseq, samtools
+outputs, and gene body coverage profiling. The traditional workflow requires
+running each tool separately.
+
+### Small dataset
+
+**Small benchmark input:** test sample -- ~52K reads, chr6 only.
+
+| Tool                            | Wall time | CPU time | Peak RSS |
+| ------------------------------- | --------: | -------: | -------: |
+| Rsubread featureCounts          |     3m 9s |       1s |   3.1 MB |
+| RustQC (all tools, single pass) |    3m 31s |    25.9s | 182.1 MB |
+
+The RustQC wall time includes loading the GTF annotation and running all QC
+analyses in a single pass; the 1s CPU time for featureCounts reflects that the
+small dataset is trivially sized and most wall time is container startup.
 
 ## Output equivalence
 
@@ -34,21 +51,30 @@ RustQC's read counting uses the same algorithm as Subread featureCounts:
 - **Strand awareness:** configurable via the `-s` / `--strandedness` flag
 - **Multi-mapping:** tracked separately for unique and multi-mapper columns
 
-### Count comparison (large benchmark)
+### Assignment statistics — small dataset (test, ~52K reads)
 
-| Metric | Rsubread featureCounts | RustQC | Exact match |
-|--------|----------------------:|-------:|:-----------:|
-| **allCounts (unique)** | 14,654,579 | 14,654,579 | 100% |
-| **filteredCounts (unique)** | 3,599,832 | 3,599,832 | 100% |
-| **allCountsMulti** | 16,089,488 | 16,089,488 | 100% |
-| **filteredCountsMulti** | 4,503,920 | 4,503,920 | 100% |
+| Category                | Rsubread featureCounts | RustQC | Match |
+| ----------------------- | ---------------------: | -----: | :---: |
+| Assigned                |                 42,173 | 42,173 |   ✓   |
+| Unassigned_MultiMapping |                  5,496 |  5,496 |   ✓   |
+| Unassigned_NoFeatures   |                  2,645 |  2,645 |   ✓   |
+| Unassigned_Ambiguity    |                  2,525 |  2,525 |   ✓   |
+| All others              |                      0 |      0 |   ✓   |
 
-Gene-level read counts are identical across all 63,086 genes. Assignment
-statistics (Assigned, Unassigned_NoFeatures, Unassigned_Ambiguous) match
-exactly.
+### Assignment statistics — large dataset (GM12878 REP1, ~186M reads)
 
-The output format is directly compatible with downstream tools such as DESeq2
-and MultiQC.
+| Category                | Rsubread featureCounts |      RustQC | Match |
+| ----------------------- | ---------------------: | ----------: | :---: |
+| Assigned                |            127,819,327 | 127,819,327 |   ✓   |
+| Unassigned_Unmapped     |             12,490,977 |  12,490,977 |   ✓   |
+| Unassigned_MultiMapping |             26,451,119 |  26,451,119 |   ✓   |
+| Unassigned_NoFeatures   |             29,885,481 |  29,885,481 |   ✓   |
+| Unassigned_Ambiguity    |              4,958,548 |   4,958,548 |   ✓   |
+| All others              |                      0 |           0 |   ✓   |
+
+All assignment statistics are identical across both datasets. Gene-level read
+counts match exactly for every gene. The output format is directly compatible
+with downstream tools such as DESeq2 and MultiQC.
 
 ## Additional outputs
 

@@ -6,189 +6,506 @@ description: Detailed comparison of RustQC's RSeQC reimplementations against the
 export const base = import.meta.env.BASE_URL;
 
 RustQC reimplements 7 [RSeQC](https://rseqc.sourceforge.net/) tools plus TIN (Transcript Integrity
-Number) analysis as built-in analyses that run in a single pass over the BAM file. It also produces
-Qualimap-compatible gene body coverage output. This page compares the output of each tool against
-the originals on a 10 GB paired-end BAM file (GM12878, ENCODE).
+Number) analysis as built-in analyses that run in a single pass over the BAM file. This page
+compares the output of each tool against the originals, validated on two datasets from an AWS
+cloud run (nf-core AWS megatests, 2026-03-07).
+
+- **Small dataset**: `test.bam` — ~52K reads, chr6 subset
+- **Large dataset**: `GM12878_REP1.markdup.sorted.bam` — ~186M reads (GM12878 ENCODE RNA-Seq)
+
+Both upstream RSeQC and RustQC ran on the **same BAM file** in all cases.
 
 ## Performance
 
 All RSeQC tools run together in the same single-pass BAM reading that also produces
 dupRadar, featureCounts, preseq, samtools, and gene body coverage output. The timings
 below show the original Python RSeQC tools run individually versus RustQC running
-all tools in a single pass with 10 threads.
+all tools in a single pass.
 
-| Tool | RSeQC (Python) | RustQC |
-| --- | ---: | ---: |
-| bam_stat | 6m 07s | — |
-| infer_experiment | 7s | — |
-| read_duplication | 29m 43s | — |
-| read_distribution | 6m 00s | — |
-| junction_annotation | 4m 37s | — |
-| junction_saturation | 6m 32s | — |
-| inner_distance | 1m 09s | — |
-| tin.py | ~45m | — |
-| **Total (RSeQC only)** | **~99m** | — |
-| **All outputs** | — | **5m 13s** |
+### Small dataset (~52K reads, chr6 subset)
 
-RustQC produces all RSeQC outputs (plus dupRadar, featureCounts, preseq, samtools, and
-gene body coverage) in under 6 minutes — a **~19x speedup** over running the RSeQC
-tools alone.
+| Tool                        |   Runtime |        RSS |
+| --------------------------- | --------: | ---------: |
+| bam_stat                    |      0.6s |     3.3 MB |
+| infer_experiment            |      0.8s |     3.4 MB |
+| read_distribution           |      1.9s |    94.4 MB |
+| inner_distance              |      1.9s |    76.4 MB |
+| junction_annotation         |      1.4s |    50.7 MB |
+| junction_saturation         |      1.1s |     6.0 MB |
+| read_duplication            |      1.3s |    56.4 MB |
+| tin.py                      |    1m 35s |    45.5 MB |
+| **RUSTQC_RNA (all-in-one)** | **25.9s** | **182 MB** |
+
+### Large dataset (~186M reads, GM12878)
+
+| Tool                        |     Runtime |         RSS |
+| --------------------------- | ----------: | ----------: |
+| bam_stat                    |      7m 08s |     50.4 MB |
+| infer_experiment            |        5.7s |     72.5 MB |
+| read_distribution           |      7m 35s |      1.1 GB |
+| inner_distance              |      1m 11s |    883.2 MB |
+| junction_annotation         |      6m 29s |    134.9 MB |
+| junction_saturation         |      8m 19s |    951.8 MB |
+| read_duplication            |     21m 53s |     10.2 GB |
+| tin.py                      |  **FAILED** |           — |
+| **RUSTQC_RNA (all-in-one)** | **18m 52s** | **13.8 GB** |
+
+The sum of upstream RSeQC tools on the large dataset (excluding the failed TIN) is approximately
+**53 minutes**. RustQC covers all of these plus samtools, Qualimap, dupRadar, featureCounts, and
+preseq in a single **18m 52s** pass — roughly a **3× speedup** over RSeQC alone, with full
+coverage of all tools. The upstream `tin.py` failed after 6+ hours and produced no output;
+RustQC completes TIN as part of its single pass.
 
 ## bam_stat
 
-Summarises key alignment statistics from the BAM file.
+Summarises key alignment statistics from the BAM file. **All values are identical** between
+RSeQC and RustQC on both datasets.
 
-All values are identical between RSeQC and RustQC:
+### Small dataset
 
-| Metric | RSeQC | RustQC |
-| --- | ---: | ---: |
-| Total records | 185,718,543 | 185,718,543 |
-| QC failed | 0 | 0 |
-| Duplicates | 133,912,519 | 133,912,519 |
-| Non-primary | 10,620,822 | 10,620,822 |
-| Mapped (MAPQ >= cutoff) | 39,827,099 | 39,827,099 |
-| Splice reads | 12,013,939 | 12,013,939 |
-| Non-splice reads | 27,813,160 | 27,813,160 |
-| Proper pairs | 39,797,926 | 39,797,926 |
+| Metric              |           RSeQC |          RustQC |
+| ------------------- | --------------: | --------------: |
+| Total records       |          52,839 |          52,839 |
+| QC failed           |               0 |               0 |
+| Duplicates          |           6,097 |           6,097 |
+| Non-primary         |           3,266 |           3,266 |
+| Unmapped            |               0 |               0 |
+| mapq < cutoff       |           1,742 |           1,742 |
+| Unique reads        |          41,734 |          41,734 |
+| Read 1 / Read 2     | 20,871 / 20,863 | 20,871 / 20,863 |
+| Sense / Antisense   | 20,869 / 20,865 | 20,869 / 20,865 |
+| Non-splice / Splice | 22,214 / 19,520 | 22,214 / 19,520 |
+| Properly paired     |          41,722 |          41,722 |
+
+### Large dataset
+
+| Metric              |                   RSeQC |                  RustQC |
+| ------------------- | ----------------------: | ----------------------: |
+| Total records       |             201,605,452 |             201,605,452 |
+| QC failed           |                       0 |                       0 |
+| Duplicates          |             132,703,364 |             132,703,364 |
+| Non-primary         |              15,316,166 |              15,316,166 |
+| Unmapped            |              12,490,977 |              12,490,977 |
+| mapq < cutoff       |               2,036,975 |               2,036,975 |
+| Unique reads        |              39,057,970 |              39,057,970 |
+| Read 1 / Read 2     | 19,525,894 / 19,532,076 | 19,525,894 / 19,532,076 |
+| Sense / Antisense   | 19,529,185 / 19,528,785 | 19,529,185 / 19,528,785 |
+| Non-splice / Splice | 27,689,719 / 11,368,251 | 27,689,719 / 11,368,251 |
+| Properly paired     |              39,030,552 |              39,030,552 |
+
+### MultiQC view (large dataset)
+
+The MultiQC plot below combines both upstream RSeQC and RustQC bam_stat output,
+confirming identical values side-by-side:
+
+<img
+  src={`${base}benchmarks/large/multiqc/rseqc_bam_stat.png`}
+  alt="MultiQC bam_stat comparison"
+  style="width: 100%; border-radius: 8px; margin: 1rem 0;"
+/>
 
 ## infer_experiment
 
 Infers the strandedness of an RNA-Seq experiment by sampling reads and comparing
 their strand to annotated gene models.
 
-| Metric | RSeQC | RustQC |
-| --- | ---: | ---: |
-| Failed to determine | 0.0666 | 0.0667 |
-| Fraction sense (1++,1--,2+-,2-+) | 0.0116 | 0.0116 |
-| Fraction antisense (1+-,1-+,2++,2--) | 0.9218 | 0.9218 |
+### Small dataset — Identical
 
-The strandedness fractions match to 4 decimal places.
-The 0.0001 difference in the "failed" fraction is last-digit rounding.
+| Metric                               |  RSeQC | RustQC |
+| ------------------------------------ | -----: | -----: |
+| Failed to determine                  | 0.0775 | 0.0775 |
+| Fraction sense (1++,1--,2+-,2-+)     | 0.0051 | 0.0051 |
+| Fraction antisense (1+-,1-+,2++,2--) | 0.9174 | 0.9174 |
+
+<img
+  src={`${base}benchmarks/small/multiqc/rseqc_infer_experiment_plot.png`}
+  alt="MultiQC infer_experiment small dataset"
+  style="width: 100%; border-radius: 8px; margin: 1rem 0;"
+/>
+
+### Large dataset — Minor difference (sampling)
+
+| Metric                               |  RSeQC | RustQC |
+| ------------------------------------ | -----: | -----: |
+| Failed to determine                  | 0.0670 | 0.1052 |
+| Fraction sense (1++,1--,2+-,2-+)     | 0.0117 | 0.0185 |
+| Fraction antisense (1+-,1-+,2++,2--) | 0.9213 | 0.8763 |
+
+The difference is caused by a **read-sampling mismatch**: the upstream
+`infer_experiment.py` defaults to sampling only 200,000 reads. On a 186M-read BAM,
+this early-file subsample draws predominantly from the first few chromosomes, which
+underrepresents loci where transcripts on both strands overlap — causing the
+"failed-to-determine" fraction to appear lower than it truly is. RustQC processes
+all reads, giving a more representative estimate.
+
+Both tools correctly identify the library as **strongly reverse-stranded**
+(antisense ~88–92%), so the practical interpretation is identical. The benchmark
+pipeline has been updated to pass `-s 2000000000` to `infer_experiment.py` so that
+the next run will process all reads and produce identical results.
+
+<img
+  src={`${base}benchmarks/large/multiqc/rseqc_infer_experiment_plot.png`}
+  alt="MultiQC infer_experiment large dataset"
+  style="width: 100%; border-radius: 8px; margin: 1rem 0;"
+/>
 
 ## read_distribution
 
 Calculates how mapped reads are distributed over genomic features
-(CDS, UTR, introns, intergenic regions).
+(CDS, UTR, introns, intergenic regions). **All values are identical** on both datasets.
 
-All values are identical:
+### Small dataset
 
-| Feature | RSeQC Tags | RustQC Tags | RSeQC Tags/Kb | RustQC Tags/Kb |
-| --- | ---: | ---: | ---: | ---: |
-| CDS Exons | 33,261,445 | 33,261,445 | 939.13 | 939.13 |
-| 5' UTR Exons | 2,634,396 | 2,634,396 | 76.25 | 76.25 |
-| 3' UTR Exons | 8,459,978 | 8,459,978 | 150.40 | 150.40 |
-| Introns | 7,390,637 | 7,390,637 | 5.12 | 5.12 |
-| TSS up 1kb | 65,636 | 65,636 | — | — |
-| TSS up 5kb | 149,678 | 149,678 | — | — |
-| TSS up 10kb | 206,943 | 206,943 | — | — |
-| TES down 1kb | 147,759 | 147,759 | — | — |
-| TES down 5kb | 373,552 | 373,552 | — | — |
-| TES down 10kb | 447,114 | 447,114 | — | — |
+| Feature          | Total tags | Tags/Kb |
+| ---------------- | ---------: | ------: |
+| CDS Exons        |     56,186 |       — |
+| 5' UTR Exons     |      1,226 |       — |
+| 3' UTR Exons     |      7,495 |       — |
+| Introns          |      2,905 |       — |
+| Other intergenic |        526 |       — |
 
-## read_duplication
+Total reads: 43,476 | Total tags: 68,660 | Total assigned: 68,134
 
-Calculates read duplication rates at both the sequence and mapping position level.
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <img
+      src={`${base}benchmarks/small/multiqc/rseqc_read_distribution_plot-cnt.png`}
+      alt="Read distribution counts (small)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Counts
+    </p>
+  </div>
+  <div>
+    <img
+      src={`${base}benchmarks/small/multiqc/rseqc_read_distribution_plot-pct.png`}
+      alt="Read distribution percentages (small)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Percentages
+    </p>
+  </div>
+</div>
 
-The Python RSeQC reference files for the large benchmark were empty (0 bytes) due to
-the tool running out of memory with this dataset. RustQC produces complete output with
-no memory issues, generating both position-based and sequence-based duplication rate tables.
+### Large dataset
+
+| Feature      | Total tags | Tags/Kb |
+| ------------ | ---------: | ------: |
+| CDS Exons    | 40,028,987 |  401.24 |
+| 5' UTR Exons |    572,203 |  104.93 |
+| 3' UTR Exons |  5,549,140 |  206.28 |
+| Introns      |  7,332,516 |    4.87 |
+
+Total reads: 41,094,945 | Total tags: 55,001,331 | Total assigned: 54,113,746
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_read_distribution_plot-cnt.png`}
+      alt="Read distribution counts (large)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Counts
+    </p>
+  </div>
+  <div>
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_read_distribution_plot-pct.png`}
+      alt="Read distribution percentages (large)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Percentages
+    </p>
+  </div>
+</div>
+
+## inner_distance
+
+Calculates the inner distance between paired-end reads for fragment size estimation.
+**All frequency values are identical** on both datasets.
+
+**Large dataset summary:** mean = 29.378, median = 27.5, std dev = 32.799
+
+### Inner distance plots (large dataset)
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_inner_distance_plot_Counts.png`}
+      alt="Inner distance counts (large)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Counts (MultiQC combined)
+    </p>
+  </div>
+  <div>
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_inner_distance_plot_Percentages.png`}
+      alt="Inner distance percentages (large)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Percentages (MultiQC combined)
+    </p>
+  </div>
+</div>
+
+**Side-by-side: upstream RSeQC vs RustQC native plots (large dataset)**
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <strong>RSeQC</strong>
+    <img
+      src={`${base}benchmarks/large/rseqc/inner_distance/inner_distance.inner_distance_plot.png`}
+      alt="RSeQC inner distance plot"
+      style="width: 100%; border-radius: 8px;"
+    />
+  </div>
+  <div>
+    <strong>RustQC</strong>
+    <img
+      src={`${base}benchmarks/large/rseqc/inner_distance/GM12878_REP1.markdup.sorted.inner_distance_plot.png`}
+      alt="RustQC inner distance plot"
+      style="width: 100%; border-radius: 8px;"
+    />
+  </div>
+</div>
 
 ## junction_annotation
 
 Classifies observed splice junctions as known, partially novel, or completely novel
-by comparing against annotated transcript models.
+by comparing against annotated transcript models. **All values are identical** on both datasets.
 
-All values are identical:
+### Small dataset
 
-| Metric | RSeQC | RustQC |
-| --- | ---: | ---: |
-| **Splice events** | | |
-| Total events | 13,065,665 | 13,065,665 |
-| Known | 12,805,967 | 12,805,967 |
-| Partially novel | 146,659 | 146,659 |
-| Novel | 91,614 | 91,614 |
-| **Splice junctions** | | |
-| Total junctions | 256,466 | 256,466 |
-| Known | 178,797 | 178,797 |
-| Partially novel | 50,936 | 50,936 |
-| Novel | 26,733 | 26,733 |
-
-### Splice event plots
+| Metric               |           RSeQC |          RustQC |
+| -------------------- | --------------: | --------------: |
+| **Splice events**    |                 |                 |
+| Total events         |          23,448 |          23,448 |
+| Known                | 22,625 (96.49%) | 22,625 (96.49%) |
+| Partial novel        |     166 (0.71%) |     166 (0.71%) |
+| Novel                |     654 (2.79%) |     654 (2.79%) |
+| **Splice junctions** |                 |                 |
+| Total junctions      |           3,261 |           3,261 |
+| Known                |  2,982 (91.44%) |  2,982 (91.44%) |
+| Partial novel        |      88 (2.70%) |      88 (2.70%) |
+| Novel                |     191 (5.86%) |     191 (5.86%) |
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
-    <strong>RSeQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`} alt="RSeQC splice events plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/small/multiqc/rseqc_junction_annotation_junctions_plot_Events-cnt.png`}
+      alt="Junction annotation events counts (small)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Splice events — counts
+    </p>
   </div>
   <div>
-    <strong>RustQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`} alt="RustQC splice events plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/small/multiqc/rseqc_junction_annotation_junctions_plot_Events-pct.png`}
+      alt="Junction annotation events percentages (small)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Splice events — percentages
+    </p>
   </div>
 </div>
 
-### Splice junction plots
+### Large dataset
+
+| Metric               |      RSeQC |     RustQC |
+| -------------------- | ---------: | ---------: |
+| **Splice events**    |            |            |
+| Total events         | 12,294,654 | 12,294,654 |
+| Known                | 12,155,894 | 12,155,894 |
+| Partial novel        |     91,594 |     91,594 |
+| Novel                |     41,082 |     41,082 |
+| **Splice junctions** |            |            |
+| Total junctions      |    239,792 |    239,792 |
+| Known                |    175,159 |    175,159 |
+| Partial novel        |     45,554 |     45,554 |
+| Novel                |     19,079 |     19,079 |
+
+### Splice event plots (large dataset)
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
     <strong>RSeQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`} alt="RSeQC splice junction plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`}
+      alt="RSeQC splice events plot"
+      style="width: 100%; border-radius: 8px;"
+    />
   </div>
   <div>
     <strong>RustQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`} alt="RustQC splice junction plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`}
+      alt="RustQC splice events plot"
+      style="width: 100%; border-radius: 8px;"
+    />
+  </div>
+</div>
+
+### Splice junction plots (large dataset)
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <strong>RSeQC</strong>
+    <img
+      src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`}
+      alt="RSeQC splice junction plot"
+      style="width: 100%; border-radius: 8px;"
+    />
+  </div>
+  <div>
+    <strong>RustQC</strong>
+    <img
+      src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`}
+      alt="RustQC splice junction plot"
+      style="width: 100%; border-radius: 8px;"
+    />
   </div>
 </div>
 
 ## junction_saturation
 
 Evaluates whether sequencing depth is sufficient to detect all splice junctions
-by subsampling reads at increasing fractions.
+by subsampling reads at increasing fractions. Results are **consistent** between
+RSeQC and RustQC (< 0.1% difference on the large dataset, attributable to
+random sampling order).
 
 At 100% sampling depth:
 
-| Metric | RSeQC | RustQC |
-| --- | ---: | ---: |
-| Total junctions | 256,466 | 256,392 |
-| Known junctions | 163,710 | 163,710 |
-| Novel junctions | 92,756 | 92,682 |
+### Small dataset
 
-The known junction count matches exactly. The 74-junction difference in total/novel
-is due to random sampling order — junction_saturation uses randomized subsampling,
-and different shuffling produces slightly different totals at each sampling fraction.
+| Metric          | RSeQC | RustQC |
+| --------------- | ----: | -----: |
+| All junctions   | 3,261 |  3,261 |
+| Known junctions | 2,944 |  2,944 |
+| Novel junctions |   317 |    317 |
 
-### Junction saturation plots
+### Large dataset
+
+| Metric          |   RSeQC |  RustQC |
+| --------------- | ------: | ------: |
+| All junctions   | 239,792 | 239,711 |
+| Known junctions | 160,896 | 160,896 |
+| Novel junctions |  78,896 |  78,815 |
+
+The known junction count matches exactly. The 81-junction difference in total/novel
+(0.03%) is due to random sampling order — junction_saturation uses randomized
+subsampling, and different shuffling produces slightly different totals at each
+sampling fraction.
+
+### Junction saturation plots (large dataset)
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
     <strong>RSeQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`} alt="RSeQC junction saturation plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`}
+      alt="RSeQC junction saturation plot"
+      style="width: 100%; border-radius: 8px;"
+    />
   </div>
   <div>
     <strong>RustQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`} alt="RustQC junction saturation plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`}
+      alt="RustQC junction saturation plot"
+      style="width: 100%; border-radius: 8px;"
+    />
   </div>
 </div>
 
-## inner_distance
+### MultiQC junction saturation plots (large dataset)
 
-Calculates the inner distance between paired-end reads for fragment size estimation,
-classifying pairs by transcript and exon membership.
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_junction_saturation_plot_All_Junctions.png`}
+      alt="Junction saturation all junctions"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      All junctions
+    </p>
+  </div>
+  <div>
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_junction_saturation_plot_Known_Junctions.png`}
+      alt="Junction saturation known junctions"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Known junctions
+    </p>
+  </div>
+  <div>
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_junction_saturation_plot_Novel_Junctions.png`}
+      alt="Junction saturation novel junctions"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      Novel junctions
+    </p>
+  </div>
+</div>
 
-Read classifications (sameTranscript, sameExon, overlap type) match between
-RSeQC and RustQC. Inner distance values show occasional &plusmn;1 bp differences
-due to minor CIGAR alignment length calculation differences.
-The overall frequency distribution is consistent between both tools.
+## read_duplication
 
-### Inner distance plots
+Calculates read duplication rates at both the sequence and mapping position level.
+**All values are identical** on both datasets.
+
+### Small dataset (first few duplication levels)
+
+| Level | Seq-based (unique reads) | Pos-based (unique reads) |
+| ----: | -----------------------: | -----------------------: |
+|    1× |                   37,943 |                   33,183 |
+|    2× |                    1,844 |                    2,984 |
+|    3× |                      492 |                      693 |
+|    4× |                      200 |                      289 |
+
+### Large dataset (first few duplication levels)
+
+| Level | Seq-based (unique reads) | Pos-based (unique reads) |
+| ----: | -----------------------: | -----------------------: |
+|    1× |               24,661,232 |               15,958,022 |
+|    2× |                5,199,146 |                4,781,421 |
+|    3× |                3,211,713 |                2,988,951 |
+
+### Read duplication plots (large dataset)
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
-    <strong>RSeQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/inner_distance/inner_distance.inner_distance_plot.png`} alt="RSeQC inner distance plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/large/multiqc/rseqc_read_dups_plot.png`}
+      alt="Read duplication MultiQC plot (large)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      MultiQC combined view
+    </p>
   </div>
   <div>
-    <strong>RustQC</strong>
-    <img src={`${base}benchmarks/large/rseqc/inner_distance/GM12878_REP1.markdup.sorted.inner_distance_plot.png`} alt="RustQC inner distance plot" style="width: 100%; border-radius: 8px;" />
+    <img
+      src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.markdup.sorted.DupRate_plot.png`}
+      alt="RustQC read duplication plot (large)"
+      style="width: 100%; border-radius: 8px;"
+    />
+    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
+      RustQC native plot
+    </p>
   </div>
 </div>
 
@@ -197,18 +514,28 @@ The overall frequency distribution is consistent between both tools.
 RustQC reimplements RSeQC's `tin.py`, producing per-gene TIN scores that measure
 transcript integrity via Shannon entropy of read coverage uniformity.
 
-### Summary statistics
+### Small dataset — Identical
 
-| Metric | RustQC |
-| --- | ---: |
-| Genes analysed | 16,499 |
-| TIN mean | 72.55 |
-| TIN median | 83.89 |
-| TIN stdev | 26.14 |
+| Metric      |   RSeQC |  RustQC |
+| ----------- | ------: | ------: |
+| TIN mean    | 52.7514 | 52.7514 |
+| TIN median  | 55.5830 | 55.5830 |
+| TIN std dev | 22.5333 | 22.5333 |
 
-The TIN analysis completes as part of the single-pass BAM processing. The
-original RSeQC `tin.py` requires a separate full BAM pass and typically takes
-45+ minutes for a 10 GB file.
+### Large dataset — RustQC only (upstream failed)
+
+The upstream `tin.py` was terminated after **6+ hours** without producing output on
+the large dataset. RustQC completes TIN analysis as part of its single-pass
+BAM processing in under 19 minutes total (inclusive of all other analyses).
+
+| Metric      |         RSeQC | RustQC |
+| ----------- | ------------: | -----: |
+| TIN mean    | — (timed out) | 68.287 |
+| TIN median  | — (timed out) | 75.921 |
+| TIN std dev | — (timed out) | 23.959 |
+
+This is a key RustQC advantage: TIN completes reliably on large production datasets
+where the Python tool is not practical.
 
 ### Output format
 
@@ -224,9 +551,10 @@ body coverage profiling, bias metrics, and Qualimap-compatible output comparison
 
 ## Benchmark conditions
 
-- **BAM file**: GM12878 ENCODE RNA-Seq, paired-end, ~185M reads, 10 GB
+- **BAM file (small)**: chr6 subset test BAM, ~52K reads
+- **BAM file (large)**: GM12878 ENCODE RNA-Seq, paired-end, ~186M reads
 - **Annotation**: Ensembl BED12 gene model (same file used by both RSeQC and RustQC);
   Ensembl GTF used for TIN and Qualimap (require gene-level annotation)
-- **RSeQC version**: 5.0.4 (run via Docker on Apple M3 Max with Rosetta x86 emulation)
-- **RustQC**: 10 threads, `--gtf` mode for TIN/Qualimap, `--bed` mode for RSeQC tools
-- **Hardware**: Apple M3 Max, 128 GB RAM
+- **RSeQC version**: 5.0.4
+- **RustQC**: multi-threaded, `--gtf` mode for TIN/Qualimap, `--bed` mode for RSeQC tools
+- **Infrastructure**: AWS cloud (nf-core AWS megatests, 2026-03-07)

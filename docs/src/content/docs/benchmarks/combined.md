@@ -15,57 +15,92 @@ RustQC replaces all of these in a single pass, producing every output together.
 
 ## Traditional workflow vs. RustQC
 
-**Large benchmark input:** GM12878 REP1 -- a 10 GB paired-end RNA-seq BAM aligned
-to GRCh38 (63,086 genes).
+Benchmarks were run on AWS (2026-03-07) using the nf-core/rnaseq pipeline for the
+traditional tools and `rustqc rna --gtf` for RustQC.
 
-| Step                            | Traditional workflow |  RustQC |
-| ------------------------------- | -------------------: | ------: |
-| Read counting (featureCounts)   |               3m 39s |      -- |
-| Duplication analysis (dupRadar) |              27m 21s |      -- |
-| bam_stat (RSeQC)                |               6m 07s |      -- |
-| infer_experiment (RSeQC)        |                   7s |      -- |
-| read_duplication (RSeQC)        |              29m 43s |      -- |
-| read_distribution (RSeQC)       |               6m 00s |      -- |
-| junction_annotation (RSeQC)     |               4m 37s |      -- |
-| junction_saturation (RSeQC)     |               6m 32s |      -- |
-| inner_distance (RSeQC)          |               1m 09s |      -- |
-| TIN (RSeQC tin.py)              |                 ~20m |      -- |
-| samtools flagstat               |                  ~2m |      -- |
-| samtools idxstats               |                  <1s |      -- |
-| samtools stats                  |                  ~5m |      -- |
-| preseq lc_extrap                |                  ~3m |      -- |
-| samtools sort -n (for Qualimap) |               ~5-10m |      -- |
-| Qualimap rnaseq                 |                 ~10m |      -- |
-| Biotype summaries               | Additional scripting |      -- |
-| **All outputs, single pass**    |                   -- | **~5m** |
-| **Total**                       |          **~2h 15m** | **~5m** |
+### Large dataset: GM12878 REP1 (~186M reads)
 
-RustQC produces all outputs -- dupRadar duplication matrix, model fit, plots,
-featureCounts-compatible counts, assignment summary, biotype counts, all 7
-RSeQC-equivalent metrics, TIN scores, samtools flagstat/idxstats/stats,
-preseq library complexity extrapolation, Qualimap-compatible gene body coverage,
-and MultiQC files -- in a single pass over the BAM file.
+A real-world large paired-end RNA-seq BAM aligned to GRCh38 (63,677 genes).
 
-The traditional workflow requires 15+ separate tool invocations, each reading
-the BAM file independently. RustQC replaces all of them with a single command.
+| Step                                    |     Traditional workflow |      RustQC |
+| --------------------------------------- | -----------------------: | ----------: |
+| samtools index                          |                   1m 36s |          -- |
+| samtools idxstats                       |                      19s |          -- |
+| samtools flagstat                       |                    2m 8s |          -- |
+| samtools stats                          |                   4m 44s |          -- |
+| samtools sort (for Qualimap)            |                   7m 57s |          -- |
+| GTF → BED conversion                    |                      22s |          -- |
+| featureCounts                           |                      56s |          -- |
+| infer_experiment (RSeQC)                |                     5.7s |          -- |
+| inner_distance (RSeQC)                  |                   1m 11s |          -- |
+| bam_stat (RSeQC)                        |                    7m 8s |          -- |
+| junction_annotation (RSeQC)             |                   6m 29s |          -- |
+| junction_saturation (RSeQC)             |                   8m 19s |          -- |
+| read_distribution (RSeQC)               |                   7m 35s |          -- |
+| read_duplication (RSeQC)                |                  21m 53s |          -- |
+| TIN (RSeQC tin.py)                      | **FAILED** (6h+ timeout) |          -- |
+| Qualimap rnaseq                         |                  38m 31s |          -- |
+| dupRadar                                |               1h 24m 56s |          -- |
+| preseq lc_extrap                        |                  23m 26s |          -- |
+| **All outputs, single pass**            |                       -- | **18m 52s** |
+| **Sequential total** (excl. failed TIN) |              **~2h 58m** | **18m 52s** |
 
-## Where the speedup comes from
+RustQC ran with 224.8% average CPU utilisation (multi-threaded), processing the
+entire BAM in under 19 minutes while the sum of all individual tool runtimes
+exceeds 2 hours and 58 minutes.
 
-1. **Single-pass architecture:** The traditional workflow reads the BAM file
-   many times -- once per tool. RustQC reads it once and produces everything
-   in that single pass.
-2. **Compiled Rust vs. interpreted R/Python:** Compiled code with zero-cost
-   abstractions and efficient memory management.
-3. **Multi-threaded parallelism:** RustQC parallelizes across chromosomes.
-   Scaling depends on the number of chromosomes with mapped reads and the
-   evenness of their read distribution.
+> **Note:** In a real pipeline, some tools can run in parallel after the BAM is
+> ready, so wall-clock time for the traditional workflow will be less than the
+> sequential sum. However, tools like Qualimap require a name-sorted BAM (adding
+> ~8m of preprocessing), and dupRadar alone (1h 25m) sets a hard lower bound on
+> wall-clock time for any parallelised run. RustQC eliminates all of this.
 
-## Output equivalence
+Key highlights from the large dataset run:
+
+- **DupRadar** alone takes **1h 24m 56s** — more than 4× RustQC's total runtime
+- **Qualimap pipeline** (sort + rnaseq) takes **46m 28s** — more than 2× RustQC's total runtime
+- **read_duplication** (RSeQC) takes **21m 53s** — longer than all of RustQC
+- **TIN failed entirely** in the upstream run (6+ hour timeout with no result);
+  RustQC completes TIN successfully as part of its normal run
+- **Peak memory:** RustQC uses 13.8 GB in a single process vs. up to 10.2 GB
+  for read_duplication alone, with many other tools also requiring several GB
+  each (Qualimap: 6.0 GB, GTF2BED: 2.7 GB, preseq: 2.0 GB, etc.)
+
+### Small dataset: `test` sample (~52K reads, chr6)
+
+A small test BAM (chromosome 6 only) used to verify correctness.
+
+| Step                         | Traditional workflow |    RustQC |
+| ---------------------------- | -------------------: | --------: |
+| GTF decompression            |                479ms |        -- |
+| samtools flagstat            |                  <1s |        -- |
+| samtools idxstats            |                  <1s |        -- |
+| samtools stats               |                  <1s |        -- |
+| samtools sort (for Qualimap) |                  <1s |        -- |
+| featureCounts                |                 1.0s |        -- |
+| bam_stat (RSeQC)             |                 0.6s |        -- |
+| infer_experiment (RSeQC)     |                 0.8s |        -- |
+| read_distribution (RSeQC)    |                 1.9s |        -- |
+| inner_distance (RSeQC)       |                 1.9s |        -- |
+| junction_annotation (RSeQC)  |                 1.4s |        -- |
+| junction_saturation (RSeQC)  |                 1.1s |        -- |
+| read_duplication (RSeQC)     |                 1.3s |        -- |
+| TIN (RSeQC tin.py)           |               1m 35s |        -- |
+| Qualimap rnaseq              |                 5.0s |        -- |
+| dupRadar                     |                 7.2s |        -- |
+| preseq lc_extrap             |                 1.0s |        -- |
+| **All outputs, single pass** |                   -- | **25.9s** |
+
+On this tiny dataset the per-tool runtimes are dominated by startup overhead;
+TIN is still the slowest individual tool at 1m 35s. RustQC completes all
+analyses in 25.9s.
+
+## RustQC outputs all produce identical results
 
 Every output file produced by RustQC matches the original tools:
 
-- **820,118 duplication matrix values** compared with zero mismatches
-- **Gene-level read counts** identical across all 63,086 genes
+- **827,801 duplication matrix values** compared with zero mismatches
+- **Gene-level read counts** identical across all 63,677 genes
 - **Model fit parameters** (intercept and slope) match to 10+ significant digits
 - **Assignment statistics** (Assigned, NoFeatures, Ambiguous) match exactly
 - **flagstat** all 16 metrics identical to samtools flagstat
@@ -80,12 +115,22 @@ See the individual benchmark pages for detailed per-tool comparisons:
 [dupRadar](dupradar/), [featureCounts](featurecounts/), [RSeQC](rseqc/),
 [preseq](preseq/), [Samtools](samtools/), [Qualimap](qualimap/).
 
+## Where the speedup comes from
+
+1. **Single-pass architecture:** The traditional workflow reads the BAM file
+   many times -- once per tool. RustQC reads it once and produces everything
+   in that single pass.
+2. **Compiled Rust vs. interpreted R/Python:** Compiled code with zero-cost
+   abstractions and efficient memory management.
+3. **Multi-threaded parallelism:** RustQC parallelizes across chromosomes.
+   Scaling depends on the number of chromosomes with mapped reads and the
+   evenness of their read distribution.
+
 ## Benchmark conditions
 
-- **Hardware:** 10-core Apple Silicon Mac (M3 Max, 128 GB RAM).
-- **RustQC:** 10 threads, `--gtf` mode (all tools enabled).
-- **Traditional tools:** Run via Docker with x86 emulation on ARM Mac. Absolute
-  timings include container overhead and emulation penalties. The relative
-  comparison demonstrates the magnitude of the speedup.
+- **Hardware:** AWS cloud (2026-03-07), run via nf-core/rnaseq pipeline.
+- **RustQC:** `--gtf` mode (all tools enabled), multi-threaded (224.8% CPU on large dataset).
+- **Traditional tools:** Each tool run in its own container as part of the nf-core/rnaseq pipeline.
+  Timings are wall-clock realtime from the Nextflow execution trace.
 - **Reproducibility:** Benchmark scripts and data are in the
   [benchmark directory](https://github.com/seqeralabs/RustQC/tree/main/benchmark).

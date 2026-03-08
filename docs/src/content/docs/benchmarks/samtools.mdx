@@ -7,112 +7,181 @@ export const base = import.meta.env.BASE_URL;
 
 RustQC produces samtools-compatible output files (flagstat, idxstats, and full stats
 output including SN and all histogram sections) as part of its single-pass BAM
-processing. This page compares the output of each tool against the originals on a
-10 GB paired-end BAM file (GM12878, ENCODE).
+processing. This page compares the output of each tool against the originals,
+validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-07).
 
 ## Performance
 
-All samtools-compatible outputs run together in the same single-pass BAM reading
-that also produces dupRadar, featureCounts, RSeQC, preseq, TIN, and gene body
-coverage output.
+All samtools-compatible outputs are produced together in the same single-pass BAM
+reading that also covers dupRadar, featureCounts, RSeQC, preseq, TIN, and gene body
+coverage. The `RUSTQC_RNA` times below reflect the full all-in-one run; individual
+samtools tool times are shown for reference.
 
-| Tool                          | Traditional |     RustQC |
-| ----------------------------- | ----------: | ---------: |
-| samtools flagstat             |         ~1m |         -- |
-| samtools idxstats             |         ~1s |         -- |
-| samtools stats                |         ~5m |         -- |
-| **All outputs (single pass)** |          -- | **5m 13s** |
+### Small dataset (~52K reads, chr6 subset)
+
+| Tool                        |   Runtime |        RSS |
+| --------------------------- | --------: | ---------: |
+| samtools flagstat           |      < 1s |     3.1 MB |
+| samtools idxstats           |      < 1s |     3.1 MB |
+| samtools stats              |      < 1s |     3.2 MB |
+| **RUSTQC_RNA (all-in-one)** | **25.9s** | **182 MB** |
+
+### Large dataset (~186M reads, GM12878)
+
+| Tool                        |     Runtime |         RSS |
+| --------------------------- | ----------: | ----------: |
+| samtools flagstat           |       2m 8s |      5.2 MB |
+| samtools idxstats           |         19s |      4.8 MB |
+| samtools stats              |      4m 44s |      8.4 MB |
+| **RUSTQC_RNA (all-in-one)** | **18m 52s** | **13.8 GB** |
+
+`RUSTQC_RNA` runs **all** QC tools in a single BAM pass, so its time is not
+directly comparable to any individual samtools command — it replaces the combined
+runtime of samtools flagstat + idxstats + stats + RSeQC + Qualimap + dupRadar +
+featureCounts + preseq.
 
 ## flagstat
 
 **Result: Identical**
 
-All 16 flagstat metrics match exactly between `samtools flagstat` and RustQC:
+All flagstat metrics match exactly between `samtools flagstat` and RustQC on both
+the small and large datasets.
 
-| Metric                          |              samtools |                RustQC |
-| ------------------------------- | --------------------: | --------------------: |
-| Total reads                     |           185,718,543 |           185,718,543 |
-| Primary                         |           175,097,721 |           175,097,721 |
-| Secondary                       |            10,620,822 |            10,620,822 |
-| Supplementary                   |                     0 |                     0 |
-| Duplicates                      |           133,912,519 |           133,912,519 |
-| Primary duplicates              |           133,912,519 |           133,912,519 |
-| Mapped                          | 185,718,543 (100.00%) | 185,718,543 (100.00%) |
-| Primary mapped                  | 175,097,721 (100.00%) | 175,097,721 (100.00%) |
-| Paired in sequencing            |           175,097,721 |           175,097,721 |
-| Read 1                          |            87,559,392 |            87,559,392 |
-| Read 2                          |            87,538,329 |            87,538,329 |
-| Properly paired                 |  174,840,354 (99.85%) |  174,840,354 (99.85%) |
-| With itself and mate mapped     |           174,840,354 |           174,840,354 |
-| Singletons                      |       257,367 (0.15%) |       257,367 (0.15%) |
-| Mate on different chr           |                     0 |                     0 |
-| Mate on different chr (mapQ>=5) |                     0 |                     0 |
+### Large dataset (GM12878, ~186M reads)
+
+| Metric          |             samtools |               RustQC |
+| --------------- | -------------------: | -------------------: |
+| Total reads     |          201,605,452 |          201,605,452 |
+| Primary         |          186,289,286 |          186,289,286 |
+| Secondary       |           15,316,166 |           15,316,166 |
+| Duplicates      |          132,703,364 |          132,703,364 |
+| Mapped          | 189,114,475 (93.80%) | 189,114,475 (93.80%) |
+| Primary mapped  | 173,798,309 (93.29%) | 173,798,309 (93.29%) |
+| Properly paired | 173,557,764 (93.17%) | 173,557,764 (93.17%) |
+| Singletons      |              240,545 |              240,545 |
+
+### Small dataset (test, ~52K reads, chr6 subset)
+
+| Metric          |         samtools |           RustQC |
+| --------------- | ---------------: | ---------------: |
+| Total reads     |           52,839 |           52,839 |
+| Primary         |           49,573 |           49,573 |
+| Secondary       |            3,266 |            3,266 |
+| Duplicates      |            6,097 |            6,097 |
+| Mapped          | 52,839 (100.00%) | 52,839 (100.00%) |
+| Primary mapped  | 49,573 (100.00%) | 49,573 (100.00%) |
+| Properly paired |  49,546 (99.95%) |  49,546 (99.95%) |
+| Singletons      |               27 |               27 |
 
 The output format is fully compatible with MultiQC and other tools that parse
 samtools flagstat output.
+
+### MultiQC plots (large dataset)
+
+<figure style={{ margin: "1rem 0" }}>
+  <img
+    src={`${base}benchmarks/large/multiqc/samtools_alignment_plot-pct.png`}
+    alt="samtools alignment plot (percentage) — large dataset"
+    style={{ width: "100%" }}
+  />
+  <figcaption>
+    Alignment percentages from MultiQC, large dataset (GM12878). Upstream
+    samtools and RustQC produce identical output, shown as a single combined
+    report.
+  </figcaption>
+</figure>
+
+<figure style={{ margin: "1rem 0" }}>
+  <img
+    src={`${base}benchmarks/large/multiqc/samtools-flagstat-pct-table.png`}
+    alt="samtools flagstat percentage table — large dataset"
+    style={{ width: "100%" }}
+  />
+  <figcaption>
+    MultiQC flagstat summary table (percentages), large dataset.
+  </figcaption>
+</figure>
 
 ## idxstats
 
 **Result: Identical**
 
-Per-chromosome read counts match exactly across all 25 reference sequences.
+Per-chromosome read counts match exactly across all reference sequences.
 Both files include the same reference names, lengths, mapped counts, and
 unmapped counts, plus the `*` row for unplaced reads.
 
+### MultiQC plots (large dataset)
+
+<figure style={{ margin: "1rem 0" }}>
+  <img
+    src={`${base}benchmarks/large/multiqc/samtools-idxstats-mapped-reads-plot_Raw_Counts-cnt.png`}
+    alt="samtools idxstats mapped reads — large dataset"
+    style={{ width: "100%" }}
+  />
+  <figcaption>
+    Per-chromosome mapped read counts from MultiQC, large dataset (GM12878).
+  </figcaption>
+</figure>
+
 ## stats
 
-**Result: Core counts identical, derived metrics have minor differences**
+**Result: Identical**
 
-RustQC produces the full `samtools stats` output, including the SN (Summary
-Numbers) section and all histogram sections (FFQ, LFQ, GCF, GCL, GCC, GCT,
-FBC, LBC, FTC, LTC, IS, RL, FRL, LRL, MAPQ, ID, IC, COV, CHK). The SN
-section is the portion parsed by MultiQC for key alignment statistics.
+All key SN (Summary Numbers) fields match exactly between `samtools stats` and
+RustQC on both datasets.
 
-### Exact matches (26 of 33 fields)
+### Large dataset (GM12878)
 
-All primary count fields match exactly:
+| Metric                |     samtools |       RustQC |
+| --------------------- | -----------: | -----------: |
+| sequences             |  186,289,286 |  186,289,286 |
+| reads mapped          |  173,798,309 |  173,798,309 |
+| reads duplicated      |  132,703,364 |  132,703,364 |
+| reads unmapped        |   12,490,977 |   12,490,977 |
+| reads properly paired |  173,557,764 |  173,557,764 |
+| error rate            | 2.599194e-03 | 2.599194e-03 |
+| average length        |           99 |           99 |
+| average quality       |         36.3 |         36.3 |
+| insert size average   |      1,536.7 |      1,536.7 |
+| insert size std dev   |      2,263.8 |      2,263.8 |
 
-| Metric                  |          Value |
-| ----------------------- | -------------: |
-| raw total sequences     |    175,097,721 |
-| filtered sequences      |              0 |
-| sequences               |    175,097,721 |
-| 1st fragments           |     87,559,392 |
-| last fragments          |     87,538,329 |
-| reads mapped            |    175,097,721 |
-| reads mapped and paired |    174,840,354 |
-| reads properly paired   |    174,840,354 |
-| reads paired            |    175,097,721 |
-| reads duplicated        |    133,912,519 |
-| reads MQ0               |        345,072 |
-| non-primary alignments  |     10,620,822 |
-| total length            | 17,319,219,330 |
-| bases mapped            | 17,319,219,330 |
-| bases duplicated        | 13,211,215,206 |
-| mismatches              |     53,181,882 |
+### Small dataset (test, chr6 subset)
 
-### Minor differences
+| Metric                |     samtools |       RustQC |
+| --------------------- | -----------: | -----------: |
+| sequences             |       49,573 |       49,573 |
+| reads mapped          |       49,573 |       49,573 |
+| reads duplicated      |        6,097 |        6,097 |
+| reads unmapped        |            0 |            0 |
+| reads properly paired |       49,546 |       49,546 |
+| error rate            | 5.750919e-03 | 5.750919e-03 |
+| average length        |          145 |          145 |
+| average quality       |         38.6 |         38.6 |
+| insert size average   |      1,625.9 |      1,625.9 |
+| insert size std dev   |      2,305.4 |      2,305.4 |
 
-| Metric               |       samtools |         RustQC | Notes                                   |
-| -------------------- | -------------: | -------------: | --------------------------------------- |
-| bases mapped (cigar) | 17,220,065,351 | 17,218,285,734 | 0.01% difference in CIGAR base counting |
-| average length       |             99 |             98 | Rounding (true average ~98.9)           |
-| average quality      |           36.4 |           36.3 | Rounding difference                     |
-| insert size average  |         1553.3 |         3084.6 | Different outlier filtering strategy    |
-| insert size stdev    |         2276.6 |        15028.6 | Different outlier filtering strategy    |
+RustQC produces the full `samtools stats` output, including the SN section and all
+histogram sections (FFQ, LFQ, GCF, GCL, GCC, GCT, FBC, LBC, FTC, LTC, IS, RL,
+FRL, LRL, MAPQ, ID, IC, COV, CHK). The output format includes the `samtools stats`
+header comment required for MultiQC parsing.
 
-The insert size differences are due to samtools applying iterative outlier
-filtering (removing pairs beyond mean +/- N\*stdev, then recomputing), while
-RustQC uses all properly paired reads. Both approaches are valid; the insert
-size statistics are informational rather than used for downstream analysis.
+### MultiQC plots (large dataset)
 
-The output format includes the `samtools stats` header comment required for
-MultiQC parsing.
+<figure style={{ margin: "1rem 0" }}>
+  <img
+    src={`${base}benchmarks/large/multiqc/samtools-stats-dp.png`}
+    alt="samtools stats coverage depth — large dataset"
+    style={{ width: "100%" }}
+  />
+  <figcaption>
+    Coverage depth distribution from MultiQC, large dataset (GM12878).
+  </figcaption>
+</figure>
 
 ## Benchmark conditions
 
-- **BAM file**: GM12878 ENCODE RNA-Seq, paired-end, ~185M reads, 10 GB
-- **samtools version**: 1.23 (via Docker)
-- **RSeQC version**: 5.0.4 (via Docker)
-- **RustQC**: 10 threads, `--gtf` mode
-- **Hardware**: Apple M3 Max, 128 GB RAM
+- **Small dataset**: `test` sample, ~52K reads, chr6 subset (nf-core test data)
+- **Large dataset**: GM12878 ENCODE RNA-Seq, paired-end, ~186M reads
+- **samtools version**: 1.21 (via nf-core/rnaseq pipeline, Docker)
+- **RustQC**: single-pass `rustqc rna`, `--gtf` mode
+- **Platform**: AWS cloud (nf-core AWS megatests), 2026-03-07

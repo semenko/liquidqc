@@ -3,7 +3,7 @@ title: TIN Outputs
 description: Output files produced by RustQC's TIN (Transcript Integrity Number) analysis.
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree } from "@astrojs/starlight/components";
 
 ## What is TIN?
 
@@ -31,10 +31,8 @@ TIN output files use the BAM file stem as a prefix and are written to a
 `rseqc/tin/` subdirectory under the output directory.
 
 <FileTree>
-- rseqc/
-  - tin/
-    - sample.tin.xls Per-transcript TIN scores
-    - sample.summary.txt Summary statistics (mean, median, stdev)
+  - rseqc/ - tin/ - sample.tin.xls Per-transcript TIN scores -
+  sample.summary.txt Summary statistics (mean, median, stdev)
 </FileTree>
 
 ### TIN scores
@@ -44,13 +42,13 @@ TIN output files use the BAM file stem as a prefix and are written to a
 A tab-separated file with one row per transcript (gene), reporting the TIN score
 for each:
 
-| Column | Description |
-|--------|-------------|
-| `geneID` | Gene identifier from the annotation |
-| `chrom` | Chromosome |
-| `tx_start` | Transcript start position |
-| `tx_end` | Transcript end position |
-| `TIN` | Transcript Integrity Number (0-100) |
+| Column     | Description                         |
+| ---------- | ----------------------------------- |
+| `geneID`   | Gene identifier from the annotation |
+| `chrom`    | Chromosome                          |
+| `tx_start` | Transcript start position           |
+| `tx_end`   | Transcript end position             |
+| `TIN`      | Transcript Integrity Number (0-100) |
 
 Transcripts below the minimum coverage threshold are excluded from the output.
 TIN values are formatted to 2 decimal places.
@@ -70,12 +68,12 @@ ENSG00000269981.1	chr1	137681	137965	85.89
 
 A single-row tab-separated summary of TIN statistics across all transcripts:
 
-| Column | Description |
-|--------|-------------|
-| `Bam_file` | Path to the input BAM file |
-| `TIN(mean)` | Mean TIN across all transcripts |
-| `TIN(median)` | Median TIN |
-| `TIN(stdev)` | Standard deviation of TIN |
+| Column        | Description                     |
+| ------------- | ------------------------------- |
+| `Bam_file`    | Path to the input BAM file      |
+| `TIN(mean)`   | Mean TIN across all transcripts |
+| `TIN(median)` | Median TIN                      |
+| `TIN(stdev)`  | Standard deviation of TIN       |
 
 Example:
 
@@ -86,12 +84,12 @@ sample.bam	72.55	83.89	26.14
 
 ## Interpreting TIN scores
 
-| Median TIN | Interpretation |
-|------------|---------------|
-| > 70 | Good RNA integrity |
-| 50-70 | Moderate degradation |
-| < 50 | Significant degradation -- consider excluding |
-| < 30 | Severe degradation |
+| Median TIN | Interpretation                                |
+| ---------- | --------------------------------------------- |
+| > 70       | Good RNA integrity                            |
+| 50-70      | Moderate degradation                          |
+| < 50       | Significant degradation -- consider excluding |
+| < 30       | Severe degradation                            |
 
 A bimodal distribution of per-transcript TIN scores (some very high, some very
 low) can indicate selective degradation of certain transcript classes rather
@@ -102,11 +100,19 @@ than global degradation.
 ```yaml
 tin:
   enabled: true
-  sample_size: 100    # Equally-spaced positions to sample per transcript
-  min_coverage: 10    # Minimum read-start count to compute TIN
+  sample_size: 100 # Equally-spaced positions to sample per transcript
+  min_coverage: 10 # Minimum read-start count to compute TIN
 ```
 
 TIN uses the shared `--mapq` / `-q` flag for mapping quality filtering.
+
+## Performance note
+
+The upstream `tin.py` tool processes each transcript independently and scales
+poorly with BAM size. On large production datasets (e.g., ~186M reads), `tin.py`
+can take **6+ hours** and may fail to complete within typical pipeline time limits.
+RustQC computes TIN scores as part of its single-pass BAM scan, completing the
+analysis in the same ~19 minutes it takes to run all other tools combined.
 
 ## Compatibility
 
@@ -118,7 +124,7 @@ the longest transcript as representative), while RSeQC reports one row per
 ## References
 
 - **TIN:** Wang L, Nie J, Sicotte H, et al. Measure transcript integrity using
-  RNA-seq data. *BMC Bioinformatics*. 2016;17:58.
+  RNA-seq data. _BMC Bioinformatics_. 2016;17:58.
 - **RSeQC:** Wang L, Wang S, Li W. RSeQC: quality control of RNA-seq experiments.
-  *Bioinformatics*. 2012;28(16):2184-2185.
+  _Bioinformatics_. 2012;28(16):2184-2185.
   [RSeQC website](https://rseqc.sourceforge.net/)

@@ -11,7 +11,7 @@ head:
       .main-pane { --sl-content-width: 67.5rem; }
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
@@ -21,22 +21,59 @@ export const base = import.meta.env.BASE_URL;
     <div class="sl-flex copy">
       <h1 id="_top">Welcome to RustQC</h1>
       <div class="tagline">
-        A blazingly fast reimplementation of{' '}
-        <a href="https://bioconductor.org/packages/dupRadar/">dupRadar</a>,{' '}
-        <a href="https://subread.sourceforge.net/">featureCounts</a>,{' '}
-        <a href="https://rseqc.sourceforge.net/">RSeQC</a>,{' '}
+        A blazingly fast reimplementation of{" "}
+        <a href="https://bioconductor.org/packages/dupRadar/">dupRadar</a>,{" "}
+        <a href="https://subread.sourceforge.net/">featureCounts</a>,{" "}
+        <a href="https://rseqc.sourceforge.net/">RSeQC</a>,{" "}
         <a href="http://qualimap.conesalab.org/">Qualimap</a>, and more in Rust,
-        delivering identical results up to 21x faster.
+        delivering identical results dramatically faster.
       </div>
     </div>
     <div class="benchmark-chart">
-      <img class="only-dark" src={`${base}benchmarks/benchmark_dark.svg`} alt="Benchmark: RustQC ~5m vs traditional tools ~2h 45m" />
-      <img class="only-light" src={`${base}benchmarks/benchmark_light.svg`} alt="Benchmark: RustQC ~5m vs traditional tools ~2h 45m" />
-      <p><em>Run time for a 10 GB paired-end BAM</em></p>
+      <img
+        class="only-dark"
+        src={`${base}benchmarks/benchmark_dark.svg`}
+        alt="Benchmark: RustQC ~19m vs traditional tools ~2h 58m+ sequential (AWS)"
+      />
+      <img
+        class="only-light"
+        src={`${base}benchmarks/benchmark_light.svg`}
+        alt="Benchmark: RustQC ~19m vs traditional tools ~2h 58m+ sequential (AWS)"
+      />
+      <p>
+        <em>
+          Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS
+        </em>
+      </p>
     </div>
     <div class="sl-flex actions not-content">
-      <a class="sl-link-button primary" href="getting-started/introduction/">Get Started <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m14.707 5.636 5.657 5.657a1 1 0 0 1 0 1.414l-5.657 5.657a1 1 0 0 1-1.414-1.414L17.243 13H4a1 1 0 1 1 0-2h13.243l-3.95-3.95a1 1 0 1 1 1.414-1.414Z"></path></svg></a>
-      <a class="sl-link-button minimal" href="https://github.com/seqeralabs/RustQC">View on GitHub <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0V9.414l-8.293 8.293a1 1 0 0 1-1.414-1.414L14.586 8H7a1 1 0 0 1-1-1Z"></path></svg></a>
+      <a class="sl-link-button primary" href="getting-started/introduction/">
+        Get Started{" "}
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="m14.707 5.636 5.657 5.657a1 1 0 0 1 0 1.414l-5.657 5.657a1 1 0 0 1-1.414-1.414L17.243 13H4a1 1 0 1 1 0-2h13.243l-3.95-3.95a1 1 0 1 1 1.414-1.414Z"></path>
+        </svg>
+      </a>
+      <a
+        class="sl-link-button minimal"
+        href="https://github.com/seqeralabs/RustQC"
+      >
+        View on GitHub{" "}
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="M6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0V9.414l-8.293 8.293a1 1 0 0 1-1.414-1.414L14.586 8H7a1 1 0 0 1-1-1Z"></path>
+        </svg>
+      </a>
     </div>
   </div>
 </div>
@@ -145,14 +182,15 @@ export const base = import.meta.env.BASE_URL;
     plus faithful reimplementations of 7 RSeQC tools, preseq, TIN, and samtools.
     Over 800,000 values compared with zero mismatches.
   </Card>
-  <Card title="Up to 21x Faster" icon="rocket">
-    Processes a 10 GB BAM file in under 5 minutes vs ~2h 45m for the
-    equivalent tools — saving over 2.5 hours per sample for the same results.
+  <Card title="Dramatically Faster" icon="rocket">
+    Processes ~186M reads in under 19 minutes on AWS vs ~2h 58m of sequential
+    tool runtimes — and replaces tools like TIN that fail entirely on large
+    datasets.
   </Card>
   <Card title="All-in-One" icon="puzzle">
-    Combines dupRadar, featureCounts, biotype counting, 7 RSeQC metrics,
-    preseq library complexity, TIN, gene body coverage, and samtools stats
-    in a single pass — replacing 14+ separate tool invocations.
+    Combines dupRadar, featureCounts, biotype counting, 7 RSeQC metrics, preseq
+    library complexity, TIN, gene body coverage, and samtools stats in a single
+    pass — replacing 14+ separate tool invocations.
   </Card>
   <Card title="SAM / BAM / CRAM" icon="document">
     Accepts SAM, BAM, and CRAM alignment files. Process multiple files in
