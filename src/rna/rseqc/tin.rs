@@ -371,14 +371,23 @@ fn sample_exonic_positions(
 /// per transcript during the BAM pass. Unique start tracking matches
 /// RSeQC's `check_min_reads()`, which uses a `set()` of read start
 /// positions.
+///
+/// To reduce memory pressure, each transcript's `unique_starts` set is
+/// capped at `min_cov + 1` entries. Once the threshold is exceeded the
+/// set is cleared and `exceeded_threshold` is set, since only the
+/// pass/fail decision matters for the TIN score.
 #[derive(Debug)]
 pub struct TinAccum {
     /// Per-transcript per-slot coverage counts.
     /// Indexed as `coverage[tx_idx][slot_idx]`.
     pub coverage: Vec<Vec<u32>>,
-    /// Per-transcript unique read start positions.
-    /// Upstream RSeQC counts unique positions, not total reads.
+    /// Per-transcript unique read start positions, capped at `min_cov + 1`.
+    /// Once exceeded, the set is drained and `exceeded_threshold[tx_idx]`
+    /// is set instead.
     pub unique_starts: Vec<HashSet<u64>>,
+    /// Per-transcript flag: true once unique start count exceeded `min_cov`.
+    /// Avoids further HashSet inserts for high-coverage transcripts.
+    pub exceeded_threshold: Vec<bool>,
     /// Number of sampled slots per transcript.
     #[allow(dead_code)]
     pub n_samples: Vec<u32>,
@@ -408,6 +417,7 @@ impl TinAccum {
         TinAccum {
             coverage,
             unique_starts: vec![HashSet::new(); n_transcripts],
+            exceeded_threshold: vec![false; n_transcripts],
             n_samples,
             mapq_cut,
             min_cov,
@@ -466,7 +476,17 @@ impl TinAccum {
         for &(_tx_start, tx_end, tx_idx) in &chrom_spans[..span_end] {
             // _tx_start <= read_start is guaranteed by the partition_point
             if read_start < tx_end {
-                self.unique_starts[tx_idx as usize].insert(read_start);
+                let idx = tx_idx as usize;
+                // Skip HashSet insert if this transcript already exceeded the
+                // min_cov threshold -- we only need the pass/fail decision.
+                if !self.exceeded_threshold[idx] {
+                    self.unique_starts[idx].insert(read_start);
+                    if self.unique_starts[idx].len() > self.min_cov as usize {
+                        self.exceeded_threshold[idx] = true;
+                        // Free the HashSet memory; the flag is sufficient.
+                        self.unique_starts[idx] = HashSet::new();
+                    }
+                }
             }
         }
 
@@ -494,7 +514,18 @@ impl TinAccum {
             for (j, count) in other_cov.into_iter().enumerate() {
                 self.coverage[i][j] += count;
             }
-            self.unique_starts[i].extend(other.unique_starts[i].iter());
+            // If either side already exceeded the threshold, the merged
+            // result also exceeds it -- no need to union the sets.
+            if self.exceeded_threshold[i] || other.exceeded_threshold[i] {
+                self.exceeded_threshold[i] = true;
+                self.unique_starts[i] = HashSet::new();
+            } else {
+                self.unique_starts[i].extend(other.unique_starts[i].iter());
+                if self.unique_starts[i].len() > self.min_cov as usize {
+                    self.exceeded_threshold[i] = true;
+                    self.unique_starts[i] = HashSet::new();
+                }
+            }
         }
     }
 
@@ -503,11 +534,15 @@ impl TinAccum {
         let mut transcripts = Vec::with_capacity(index.transcripts.len());
 
         for (i, tx) in index.transcripts.iter().enumerate() {
-            let n_unique_starts = self.unique_starts[i].len() as u32;
+            // A transcript passes if the exceeded_threshold flag was set
+            // (unique starts > min_cov during accumulation or merge), or
+            // if the remaining set still exceeds the threshold.
+            let passed =
+                self.exceeded_threshold[i] || self.unique_starts[i].len() as u32 > self.min_cov;
             let coverage = &self.coverage[i];
 
             // Upstream: `if len(read_count) > cutoff` -- strictly greater
-            if n_unique_starts <= self.min_cov {
+            if !passed {
                 transcripts.push(TinResult {
                     gene_id: tx.gene_id.clone(),
                     chrom: tx.chrom.clone(),
