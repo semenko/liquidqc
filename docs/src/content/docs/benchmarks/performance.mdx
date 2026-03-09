@@ -3,6 +3,8 @@ title: Performance & Tuning
 description: Per-tool cost breakdown, cumulative removal analysis, and guidance on tuning RustQC for speed by disabling unneeded tools or adjusting thread counts.
 ---
 
+export const base = import.meta.env.BASE_URL;
+
 RustQC runs all RNA-seq QC analyses in a single pass over the BAM file.
 Because every tool shares the same BAM decode and per-read dispatch,
 the cost of each tool is **not** simply additive -- there is a shared baseline
@@ -23,11 +25,11 @@ counts for your hardware.
   total runtime.
 - **Disabling TIN + read_duplication** together brings the runtime under
   2.5 minutes.
-- **Thread count:** `-t 8` to `-t 25` is the productive range for human
-  data. Beyond the number of chromosomes, extra threads are mostly idle.
-  For small genomes, the ceiling is lower (see [CPU count table](#effect-of-cpu-count) below).
+- **Thread count:** `-t 4` to `-t 8` is the productive range for a
+  single human BAM. Beyond ~8 threads, runtime plateaus at roughly 2×
+  speedup with increasing memory usage (see [CPU scaling benchmarks](#cpu-scaling-benchmarks) below).
 - **Multiple BAMs:** the useful thread count scales with the number of
-  input files (e.g. 4 human BAMs can use ~100 threads).
+  input files (e.g. 4 human BAMs can productively use ~32 threads).
 - **Ensure a BAM index exists** (`.bai`/`.csi`). Without one, only a
   single counting thread is used regardless of `-t`.
 
@@ -184,37 +186,60 @@ complete list of toggles.
 
 RustQC parallelises by assigning chromosomes to worker threads -- each worker
 opens its own BAM reader and processes its assigned chromosomes independently.
-This means **the number of chromosomes is the hard ceiling** for useful threads.
-Any threads beyond the chromosome count are used for BAM decompression, which
-gives diminishing returns.
+The number of chromosomes sets the theoretical ceiling for counting threads,
+but in practice **returns diminish well before that limit**: performance
+plateaus at roughly **4-8 threads** (~2× speedup). Additional threads beyond
+this point are used for BAM decompression and add little benefit while
+increasing memory usage (each worker maintains its own per-chromosome
+accumulators).
 
 When multiple BAM files are provided, the thread budget is split across files,
-so the ceiling scales with the number of inputs.
+so the practical ceiling scales with the number of inputs.
 
 A BAM index (`.bai`/`.csi`) is required for parallel mode. Without one, RustQC
 falls back to a single counting thread.
 
-| Organism                  | Primary sequences | Useful threads (single BAM) |
-| ------------------------- | ----------------: | --------------------------: |
-| Human (GRCh38)            |                25 |                         ~25 |
-| Mouse (GRCm39)            |                22 |                         ~22 |
-| Zebrafish (GRCz11)        |                26 |                         ~26 |
-| _Drosophila_ (BDGP6)      |                 7 |                          ~7 |
-| _C. elegans_ (WBcel235)   |                 7 |                          ~7 |
-| _S. cerevisiae_ (R64-1-1) |                17 |                         ~17 |
-
 ### CPU scaling benchmarks
 
-<!-- TODO: Add CPU scaling benchmarks with actual timing data -->
+Measured on AWS using the same GM12878 BAM (186M reads, 10 GB) with all
+tools enabled.
+Three replicates per thread count; the table shows the **median** run
+time (robust to cloud scheduling jitter).
 
-_Benchmarks in progress -- this table will be updated with timing data._
+<img
+  class="only-light"
+  src={`${base}benchmarks/cpu_scaling_light.svg`}
+  alt="CPU scaling benchmark chart – light theme"
+  style={{ width: "100%" }}
+/>
+<img
+  class="only-dark"
+  src={`${base}benchmarks/cpu_scaling_dark.svg`}
+  alt="CPU scaling benchmark chart – dark theme"
+  style={{ width: "100%" }}
+/>
 
-| Threads | Run time | Speedup vs 1 thread |
-| ------: | -------: | ------------------: |
-|       1 |          |                1.0x |
-|       2 |          |                     |
-|       4 |          |                     |
-|       8 |          |                     |
-|      16 |          |                     |
-|      25 |          |                     |
-|      32 |          |                     |
+| Threads | Run time | Peak RSS | Speedup vs 1 thread |
+| ------: | -------: | -------: | ------------------: |
+|       1 |    39:56 |   8.9 GB |                1.0× |
+|       2 |    26:08 |  11.2 GB |                1.5× |
+|       3 |    20:42 |  11.2 GB |                1.9× |
+|       4 |    21:54 |  11.8 GB |                1.8× |
+|       5 |    20:16 |  11.9 GB |                2.0× |
+|       6 |    21:30 |  12.1 GB |                1.9× |
+|       7 |    19:29 |  12.5 GB |                2.1× |
+|       8 |    18:42 |  12.8 GB |                2.1× |
+|      10 |    18:42 |  13.2 GB |                2.1× |
+|      12 |    19:00 |  13.7 GB |                2.1× |
+|      14 |    18:18 |  14.2 GB |                2.2× |
+|      16 |    18:14 |  14.5 GB |                2.2× |
+|      20 |    18:26 |  15.9 GB |                2.2× |
+|      24 |    17:54 |  16.7 GB |                2.2× |
+|      28 |    18:32 |  16.9 GB |                2.2× |
+|      32 |    18:32 |  16.9 GB |                2.2× |
+
+Performance scales well up to ~8 threads, where runtime drops from
+~40 minutes (single-threaded) to ~19 minutes (2.1× speedup). Beyond 8
+threads, gains plateau -- additional threads are used mainly for BAM
+decompression, yielding diminishing returns. Peak RSS grows linearly with
+thread count as each worker maintains its own per-chromosome accumulators.
