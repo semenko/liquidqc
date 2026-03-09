@@ -22,7 +22,7 @@
 <p align="center">
 <picture>
    <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.svg">
-   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC RNA ~7m vs traditional tools ~4h (dupRadar + featureCounts + 9 RSeQC tools + preseq + samtools + Qualimap)" width="600">
+   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC RNA ~7m vs traditional tools ~4h (dupRadar + featureCounts + 8 RSeQC tools + preseq + samtools + Qualimap)" width="600">
 </picture>
 </p>
 

@@ -22,7 +22,7 @@ RustQC follows the same algorithm as [Subread featureCounts](http://subread.sour
 - Attribute: `gene_id`
 - Overlap detection: at least 1 base overlap
 - Multi-mapping reads: counted (for multi columns), excluded (for unique columns)
-- Strand-aware counting based on the `-s` / `--strandedness` flag
+- Strand-aware counting based on the `-s` / `--stranded` flag
 
 The key difference is that RustQC performs counting and duplicate analysis in a single pass, while the traditional workflow requires running featureCounts separately before dupRadar.
 

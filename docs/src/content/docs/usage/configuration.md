@@ -18,8 +18,8 @@ Unknown fields are silently ignored, so config files remain forward-compatible.
 
 :::note
 Since all analyses run within the `rustqc rna` command, the configuration file
-controls all tools: dupRadar, featureCounts, all 7 RSeQC tools, TIN, Qualimap,
-preseq, and samtools. Each tool has an `enabled` toggle and tool-specific
+controls all tools: dupRadar, featureCounts, all 8 RSeQC tools (including TIN),
+Qualimap, preseq, and samtools. Each tool has an `enabled` toggle and tool-specific
 parameter overrides where applicable.
 CLI flags take precedence over config file values.
 :::
@@ -73,7 +73,6 @@ junction_annotation:
   min_intron: 50
 junction_saturation:
   enabled: true
-  min_intron: 50
   min_coverage: 1
   percentile_floor: 5
   percentile_ceiling: 100
@@ -244,7 +243,7 @@ printed and biotype counting is skipped.
 
 ## RSeQC tool settings
 
-Each of the 7 RSeQC tools has an `enabled` toggle (default `true`) and
+Each of the 8 RSeQC tools has an `enabled` toggle (default `true`) and
 tool-specific parameter overrides. Disabling a tool here prevents it from
 running even when annotation is provided. CLI flags take precedence over
 config file values for all parameters.
@@ -302,7 +301,6 @@ Requires annotation (`--gtf` or `--bed`). The `min_intron` can also be set via `
 ```yaml
 junction_saturation:
   enabled: true
-  min_intron: 50 # Minimum intron length in bases (default: 50)
   min_coverage: 1 # Minimum read count to consider a junction (default: 1)
   percentile_floor: 5 # Sampling start percentage (default: 5)
   percentile_ceiling: 100 # Sampling end percentage (default: 100)
@@ -310,7 +308,7 @@ junction_saturation:
 ```
 
 Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
-`--min-intron`, `--junction-saturation-min-coverage`,
+`--junction-saturation-min-coverage`,
 `--junction-saturation-percentile-floor`, `--junction-saturation-percentile-ceiling`,
 `--junction-saturation-percentile-step`.
 

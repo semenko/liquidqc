@@ -13,7 +13,7 @@ validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-
 ## Performance
 
 All samtools-compatible outputs are produced together in the same single-pass BAM
-reading that also covers dupRadar, featureCounts, RSeQC, preseq, TIN, and gene body
+reading that also covers dupRadar, featureCounts, RSeQC (including TIN), preseq, and gene body
 coverage. The `RUSTQC_RNA` times below reflect the full all-in-one run; individual
 samtools tool times are shown for reference.
 

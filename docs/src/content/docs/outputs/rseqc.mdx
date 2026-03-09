@@ -7,10 +7,10 @@ import { Card, CardGrid, FileTree } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
-RustQC reimplements seven tools from the [RSeQC](https://rseqc.sourceforge.net/)
-package. Each tool produces output files that match the format and content of the
-original Python implementation, plus **native PNG and SVG plots** generated
-directly -- no R scripts required.
+RustQC reimplements eight tools from the [RSeQC](https://rseqc.sourceforge.net/)
+package (including TIN). Each tool produces output files that match the format
+and content of the original Python implementation, plus **native PNG and SVG
+plots** generated directly -- no R scripts required.
 
 All RSeQC tools run automatically as part of the `rustqc rna` command and use
 the input filename stem as a prefix for output files. Output files are organized

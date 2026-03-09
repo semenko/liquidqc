@@ -64,7 +64,10 @@ src/
   io.rs                          Shared I/O utilities (gzip-transparent file reading)
   gtf.rs                         GTF annotation file parser
   rna/
-    mod.rs                       Re-exports dupradar, featurecounts, rseqc
+    mod.rs                       Re-exports all submodules (bam_flags, cpp_rng, dupradar,
+                                   featurecounts, preseq, qualimap, rseqc)
+    bam_flags.rs                 BAM flag constants
+    cpp_rng.rs                   C++ RNG FFI shim for preseq bootstrap reproducibility
     dupradar/
       mod.rs                     Re-exports counting, dupmatrix, fitting, plots
       counting.rs                BAM read counting engine (4-mode counting)
@@ -74,12 +77,20 @@ src/
     featurecounts/
       mod.rs                     Re-exports output
       output.rs                  featureCounts-format output and biotype counting
-    preseq.rs                  preseq lc_extrap library complexity extrapolation
+    preseq.rs                    preseq lc_extrap library complexity extrapolation
+    qualimap/
+      mod.rs                     Re-exports accumulator, coverage, index, output, plots, report
+      accumulator.rs             Gene body coverage accumulator
+      coverage.rs                Coverage computation logic
+      index.rs                   Transcript interval index for coverage lookups
+      output.rs                  Qualimap-compatible output file generation
+      plots.rs                   Gene body coverage plot generation
+      report.rs                  HTML/text report generation
     rseqc/
       mod.rs                     Re-exports all RSeQC modules + common helpers
       accumulators.rs            Shared RSeQC accumulator infrastructure (read dispatch)
       common.rs                  Shared junction/intron extraction, from_genes/from_bed builders
-      plots.rs                   Plot generation (duplication, junctions, inner distance)
+      plots.rs                   RSeQC native plot generation (PNG/SVG)
       bam_stat.rs                Basic BAM alignment statistics
       flagstat.rs                samtools flagstat-compatible output
       idxstats.rs                samtools idxstats-compatible output
@@ -89,7 +100,7 @@ src/
       junction_saturation.rs     Junction saturation analysis
       read_distribution.rs       Read distribution across genomic features
       read_duplication.rs        Position- and sequence-based duplication histograms
-      stats.rs                   samtools stats SN-section compatible output
+      stats.rs                   samtools stats full output (SN + all histogram sections)
       tin.rs                     TIN (Transcript Integrity Number) analysis
 tests/
   integration_test.rs            Integration tests vs R reference output

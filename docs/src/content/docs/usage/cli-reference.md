@@ -9,10 +9,10 @@ one pass over the BAM file.
 ## `rna`
 
 RNA-seq quality control: duplicate rate analysis (dupRadar equivalent),
-featureCounts-compatible read counting with biotype summaries, 7
+featureCounts-compatible read counting with biotype summaries, 8
 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
-read_distribution, junction_annotation, junction_saturation, inner_distance),
-TIN, Qualimap RNA-seq QC, preseq library complexity, and samtools-compatible
+read_distribution, junction_annotation, junction_saturation, inner_distance,
+TIN), Qualimap RNA-seq QC, preseq library complexity, and samtools-compatible
 outputs.
 
 ### Synopsis
@@ -53,7 +53,7 @@ At least one of `--gtf` or `--bed` must be provided. They can be **used together
 
 Path to a GTF gene annotation file (plain or gzip-compressed). The GTF must
 contain `exon` features with a `gene_id` attribute. When a GTF is provided,
-**all analyses run**: dupRadar, featureCounts, all 7 RSeQC tools, TIN, Qualimap, preseq, and samtools.
+**all analyses run**: dupRadar, featureCounts, all 8 RSeQC tools (including TIN), Qualimap, preseq, and samtools.
 Transcript-level structure (exon blocks, CDS features) is extracted automatically
 and used by the RSeQC tools that previously required a separate BED file.
 
@@ -63,7 +63,7 @@ bytes), so the `.gz` extension is not required.
 #### `-b, --bed <BED>`
 
 Path to a BED12-format gene model file (plain or gzip-compressed). When a BED
-file is provided **without** a GTF, the RSeQC tools, TIN, preseq, and samtools
+file is provided **without** a GTF, the RSeQC tools (including TIN), preseq, and samtools
 outputs run. dupRadar, featureCounts, and Qualimap are skipped because BED files
 lack gene-level grouping and biotype information. When provided **together with**
 a GTF, the BED file is used for read_distribution while the GTF handles
@@ -214,7 +214,7 @@ Preseq runs by default and can be skipped entirely with `--skip-preseq`.
 # Basic paired-end analysis with GTF (all tools)
 rustqc rna sample.bam --gtf genes.gtf -p -o results/
 
-# BED-only mode (RSeQC + TIN + preseq + samtools; dupRadar/featureCounts/Qualimap skipped)
+# BED-only mode (RSeQC + preseq + samtools; dupRadar/featureCounts/Qualimap skipped)
 rustqc rna sample.bam --bed genes.bed -p -o results/
 
 # Reverse-stranded library with 8 threads

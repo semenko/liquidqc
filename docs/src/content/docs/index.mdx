@@ -33,12 +33,12 @@ export const base = import.meta.env.BASE_URL;
       <img
         class="only-dark"
         src={`${base}benchmarks/benchmark_dark.svg`}
-        alt="Benchmark: RustQC ~19m vs traditional tools ~2h 58m+ sequential (AWS)"
+        alt="Benchmark: RustQC ~32m vs traditional tools ~4h 06m sequential (AWS)"
       />
       <img
         class="only-light"
         src={`${base}benchmarks/benchmark_light.svg`}
-        alt="Benchmark: RustQC ~19m vs traditional tools ~2h 58m+ sequential (AWS)"
+        alt="Benchmark: RustQC ~32m vs traditional tools ~4h 06m sequential (AWS)"
       />
       <p>
         <em>
@@ -179,18 +179,17 @@ export const base = import.meta.env.BASE_URL;
 <CardGrid stagger>
   <Card title="Identical Results" icon="approve-check">
     Produces bit-for-bit identical output to R's dupRadar and featureCounts,
-    plus faithful reimplementations of 7 RSeQC tools, preseq, TIN, and samtools.
-    Over 800,000 values compared with zero mismatches.
+    plus faithful reimplementations of 8 RSeQC tools (including TIN), preseq,
+    and samtools. Over 800,000 values compared with zero mismatches.
   </Card>
   <Card title="Dramatically Faster" icon="rocket">
-    Processes ~186M reads in under 19 minutes on AWS vs ~2h 58m of sequential
-    tool runtimes — and replaces tools like TIN that fail entirely on large
-    datasets.
+    Processes ~186M reads in ~32 minutes on AWS vs ~4h 06m of sequential tool
+    runtimes — and replaces tools like TIN that fail entirely on large datasets.
   </Card>
   <Card title="All-in-One" icon="puzzle">
-    Combines dupRadar, featureCounts, biotype counting, 7 RSeQC metrics, preseq
-    library complexity, TIN, gene body coverage, and samtools stats in a single
-    pass — replacing 14+ separate tool invocations.
+    Combines dupRadar, featureCounts, biotype counting, 8 RSeQC metrics
+    (including TIN), preseq library complexity, gene body coverage, and samtools
+    stats in a single pass — replacing 14+ separate tool invocations.
   </Card>
   <Card title="SAM / BAM / CRAM" icon="document">
     Accepts SAM, BAM, and CRAM alignment files. Process multiple files in

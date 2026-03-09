@@ -66,7 +66,7 @@ estimates the expected number of distinct molecules at increasing sequencing dep
 ## samtools
 
 RustQC produces output compatible with
-[samtools](http://www.htslib.org/) flagstat, idxstats, and stats (SN section),
+[samtools](http://www.htslib.org/) flagstat, idxstats, and stats,
 created by Heng Li and the HTSlib project. These formats are widely used by
 downstream QC tools including MultiQC.
 

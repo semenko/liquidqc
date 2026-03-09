@@ -5,8 +5,8 @@ description: Detailed comparison of RustQC's RSeQC reimplementations against the
 
 export const base = import.meta.env.BASE_URL;
 
-RustQC reimplements 7 [RSeQC](https://rseqc.sourceforge.net/) tools plus TIN (Transcript Integrity
-Number) analysis as built-in analyses that run in a single pass over the BAM file. This page
+RustQC reimplements 8 [RSeQC](https://rseqc.sourceforge.net/) tools — including TIN (Transcript
+Integrity Number) analysis — as built-in analyses that run in a single pass over the BAM file. This page
 compares the output of each tool against the originals, validated on two datasets from an AWS
 cloud run (nf-core AWS megatests, 2026-03-07).
 
@@ -139,9 +139,9 @@ underrepresents loci where transcripts on both strands overlap — causing the
 all reads, giving a more representative estimate.
 
 Both tools correctly identify the library as **strongly reverse-stranded**
-(antisense ~88–92%), so the practical interpretation is identical. The benchmark
-pipeline has been updated to pass `-s 2000000000` to `infer_experiment.py` so that
-the next run will process all reads and produce identical results.
+(antisense ~88–92%), so the practical interpretation is identical. When
+`infer_experiment.py` is run with `-s 2000000000` (processing all reads), the
+results are identical.
 
 <img
   src={`${base}benchmarks/large/multiqc/rseqc_infer_experiment_plot.png`}
@@ -229,6 +229,8 @@ Calculates the inner distance between paired-end reads for fragment size estimat
 **All frequency values are identical** on both datasets.
 
 **Large dataset summary:** mean = 29.378, median = 27.5, std dev = 32.799
+
+The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
 
 ### Inner distance plots (large dataset)
 
@@ -334,6 +336,9 @@ by comparing against annotated transcript models. **All values are identical** o
 | Partial novel        |     45,554 |     45,554 |
 | Novel                |     19,079 |     19,079 |
 
+The data files and R plotting scripts (`junction_plot.r`, `junctionSaturation_plot.r`)
+produced by RustQC are identical to upstream RSeQC output.
+
 ### Splice event plots (large dataset)
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
@@ -379,9 +384,8 @@ by comparing against annotated transcript models. **All values are identical** o
 ## junction_saturation
 
 Evaluates whether sequencing depth is sufficient to detect all splice junctions
-by subsampling reads at increasing fractions. Results are **consistent** between
-RSeQC and RustQC (< 0.1% difference on the large dataset, attributable to
-random sampling order).
+by subsampling reads at increasing fractions. Results are **identical** between
+RSeQC and RustQC at full sampling depth on both datasets.
 
 At 100% sampling depth:
 
@@ -397,14 +401,13 @@ At 100% sampling depth:
 
 | Metric          |   RSeQC |  RustQC |
 | --------------- | ------: | ------: |
-| All junctions   | 239,792 | 239,711 |
+| All junctions   | 239,792 | 239,792 |
 | Known junctions | 160,896 | 160,896 |
-| Novel junctions |  78,896 |  78,815 |
+| Novel junctions |  78,896 |  78,896 |
 
-The known junction count matches exactly. The 81-junction difference in total/novel
-(0.03%) is due to random sampling order — junction_saturation uses randomized
-subsampling, and different shuffling produces slightly different totals at each
-sampling fraction.
+At 100% sampling depth, all junction counts match exactly between RSeQC and RustQC.
+Intermediate sampling percentages show minor stochastic variation from random
+subsampling, which is expected behavior matching the upstream tool.
 
 ### Junction saturation plots (large dataset)
 

@@ -6,10 +6,9 @@
 > - **dupRadar** duplicate rate analysis (reimplementation of
 >   [dupRadar](https://github.com/ssayols/dupRadar))
 > - **featureCounts**-compatible gene-level read counting with biotype summaries
-> - **7 RSeQC tools** integrated as built-in analyses: bam_stat, infer_experiment,
+> - **8 RSeQC tools** integrated as built-in analyses: bam_stat, infer_experiment,
 >   read_duplication, read_distribution, junction_annotation, junction_saturation,
->   inner_distance (reimplementations of [RSeQC](https://rseqc.sourceforge.net/))
-> - **TIN** (Transcript Integrity Number) analysis (reimplementation of RSeQC `tin.py`)
+>   inner_distance, and TIN (reimplementations of [RSeQC](https://rseqc.sourceforge.net/))
 > - **preseq** library complexity extrapolation (reimplementation of
 >   [preseq](https://github.com/smithlabcode/preseq) `lc_extrap`)
 > - **samtools-compatible** flagstat, idxstats, and full stats output
@@ -59,7 +58,9 @@ src/
   io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
   rna/
-    mod.rs          — Re-exports dupradar, featurecounts, rseqc sub-modules
+    mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, preseq, qualimap)
+    bam_flags.rs    — BAM flag constants
+    cpp_rng.rs      — C++ RNG FFI shim for preseq bootstrap reproducibility
     dupradar/
       mod.rs        — Re-exports counting, dupmatrix, fitting, plots
       counting.rs   — BAM read counting engine (largest module)
@@ -70,6 +71,14 @@ src/
       mod.rs        — Re-exports output
       output.rs     — featureCounts-format output & biotype counting
     preseq.rs       — preseq lc_extrap library complexity extrapolation
+    qualimap/
+      mod.rs        — Re-exports all Qualimap modules
+      accumulator.rs — Gene body coverage accumulation logic
+      coverage.rs   — Per-base coverage computation
+      index.rs      — Transcript index for coverage profiling
+      output.rs     — Qualimap-compatible output file generation
+      plots.rs      — Gene body coverage plot generation (PNG/SVG)
+      report.rs     — Qualimap HTML report generation
     rseqc/
       mod.rs                — Re-exports all RSeQC modules + common helpers
       accumulators.rs       — Shared RSeQC accumulator infrastructure (read dispatch)
@@ -87,7 +96,7 @@ src/
       stats.rs              — samtools stats full output (SN + all histogram sections)
       tin.rs                — TIN (Transcript Integrity Number) analysis
 tests/
-  integration_test.rs  — 13 integration tests vs R dupRadar reference output
+  integration_test.rs  — 12 integration tests vs R dupRadar reference output
   data/                — Test BAM/GTF input files
   expected/            — R-generated reference outputs
   create_test_data.R   — R script to regenerate test data + references
@@ -104,21 +113,21 @@ The CLI uses a single subcommand:
 The `--gtf` and `--bed` flags can be used **individually or together**. At least one must be provided:
 
 - **`--gtf`** (recommended): Runs all analyses — dupRadar duplicate rate analysis,
-  featureCounts-compatible gene counting, all 7 RSeQC-equivalent tools
+  featureCounts-compatible gene counting, all 8 RSeQC-equivalent tools
   (bam_stat, infer_experiment, read_duplication, read_distribution,
-  junction_annotation, junction_saturation, inner_distance), TIN analysis,
+  junction_annotation, junction_saturation, inner_distance, TIN),
   preseq library complexity extrapolation, samtools-compatible outputs
   (flagstat, idxstats, stats), and gene body coverage profiling with
   Qualimap-compatible output. The GTF parser extracts transcript-level
   structure (exons + CDS features) to derive all data needed by every tool.
-- **`--bed`**: Runs the 7 RSeQC tools + bam_stat + read_duplication + TIN +
-  preseq + samtools outputs (flagstat, idxstats, stats). DupRadar,
+- **`--bed`**: Runs the 8 RSeQC tools + preseq + samtools outputs
+  (flagstat, idxstats, stats). DupRadar,
   featureCounts, and gene body coverage are skipped (they require gene-level
   annotation with biotype/exon attributes that BED12 cannot provide).
 - **`--gtf` + `--bed` together**: When both are provided, the GTF is used for
   dupRadar, featureCounts, and Qualimap (which require gene-level annotation),
   while the BED file is used for read_distribution. All other RSeQC tools,
-  TIN, preseq, and samtools outputs also run.
+  preseq, and samtools outputs also run.
 
 Individual tools can be disabled via the YAML config file (each has an `enabled`
 toggle). Tool-specific parameters (e.g., `--min-intron`, `--inner-distance-lower-bound`)
@@ -263,9 +272,9 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   These documents must always accurately reflect the latest benchmark data.
 - The YAML config nests output toggles under `dupradar:` and `featurecounts:` keys.
   Each output file can be individually enabled/disabled (all default to `true`).
-- The YAML config also has sections for each of the 7 RSeQC tools (`bam_stat:`,
+- The YAML config also has sections for each of the 8 RSeQC tools (`bam_stat:`,
   `infer_experiment:`, `read_duplication:`, `read_distribution:`, `junction_annotation:`,
-  `junction_saturation:`, `inner_distance:`). Each has an `enabled: bool` toggle
+  `junction_saturation:`, `inner_distance:`, `tin:`). Each has an `enabled: bool` toggle
   and tool-specific parameter overrides. CLI flags take precedence over config values.
 - The YAML config also has sections for `tin:`, `preseq:`,
   `flagstat:`, `idxstats:`, and `samtools_stats:`. Each has an `enabled: bool` toggle.

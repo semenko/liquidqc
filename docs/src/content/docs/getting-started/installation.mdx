@@ -142,13 +142,13 @@ Both `target-cpu=native` and PGO produce binaries that are specific to the machi
 
 ## Input requirements
 
-### `rustqc rna` (dupRadar + featureCounts + RSeQC)
+### `rustqc rna`
 
 The `rustqc rna` command runs all analyses in a single pass. Input requirements:
 
 - **BAM file(s)** — must have PCR duplicates **marked** (SAM flag `0x400`) but **not removed**. RustQC needs both duplicate and non-duplicate reads to calculate duplication rates.
-- **GTF annotation file** (`--gtf`) — required for gene-level counting and dupRadar analysis.
-- **BED12 gene model file** (`--bed`, optional) — required for 5 of the 7 RSeQC tools (infer_experiment, read_distribution, junction_annotation, junction_saturation, inner_distance). If omitted, these tools are skipped with a warning. The bam_stat and read_duplication tools run without a BED file.
+- **GTF annotation file** (`--gtf`) — provides all annotation needed for every tool. When a GTF is provided, gene models are derived internally so all analyses run (dupRadar, featureCounts, Qualimap gene body coverage, all 8 RSeQC tools including TIN, preseq, and samtools outputs). This is the typical input.
+- **BED12 gene model file** (`--bed`, optional) — can be provided alongside `--gtf` (the BED file is then used for read_distribution while the GTF handles everything else) or on its own. If only `--bed` is given, dupRadar, featureCounts, and Qualimap gene body coverage are skipped because they require gene-level annotation with biotype/exon attributes that BED12 cannot provide.
 
 Compatible duplicate-marking tools:
 

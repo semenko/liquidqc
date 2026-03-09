@@ -193,7 +193,7 @@ opens its own BAM reader and processes its assigned chromosomes independently.
 The number of chromosomes sets the theoretical ceiling for counting threads,
 but in practice returns diminish well before that limit because chromosomes
 aren't split and have very different lengths - so the longest chromosome becomes
-the parellisation bottleneck.
+the parallelisation bottleneck.
 
 Performance plateaus at roughly **4-8 threads** (~2x speedup). Additional threads beyond
 this point are used for BAM decompression and add little benefit while

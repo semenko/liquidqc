@@ -14,7 +14,7 @@ used by the [nf-core/rnaseq](https://nf-co.re/rnaseq) pipeline.
 
 Preseq runs as part of the single-pass `rustqc rna` analysis alongside all other
 tools. The fragment counting is performed during the same BAM read that powers
-dupRadar, featureCounts, and the 7 RSeQC tools. The extrapolation computation
+dupRadar, featureCounts, and the 8 RSeQC tools (including TIN). The extrapolation computation
 itself is fast (under 1 second) -- it is purely a function of the histogram data.
 
 ### Small dataset (~52K reads, chr6)

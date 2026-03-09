@@ -7,7 +7,7 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 
 - **[dupRadar](https://bioconductor.org/packages/dupRadar/)** -- RNA-seq PCR duplicate rate analysis
 - **[featureCounts](http://subread.sourceforge.net/)** -- gene-level read counting and biotype quantification
-- **[RSeQC](https://rseqc.sourceforge.net/)** -- 7 RNA-seq quality control modules (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance) plus TIN (Transcript Integrity Number) analysis
+- **[RSeQC](https://rseqc.sourceforge.net/)** -- 8 RNA-seq quality control modules (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance, TIN)
 - **[preseq](https://github.com/smithlabcode/preseq)** -- library complexity extrapolation (lc_extrap)
 - **[samtools](http://www.htslib.org/)** -- flagstat, idxstats, and full stats output including all histogram sections
 - **[Qualimap](http://qualimap.conesalab.org/)** -- gene body coverage profiling and RNA-seq QC summary
@@ -50,7 +50,7 @@ Given a duplicate-marked BAM file and a GTF or BED12 annotation, `rustqc rna` ru
 
 ### RSeQC tools -- RNA-seq quality control
 
-Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, plus TIN analysis, all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis:
+Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (including TIN), all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis:
 
 | Tool                | Description                                                                                |
 | ------------------- | ------------------------------------------------------------------------------------------ |
@@ -73,7 +73,7 @@ Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, plus T
 | idxstats        | `samtools idxstats`                                                | Per-chromosome read counts                                                                                                                                                                                        |
 | stats           | `samtools stats`                                                   | Full samtools stats output including all histogram sections                                                                                                                                                       |
 
-When a GTF file is provided via `--gtf`, all tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed`, which runs the RSeQC tools, TIN, preseq, and samtools outputs, but skips dupRadar, featureCounts, and Qualimap (they require a GTF). Both `--gtf` and `--bed` can be used together: the GTF is used for dupRadar, featureCounts, and Qualimap, while the BED file is used for read_distribution. Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
+When a GTF file is provided via `--gtf`, all tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed`, which runs the RSeQC tools (including TIN), preseq, and samtools outputs, but skips dupRadar, featureCounts, and Qualimap (they require a GTF). Both `--gtf` and `--bed` can be used together: the GTF is used for dupRadar, featureCounts, and Qualimap, while the BED file is used for read_distribution. Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 

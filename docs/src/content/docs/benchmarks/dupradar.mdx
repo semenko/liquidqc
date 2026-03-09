@@ -5,7 +5,7 @@ description: Performance comparison between RustQC and R dupRadar on AWS, with r
 
 export const base = import.meta.env.BASE_URL;
 
-RustQC produces output matching R dupRadar to floating-point precision. Every value in the duplication matrix and the fitted model parameters agree to 9–10 significant figures. The benchmarks below quantify the performance difference on real RNA-seq data, measured on AWS (2026-03-07).
+RustQC produces output matching R dupRadar to floating-point precision. All 14 output columns are identical, and the fitted model parameters agree to 9–10 significant figures. The benchmarks below quantify the performance difference on real RNA-seq data, measured on AWS (2026-03-07).
 
 ## Small benchmark
 
@@ -16,7 +16,7 @@ RustQC produces output matching R dupRadar to floating-point precision. Every va
 | R dupRadar         | 7.2s    | 219.1 MB |
 | RustQC (all tools) | 25.9s   | 182.1 MB |
 
-Note: The RustQC runtime covers the full combined workload (dupRadar, featureCounts, all RSeQC tools, TIN, preseq, samtools outputs, and gene body coverage) in a single pass, not just dupRadar.
+Note: The RustQC runtime covers the full combined workload (dupRadar, featureCounts, all 8 RSeQC tools including TIN, preseq, samtools outputs, and gene body coverage) in a single pass, not just dupRadar.
 
 ### Results comparison (small)
 
@@ -48,7 +48,7 @@ The intercept and slope differences are at the 9th–10th significant figure, ar
 | R dupRadar         | 1h 24m 56s | 492.6 MB |
 | RustQC (all tools) | 18m 52s    | 13.8 GB  |
 
-Note: RustQC runs dupRadar, featureCounts, all 7 RSeQC tools, TIN, preseq, samtools outputs, and gene body coverage in a single pass. The 18m 52s covers the full combined workload (224.8% CPU utilisation), while the R dupRadar figure is for dupRadar alone.
+Note: RustQC runs dupRadar, featureCounts, all 8 RSeQC tools (including TIN), preseq, samtools outputs, and gene body coverage in a single pass. The 18m 52s covers the full combined workload (224.8% CPU utilisation), while the R dupRadar figure is for dupRadar alone.
 
 ### Results comparison (large)
 
@@ -66,7 +66,7 @@ Note: RustQC runs dupRadar, featureCounts, all 7 RSeQC tools, TIN, preseq, samto
 | **Total values compared**     |        827,801 |        827,801 |     --      |
 | **Value mismatches**          |             -- |          **0** |     --      |
 
-Model fit parameters (intercept and slope) match to 9–10 significant figures — well within floating-point rounding. All integer count columns (allCounts, filteredCounts, allCountsMulti, filteredCountsMulti) are identical across all 63,677 genes. RPKM columns show small systematic offsets (~0.25%) attributable to a different total-mapped-reads denominator between the R and Rust implementations; this does not affect dupRadar's primary outputs (duplication rates, model parameters, or read counts).
+Model fit parameters (intercept and slope) match to 9–10 significant figures — well within floating-point rounding. All 14 output columns match across all 63,677 genes, including integer count columns, duplication rates, and RPKM-normalised values.
 
 ### Side-by-side plots
 

@@ -77,7 +77,11 @@ src/
   io.rs                       Shared I/O utilities (gzip-transparent file reading)
   gtf.rs                      GTF annotation file parser
   rna/
-    mod.rs                    Re-exports dupradar, featurecounts, rseqc
+    mod.rs                    Re-exports all submodules (bam_flags, cpp_rng, dupradar,
+                                featurecounts, preseq, qualimap, rseqc)
+    bam_flags.rs              BAM flag constants
+    cpp_rng.rs                C++ RNG FFI shim for preseq bootstrap reproducibility
+    preseq.rs                 preseq lc_extrap library complexity extrapolation
     dupradar/
       mod.rs                  Re-exports counting, dupmatrix, fitting, plots
       counting.rs             BAM read counting engine
@@ -87,15 +91,30 @@ src/
     featurecounts/
       mod.rs                  Re-exports output
       output.rs               featureCounts-format output and biotype counting
+    qualimap/
+      mod.rs                  Re-exports accumulator, coverage, index, output, plots, report
+      accumulator.rs          Gene body coverage accumulation
+      coverage.rs             Coverage computation
+      index.rs                Transcript index for coverage lookups
+      output.rs               Qualimap-compatible output files
+      plots.rs                Gene body coverage plots
+      report.rs               Qualimap HTML report generation
     rseqc/
       mod.rs                  Re-exports all RSeQC modules
+      accumulators.rs         Shared accumulator infrastructure (read dispatch)
+      common.rs               Shared helpers (junction/intron extraction)
       bam_stat.rs             BAM alignment statistics (bam_stat.py)
+      flagstat.rs             samtools flagstat-compatible output
+      idxstats.rs             samtools idxstats-compatible output
       infer_experiment.rs     Library strandedness inference (infer_experiment.py)
       read_duplication.rs     Duplication rate histograms (read_duplication.py)
       read_distribution.rs    Read distribution across features (read_distribution.py)
       junction_annotation.rs  Splice junction classification (junction_annotation.py)
       junction_saturation.rs  Junction saturation analysis (junction_saturation.py)
       inner_distance.rs       Paired-end inner distance (inner_distance.py)
+      plots.rs                RSeQC native plot generation
+      stats.rs                samtools stats full output
+      tin.rs                  TIN (Transcript Integrity Number) analysis
 tests/
   integration_test.rs         Integration tests vs R reference output
   data/                       Test BAM/GTF input files

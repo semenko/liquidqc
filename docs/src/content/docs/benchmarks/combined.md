@@ -6,10 +6,9 @@ description: Overall performance comparison between the traditional workflow and
 The traditional RNA-seq QC workflow requires multiple separate tools:
 **featureCounts** for gene-level read counting and biotype quantification,
 **dupRadar** for duplication rate analysis,
-**RSeQC** for a suite of quality control metrics,
+**RSeQC** for a suite of quality control metrics (including TIN for transcript integrity),
 **samtools** for alignment statistics,
-**preseq** for library complexity estimation,
-**RSeQC tin.py** for transcript integrity, and
+**preseq** for library complexity estimation, and
 **Qualimap** for gene body coverage.
 RustQC replaces all of these in a single pass, producing every output together.
 
@@ -99,7 +98,7 @@ analyses in 25.9s.
 
 Every output file produced by RustQC matches the original tools:
 
-- **827,801 duplication matrix values** compared with zero mismatches
+- **dupRadar duplication matrix** — all 14 columns match across 63,677 genes
 - **Gene-level read counts** identical across all 63,677 genes
 - **Model fit parameters** (intercept and slope) match to 10+ significant digits
 - **Assignment statistics** (Assigned, NoFeatures, Ambiguous) match exactly
@@ -107,7 +106,9 @@ Every output file produced by RustQC matches the original tools:
 - **idxstats** all per-chromosome counts identical to samtools idxstats
 - **stats** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, etc.) matches samtools stats
 - **preseq** extrapolation curve within <0.1% of preseq v3.2.0 across entire range
-- **RSeQC tools** all values match Python RSeQC (see [RSeQC benchmark](rseqc/))
+- **RSeQC tools** all data values and R plotting scripts match Python RSeQC.
+  Junction saturation intermediate sampling points show expected stochastic
+  variation from random subsampling (see [RSeQC benchmark](rseqc/))
 - **Qualimap** all read counts, genomic origin percentages, and coverage bias metrics
   match Qualimap Java 2.3 exactly (see [Qualimap benchmark](qualimap/))
 

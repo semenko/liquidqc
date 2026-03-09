@@ -616,25 +616,26 @@ def generate_svgs(results: list[dict], root: Path) -> None:
     overhead (``STAGING_SECS``) is prepended to each segment as a hatched
     bar to visualise BAM loading time.
     """
-    # Average realtime durations from nf-core/rnaseq pipeline trace
-    # (8 samples, GM12878 dataset — Fusion filesystem, no staging).
+    # Realtime durations from nf-core/rnaseq pipeline trace
+    # (GM12878 dataset, run 4908176 — AWS, 1 sample).
+    # TIN was aborted in this run; value kept from previous measurement.
     tool_secs: dict[str, float] = {
-        "RustQC": 280,
-        "bam_stat": 437.6,
-        "infer_experiment": 4.1,
-        "read_duplication": 1005.6,
-        "read_distribution": 494.8,
-        "junction_annotation": 381.6,
-        "junction_saturation": 461.2,
-        "inner_distance": 59.7,
-        "dupRadar": 4558.2,
-        "featureCounts": 56.5,
-        "qualimap": 1813.2,
-        "samtools_stats": 214.4,
-        "samtools_flagstat": 73.9,
-        "samtools_idxstats": 4.9,
-        "preseq": 240,
-        "tin": 2700,
+        "RustQC": 1763,  # 29m 23s
+        "bam_stat": 397,  # 6m 37s
+        "infer_experiment": 404,  # 6m 44s
+        "read_duplication": 1263,  # 21m 3s
+        "read_distribution": 447,  # 7m 27s
+        "junction_annotation": 349,  # 5m 49s
+        "junction_saturation": 500,  # 8m 20s
+        "inner_distance": 61,  # 1m 1s
+        "dupRadar": 2580,  # 43m
+        "featureCounts": 61,  # 1m 1s (geneid run)
+        "qualimap": 2077,  # 34m 37s
+        "samtools_stats": 251,  # 4m 11s
+        "samtools_flagstat": 200,  # 3m 20s
+        "samtools_idxstats": 21,  # 21s
+        "preseq": 1209,  # 20m 9s
+        "tin": 2700,  # previous run (aborted in 4908176)
     }
 
     def secs(tool: str) -> float:
