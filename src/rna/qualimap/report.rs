@@ -351,7 +351,7 @@ fn write_summary_section(html: &mut String, data: &ReportData) {
     table_row(
         html,
         "Total number of alignments:",
-        &format_with_commas(data.primary_alignments),
+        &format_with_commas(data.primary_alignments + data.secondary_alignments),
     );
     table_row(
         html,
@@ -487,12 +487,13 @@ fn write_summary_section(html: &mut String, data: &ReportData) {
     );
 
     // Top junction motifs sorted by count descending — Qualimap shows motif / percentage
+    // Use reads_at_junctions as denominator (matches text file output and upstream Qualimap)
     let mut motifs: Vec<(&String, &u64)> = data.junction_motifs.iter().collect();
     motifs.sort_by(|a, b| b.1.cmp(a.1));
-    let total_motif: u64 = motifs.iter().map(|(_, &c)| c).sum();
+    let total_junctions = data.reads_at_junctions;
     for (motif, &count) in motifs.iter().take(11) {
-        let pct = if total_motif > 0 {
-            count as f64 / total_motif as f64 * 100.0
+        let pct = if total_junctions > 0 {
+            count as f64 / total_junctions as f64 * 100.0
         } else {
             0.0
         };
