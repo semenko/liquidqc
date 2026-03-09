@@ -872,11 +872,8 @@ fn process_single_bam(
 
             // Biotype outputs (only if attribute was found in GTF)
             if params.biotype_in_gtf && config.any_biotype_output() {
-                let biotype_counts = rna::featurecounts::output::aggregate_biotype_counts(
-                    genes,
-                    &count_result,
-                    params.biotype_attribute,
-                );
+                let biotype_counts =
+                    rna::featurecounts::output::aggregate_biotype_counts(&count_result);
                 info!(
                     "[{}] Biotype counting: {} biotypes found",
                     bam_stem,
@@ -916,7 +913,7 @@ fn process_single_bam(
                     rna::featurecounts::output::write_biotype_rrna_mqc(
                         &mqc_rrna_path,
                         &biotype_counts,
-                        count_result.fc_assigned,
+                        count_result.fc_biotype_assigned,
                         bam_stem,
                     )?;
                     info!(

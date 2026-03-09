@@ -336,6 +336,16 @@ pub struct CountResult {
     /// Per-read: singleton reads (unmatched mates after cross-chromosome reconciliation)
     pub fc_singleton: u64,
 
+    // --- featureCounts biotype-level per-read counts ---
+    // Matches `featureCounts -g gene_biotype` behaviour where exons are grouped
+    // by biotype. Indexed by biotype_idx; names stored separately.
+    /// Per-biotype read counts (indexed by biotype_idx)
+    pub biotype_reads: Vec<u64>,
+    /// Biotype names corresponding to biotype_idx values
+    pub biotype_names: Vec<String>,
+    /// Total reads assigned at the biotype level
+    pub fc_biotype_assigned: u64,
+
     // --- RSeQC results (collected during the same BAM pass) ---
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
     pub rseqc: Option<RseqcAccumulators>,
@@ -568,13 +578,22 @@ struct ChromResult {
     fc_unmapped: u64,
     /// Per-read: singleton reads (mate unmapped or missing)
     fc_singleton: u64,
+
+    // --- featureCounts biotype-level per-read statistics ---
+    // Matches `featureCounts -g gene_biotype` behaviour: exons are grouped
+    // by their biotype, so reads overlapping multiple genes of the SAME
+    // biotype are assigned (not ambiguous). Indexed by biotype_idx.
+    biotype_reads: Vec<u64>,
+    /// Total reads assigned at the biotype level (biotype-level fc_assigned)
+    fc_biotype_assigned: u64,
+
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
 }
 
 impl ChromResult {
-    /// Create a new empty result with the given number of genes.
-    fn new(num_genes: usize) -> Self {
+    /// Create a new empty result with the given number of genes and biotypes.
+    fn new(num_genes: usize, num_biotypes: usize) -> Self {
         ChromResult {
             gene_counts: vec![GeneCounts::default(); num_genes],
             unmatched_mates: HashMap::new(),
@@ -596,6 +615,8 @@ impl ChromResult {
             fc_multimapping: 0,
             fc_unmapped: 0,
             fc_singleton: 0,
+            biotype_reads: vec![0u64; num_biotypes],
+            fc_biotype_assigned: 0,
             qualimap: None,
         }
     }
@@ -629,6 +650,11 @@ impl ChromResult {
         self.fc_multimapping += other.fc_multimapping;
         self.fc_unmapped += other.fc_unmapped;
         self.fc_singleton += other.fc_singleton;
+        // Merge biotype-level counts
+        for (i, &count) in other.biotype_reads.iter().enumerate() {
+            self.biotype_reads[i] += count;
+        }
+        self.fc_biotype_assigned += other.fc_biotype_assigned;
         // Merge Qualimap accumulator
         if let Some(other_qm) = other.qualimap {
             if let Some(ref mut self_qm) = self.qualimap {
@@ -665,6 +691,49 @@ fn classify_read_fc(is_multi: bool, gene_hits: &[GeneIdx], result: &mut ChromRes
     }
 }
 
+/// Per-read biotype-level featureCounts classification.
+///
+/// Matches `featureCounts -g gene_biotype` behaviour: exons from all genes
+/// sharing the same biotype are grouped into a single meta-feature. A read
+/// overlapping two different genes of the SAME biotype is therefore Assigned
+/// (not ambiguous), because it maps to a single biotype meta-feature.
+///
+/// `gene_to_biotype` maps each gene_idx to a biotype_idx (u16::MAX = unknown).
+/// `biotype_hits_buf` is a reusable scratch buffer to avoid per-call allocation.
+fn classify_read_fc_biotype(
+    is_multi: bool,
+    gene_hits: &[GeneIdx],
+    gene_to_biotype: &[u16],
+    biotype_hits_buf: &mut Vec<u16>,
+    result: &mut ChromResult,
+) {
+    // Multi-mapped reads are excluded from biotype counting too
+    if is_multi || gene_hits.is_empty() {
+        return;
+    }
+    // Map gene_hits to unique biotype hits
+    biotype_hits_buf.clear();
+    for &gidx in gene_hits {
+        let bidx = gene_to_biotype[gidx as usize];
+        if bidx != u16::MAX {
+            biotype_hits_buf.push(bidx);
+        }
+    }
+    biotype_hits_buf.sort_unstable();
+    biotype_hits_buf.dedup();
+
+    if biotype_hits_buf.len() == 1 {
+        // Single biotype hit → Assigned at biotype level
+        let bidx = biotype_hits_buf[0] as usize;
+        if bidx < result.biotype_reads.len() {
+            result.biotype_reads[bidx] += 1;
+            result.fc_biotype_assigned += 1;
+        }
+    }
+    // Multiple biotype hits → Ambiguous at biotype level (not counted)
+    // Zero biotype hits (all unknown) → not counted
+}
+
 /// Process a batch of chromosomes from an alignment file, counting reads against gene annotations.
 ///
 /// Opens its own indexed reader and seeks to each chromosome in the batch.
@@ -687,8 +756,10 @@ fn process_chromosome_batch(
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
+    gene_to_biotype: &[u16],
+    num_biotypes: usize,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
-    let mut result = ChromResult::new(num_genes);
+    let mut result = ChromResult::new(num_genes, num_biotypes);
     if qualimap_index.is_some() {
         result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(stranded));
     }
@@ -727,6 +798,7 @@ fn process_chromosome_batch(
     // Reusable buffers
     let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
     let mut gene_hits: Vec<GeneIdx> = Vec::new();
+    let mut biotype_hits_buf: Vec<u16> = Vec::new();
     let mut mate_buffer: HashMap<MateBufferKey, MateInfo> = HashMap::new();
     let mut record = bam::Record::new();
 
@@ -854,6 +926,13 @@ fn process_chromosome_batch(
 
             // --- Per-read featureCounts counting (independent of mate pairing) ---
             classify_read_fc(is_multi, &gene_hits, &mut result);
+            classify_read_fc_biotype(
+                is_multi,
+                &gene_hits,
+                gene_to_biotype,
+                &mut biotype_hits_buf,
+                &mut result,
+            );
 
             // --- Single-end counting ---
             if !paired {
@@ -1062,8 +1141,34 @@ pub fn count_reads(
         );
     }
 
-    // Build gene_idx → biotype_id lookup for per-read featureCounts counting.
+    // Build gene_idx → biotype_idx lookup for biotype-level featureCounts counting.
     // When featureCounts runs with `-g gene_biotype`, exons are grouped by their
+    // biotype into mega-features. Reads overlapping two genes of the SAME biotype
+    // are "Assigned" (not ambiguous), because they map to one biotype meta-feature.
+    // We build a compact lookup table from gene_idx to biotype_idx so the hot path
+    // can classify reads at the biotype level without string operations.
+    let mut biotype_names: Vec<String> = Vec::new();
+    let mut biotype_name_to_idx: HashMap<String, u16> = HashMap::new();
+    let gene_to_biotype: Vec<u16> = genes
+        .values()
+        .map(|gene| {
+            if let Some(bt) = gene
+                .attributes
+                .get("gene_biotype")
+                .or_else(|| gene.attributes.get("gene_type"))
+            {
+                let next_idx = biotype_names.len() as u16;
+                *biotype_name_to_idx.entry(bt.clone()).or_insert_with(|| {
+                    biotype_names.push(bt.clone());
+                    next_idx
+                })
+            } else {
+                u16::MAX // unknown biotype
+            }
+        })
+        .collect();
+    let num_biotypes = biotype_names.len();
+
     let (mut merged, mut merged_rseqc) = if use_parallel {
         // --- Parallel chromosome processing ---
         //
@@ -1135,13 +1240,15 @@ pub fn count_reads(
                         rseqc_annotations,
                         htslib_threads,
                         qualimap_index,
+                        &gene_to_biotype,
+                        num_biotypes,
                     )
                 })
                 .collect()
         });
 
         // Merge all chromosome results (both dupRadar and RSeQC)
-        let mut merged = ChromResult::new(interner.len());
+        let mut merged = ChromResult::new(interner.len(), num_biotypes);
         let mut merged_rseqc: Option<RseqcAccumulators> =
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         for result in results {
@@ -1159,7 +1266,7 @@ pub fn count_reads(
         // Process all reads sequentially through a single pass over the alignment file.
         // This avoids the need for an index file.
         let global_read_counter = AtomicU64::new(0);
-        let mut result = ChromResult::new(interner.len());
+        let mut result = ChromResult::new(interner.len(), num_biotypes);
         let mut rseqc_accums: Option<RseqcAccumulators> =
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
@@ -1199,6 +1306,7 @@ pub fn count_reads(
         // Reusable buffers
         let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
         let mut gene_hits: Vec<GeneIdx> = Vec::new();
+        let mut biotype_hits_buf: Vec<u16> = Vec::new();
         let mut mate_buffer: HashMap<MateBufferKey, MateInfo> = HashMap::new();
         let mut record = bam::Record::new();
 
@@ -1309,6 +1417,13 @@ pub fn count_reads(
 
             // --- Per-read featureCounts counting (independent of mate pairing) ---
             classify_read_fc(is_multi, &gene_hits, &mut result);
+            classify_read_fc_biotype(
+                is_multi,
+                &gene_hits,
+                &gene_to_biotype,
+                &mut biotype_hits_buf,
+                &mut result,
+            );
 
             if !paired {
                 result.n_multi_dup += 1;
@@ -1674,6 +1789,9 @@ pub fn count_reads(
         fc_multimapping: merged.fc_multimapping,
         fc_unmapped: merged.fc_unmapped,
         fc_singleton: merged.fc_singleton,
+        biotype_reads: merged.biotype_reads,
+        biotype_names,
+        fc_biotype_assigned: merged.fc_biotype_assigned,
         rseqc: merged_rseqc,
         qualimap: match (merged.qualimap, qualimap_index) {
             (Some(mut a), Some(idx)) => {
@@ -1842,7 +1960,7 @@ mod tests {
 
     /// Helper to create a ChromResult for testing classify_read_fc
     fn make_test_chrom_result(num_genes: usize) -> ChromResult {
-        ChromResult::new(num_genes)
+        ChromResult::new(num_genes, 0)
     }
 
     #[test]

@@ -119,32 +119,21 @@ pub fn write_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> 
     Ok(())
 }
 
-/// Aggregate counts by a given GTF attribute (e.g. `gene_biotype`).
+/// Aggregate counts by biotype, matching `featureCounts -g gene_biotype` behaviour.
 ///
-/// Returns an ordered map of attribute_value -> total count.
-/// Genes missing the attribute are grouped under `"unknown"`.
-pub fn aggregate_biotype_counts(
-    genes: &IndexMap<String, Gene>,
-    counts: &CountResult,
-    attribute_name: &str,
-) -> IndexMap<String, u64> {
+/// Uses pre-computed biotype-level read counts from the counting engine, where
+/// exons are grouped by biotype into mega-features (reads overlapping multiple
+/// genes of the same biotype are Assigned, not Ambiguous).
+///
+/// Returns an ordered map of biotype_name -> total count, sorted descending.
+pub fn aggregate_biotype_counts(counts: &CountResult) -> IndexMap<String, u64> {
     let mut biotype_counts: IndexMap<String, u64> = IndexMap::new();
 
-    for (gene_id, gene) in genes.iter() {
-        let biotype = gene
-            .attributes
-            .get(attribute_name)
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_string());
-
-        // Use per-read counts for featureCounts biotype output
-        let count = counts
-            .gene_counts
-            .get(gene_id)
-            .map(|gc| gc.fc_reads)
-            .unwrap_or(0);
-
-        *biotype_counts.entry(biotype).or_insert(0) += count;
+    for (idx, name) in counts.biotype_names.iter().enumerate() {
+        let count = counts.biotype_reads.get(idx).copied().unwrap_or(0);
+        if count > 0 {
+            biotype_counts.insert(name.clone(), count);
+        }
     }
 
     // Sort by count descending for readability
@@ -315,6 +304,9 @@ mod tests {
             },
         );
 
+        // Pre-computed biotype-level counts matching featureCounts -g gene_biotype
+        // behaviour: biotype_names[0] = "protein_coding" (150 reads),
+        // biotype_names[1] = "rRNA" (25 reads). gene4 has no biotype so is not counted.
         let count_result = CountResult {
             gene_counts,
             stat_total_reads: 200,
@@ -328,14 +320,18 @@ mod tests {
             fc_multimapping: 0,
             fc_unmapped: 0,
             fc_singleton: 0,
+            biotype_reads: vec![150, 25],
+            biotype_names: vec!["protein_coding".to_string(), "rRNA".to_string()],
+            fc_biotype_assigned: 175,
             rseqc: None,
             qualimap: None,
         };
 
-        let biotypes = aggregate_biotype_counts(&genes, &count_result, "gene_biotype");
+        let biotypes = aggregate_biotype_counts(&count_result);
 
         assert_eq!(biotypes.get("protein_coding"), Some(&150));
         assert_eq!(biotypes.get("rRNA"), Some(&25));
-        assert_eq!(biotypes.get("unknown"), Some(&10));
+        // gene4 has no biotype attribute, so it's not in biotype_reads
+        assert_eq!(biotypes.get("unknown"), None);
     }
 }
