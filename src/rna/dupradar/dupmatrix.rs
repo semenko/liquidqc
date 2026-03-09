@@ -55,22 +55,19 @@ impl DupMatrix {
     /// - RPKM = RPK * (1_000_000 / N)  where N = total mapped reads
     /// - dupRate = (allCounts - filteredCounts) / allCounts
     pub fn build(genes: &IndexMap<String, Gene>, counts: &CountResult) -> Self {
-        let n_multi_all = counts.total_reads_multi_dup as f64;
-        let n_unique_all = counts.total_reads_unique_dup as f64;
-
-        // For RPKM we use the total mapped reads from the "all" (dup-included) runs,
-        // matching featureCounts convention. dupRadar computes RPK and RPKM for each
-        // of the 4 runs independently, but the final matrix uses:
-        // - Multi columns: N from multi+dup run for allCountsMulti RPKM,
-        //   and N from multi+nodup run for filteredCountsMulti RPKM
-        // - Unique columns: N from unique+dup run for allCounts RPKM,
-        //   and N from unique+nodup run for filteredCounts RPKM
-        //
-        // However, looking at dupRadar source more carefully:
-        // RPK and RPKM in the output use the "dup" (all reads) counts with
-        // the corresponding N from that run.
-        // The "Multi" columns use the multi+dup counts and N.
-        // The non-Multi columns use the unique+dup counts and N.
+        // Compute N exactly as R dupRadar does:
+        //   N <- sum(x$stat[, 2]) - x$stat[x$stat$Status == "Unassigned_Unmapped", 2]
+        // This equals the total number of fragments across all featureCounts stat
+        // categories minus unmapped fragments. Both multi-mapper and unique-mapper
+        // runs produce the same N because multi-mapped reads are always included
+        // in the sum (as either Assigned or Unassigned_MultiMapping).
+        let n_from_fc_stats = (counts.fc_assigned
+            + counts.fc_ambiguous
+            + counts.fc_no_features
+            + counts.fc_multimapping
+            + counts.fc_singleton) as f64;
+        let n_multi_all = n_from_fc_stats;
+        let n_unique_all = n_from_fc_stats;
 
         let mut rows = Vec::with_capacity(genes.len());
         let default_counts = GeneCounts::default();
