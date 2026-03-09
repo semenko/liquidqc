@@ -184,6 +184,9 @@ complete list of toggles.
 
 ## Effect of CPU count
 
+RustQC speed is typically bound by CPU and disk I/O. It is designed to heavily
+parallelise work to achieve the best performance possible with multiple CPUs.
+
 RustQC parallelises by assigning chromosomes to worker threads -- each worker
 opens its own BAM reader and processes its assigned chromosomes independently.
 
@@ -192,7 +195,7 @@ but in practice returns diminish well before that limit because chromosomes
 aren't split and have very different lengths - so the longest chromosome becomes
 the parellisation bottleneck.
 
-Performance plateaus at roughly **4-8 threads** (~2× speedup). Additional threads beyond
+Performance plateaus at roughly **4-8 threads** (~2x speedup). Additional threads beyond
 this point are used for BAM decompression and add little benefit while
 increasing memory usage (each worker maintains its own per-chromosome
 accumulators).
@@ -202,6 +205,12 @@ so the practical ceiling scales with the number of inputs.
 
 A BAM index (`.bai`/`.csi`) is required for parallel mode. Without one, RustQC
 falls back to a single counting thread.
+
+:::tip
+In our benchmarks, running on AWS with the `c5ad.2xlarge` or `c8gd.2xlarge`
+works well. RustQC compiles to x86 CPU archiecture or ARM, so the cheaper and
+more energy-efficient Graviton instances perform well.
+:::
 
 ### CPU scaling benchmarks
 
