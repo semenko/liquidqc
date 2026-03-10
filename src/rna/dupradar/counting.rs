@@ -875,15 +875,8 @@ fn process_chromosome_batch(
             }
 
             // Determine if the read is a multimapper (NH tag)
-            let is_multi = match record.aux(b"NH") {
-                Ok(rust_htslib::bam::record::Aux::U8(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::U16(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::U32(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::I8(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::I16(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::I32(nh)) => nh > 1,
-                _ => false,
-            };
+            let is_multi =
+                crate::rna::bam_flags::get_aux_int(&record, b"NH").is_some_and(|nh| nh > 1);
             if is_multi {
                 result.total_multi += 1;
             }
@@ -961,15 +954,8 @@ fn process_chromosome_batch(
             let mate_pos_val = record.mpos();
             let mate_tid = record.mtid();
 
-            let hi_tag: i32 = match record.aux(b"HI") {
-                Ok(rust_htslib::bam::record::Aux::U8(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::U16(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::U32(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::I8(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::I16(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::I32(v)) => v,
-                _ => -1,
-            };
+            let hi_tag: i32 =
+                crate::rna::bam_flags::get_aux_int(&record, b"HI").map_or(-1, |v| v as i32);
 
             let buffer_key: MateBufferKey = if is_read1 {
                 (qname_hash, own_tid, own_pos, mate_tid, mate_pos_val, hi_tag)
@@ -1367,15 +1353,8 @@ pub fn count_reads(
                 result.total_dup += 1;
             }
 
-            let is_multi = match record.aux(b"NH") {
-                Ok(rust_htslib::bam::record::Aux::U8(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::U16(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::U32(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::I8(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::I16(nh)) => nh > 1,
-                Ok(rust_htslib::bam::record::Aux::I32(nh)) => nh > 1,
-                _ => false,
-            };
+            let is_multi =
+                crate::rna::bam_flags::get_aux_int(&record, b"NH").is_some_and(|nh| nh > 1);
             if is_multi {
                 result.total_multi += 1;
             }
@@ -1448,15 +1427,8 @@ pub fn count_reads(
             let mate_pos_val = record.mpos();
             let mate_tid_val = record.mtid();
 
-            let hi_tag: i32 = match record.aux(b"HI") {
-                Ok(rust_htslib::bam::record::Aux::U8(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::U16(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::U32(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::I8(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::I16(v)) => v as i32,
-                Ok(rust_htslib::bam::record::Aux::I32(v)) => v,
-                _ => -1,
-            };
+            let hi_tag: i32 =
+                crate::rna::bam_flags::get_aux_int(&record, b"HI").map_or(-1, |v| v as i32);
 
             let buffer_key: MateBufferKey = if is_read1 {
                 (

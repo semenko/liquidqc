@@ -26,3 +26,25 @@ pub const BAM_FQCFAIL: u16 = 0x200;
 pub const BAM_FDUP: u16 = 0x400;
 /// Supplementary alignment (0x800).
 pub const BAM_FSUPPLEMENTARY: u16 = 0x800;
+
+// ============================================================
+// Auxiliary tag helpers
+// ============================================================
+
+/// Extract an integer auxiliary tag from a BAM record.
+///
+/// Handles all integer Aux variants (U8, U16, U32, I8, I16, I32)
+/// and returns the value as `i64`. Returns `None` if the tag is
+/// absent or has a non-integer type.
+pub fn get_aux_int(record: &rust_htslib::bam::Record, tag: &[u8]) -> Option<i64> {
+    use rust_htslib::bam::record::Aux;
+    match record.aux(tag) {
+        Ok(Aux::U8(v)) => Some(v as i64),
+        Ok(Aux::U16(v)) => Some(v as i64),
+        Ok(Aux::U32(v)) => Some(v as i64),
+        Ok(Aux::I8(v)) => Some(v as i64),
+        Ok(Aux::I16(v)) => Some(v as i64),
+        Ok(Aux::I32(v)) => Some(v as i64),
+        _ => None,
+    }
+}

@@ -691,15 +691,7 @@ impl QualimapAccum {
 
 /// Extract NH tag (number of reported alignments) from a BAM record.
 fn get_nh_tag(record: &bam::Record) -> Option<u32> {
-    match record.aux(b"NH") {
-        Ok(rust_htslib::bam::record::Aux::U8(v)) => Some(v as u32),
-        Ok(rust_htslib::bam::record::Aux::U16(v)) => Some(v as u32),
-        Ok(rust_htslib::bam::record::Aux::U32(v)) => Some(v),
-        Ok(rust_htslib::bam::record::Aux::I8(v)) => Some(v as u32),
-        Ok(rust_htslib::bam::record::Aux::I16(v)) => Some(v as u32),
-        Ok(rust_htslib::bam::record::Aux::I32(v)) => Some(v as u32),
-        _ => None,
-    }
+    crate::rna::bam_flags::get_aux_int(record, b"NH").map(|v| v as u32)
 }
 
 /// Extract M-only aligned blocks from a BAM record's CIGAR.
