@@ -1495,25 +1495,17 @@ fn hash_sequence_encoded(seq: &bam::record::Seq<'_>) -> u128 {
 fn hash_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView) -> u64 {
     use rust_htslib::bam::record::Cigar;
 
-    // FNV-1a hash of the position key components
-    let mut h: u64 = 0xcbf29ce484222325;
-    let mix = |h: &mut u64, bytes: &[u8]| {
-        for &b in bytes {
-            *h ^= b as u64;
-            *h = h.wrapping_mul(0x100000001b3);
-        }
-    };
-
-    mix(&mut h, chrom.as_bytes());
-    mix(&mut h, &pos.to_le_bytes());
+    let mut h = crate::io::FNV1A_OFFSET;
+    crate::io::fnv1a_update(&mut h, chrom.as_bytes());
+    crate::io::fnv1a_update(&mut h, &pos.to_le_bytes());
 
     let mut ref_pos = pos;
     for op in cigar.iter() {
         match op {
             Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
                 let end = ref_pos + *len as i64;
-                mix(&mut h, &ref_pos.to_le_bytes());
-                mix(&mut h, &end.to_le_bytes());
+                crate::io::fnv1a_update(&mut h, &ref_pos.to_le_bytes());
+                crate::io::fnv1a_update(&mut h, &end.to_le_bytes());
                 ref_pos = end;
             }
             Cigar::Del(len) | Cigar::RefSkip(len) => {

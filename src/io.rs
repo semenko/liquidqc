@@ -49,6 +49,37 @@ pub fn open_reader<P: AsRef<Path>>(path: P) -> Result<Box<dyn BufRead>> {
 }
 
 // ============================================================
+// Hashing helpers
+// ============================================================
+
+/// FNV-1a offset basis constant.
+pub const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a prime constant.
+const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// FNV-1a hash of a byte slice.
+///
+/// A fast, non-cryptographic hash used throughout RustQC for hashing
+/// read names, position keys, and fragment identifiers without heap
+/// allocation.
+#[inline(always)]
+pub fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = FNV1A_OFFSET;
+    fnv1a_update(&mut hash, bytes);
+    hash
+}
+
+/// FNV-1a streaming update: mix additional bytes into an existing hash state.
+#[inline(always)]
+pub fn fnv1a_update(hash: &mut u64, bytes: &[u8]) {
+    for &b in bytes {
+        *hash ^= b as u64;
+        *hash = hash.wrapping_mul(FNV1A_PRIME);
+    }
+}
+
+// ============================================================
 // Formatting helpers
 // ============================================================
 
@@ -119,6 +150,27 @@ mod tests {
         encoder.write_all(content.as_bytes()).unwrap();
         encoder.finish().unwrap();
         path
+    }
+
+    #[test]
+    fn test_fnv1a_deterministic() {
+        // Same input always produces the same hash
+        let hash1 = fnv1a(b"test_read_name");
+        let hash2 = fnv1a(b"test_read_name");
+        assert_eq!(hash1, hash2);
+        // Different inputs produce different hashes
+        let hash3 = fnv1a(b"other_read_name");
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_fnv1a_streaming_matches_oneshot() {
+        // Streaming update should match one-shot hash
+        let oneshot = fnv1a(b"hello world");
+        let mut streaming = FNV1A_OFFSET;
+        fnv1a_update(&mut streaming, b"hello ");
+        fnv1a_update(&mut streaming, b"world");
+        assert_eq!(oneshot, streaming);
     }
 
     #[test]

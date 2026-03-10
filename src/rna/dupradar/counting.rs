@@ -530,12 +530,7 @@ type MateBufferKey = (u64, i32, i64, i32, i64, i32);
 /// This avoids allocating a `Vec<u8>` for every read in paired-end mode.
 #[inline(always)]
 fn hash_qname(qname: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
-    for &b in qname {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3); // FNV prime
-    }
-    h
+    crate::io::fnv1a(qname)
 }
 
 /// Accumulated results from processing a batch of chromosomes.

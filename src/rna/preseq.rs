@@ -23,14 +23,7 @@ use crate::config::PreseqConfig;
 /// name without allocating a Vec<u8> per read.
 #[inline(always)]
 fn fnv1a_hash_bytes(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = FNV_OFFSET;
-    for &b in bytes {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
+    crate::io::fnv1a(bytes)
 }
 
 // ============================================================================
@@ -300,15 +293,11 @@ impl PreseqAccum {
 /// GenomicRegion comparison: two fragments are duplicates iff they have the
 /// same chromosome, start, and end positions.
 fn fragment_hash(tid: i32, start: i64, end: i64) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
-    let prime: u64 = 0x100000001b3; // FNV prime
-    for val in [tid as u64, start as u64, end as u64] {
-        for byte in val.to_le_bytes() {
-            h ^= byte as u64;
-            h = h.wrapping_mul(prime);
-        }
-    }
-    h
+    let mut buf = [0u8; 24];
+    buf[0..8].copy_from_slice(&(tid as u64).to_le_bytes());
+    buf[8..16].copy_from_slice(&(start as u64).to_le_bytes());
+    buf[16..24].copy_from_slice(&(end as u64).to_le_bytes());
+    crate::io::fnv1a(&buf)
 }
 
 // ============================================================================
