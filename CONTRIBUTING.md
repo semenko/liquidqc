@@ -52,6 +52,27 @@ cargo fmt --check        # check formatting without changes
 cargo clippy -- -D warnings  # lint with warnings as errors
 ```
 
+### Pre-commit hooks
+
+The repository includes a [pre-commit](https://pre-commit.com/) configuration
+that runs formatting and linting checks before each commit.
+We recommend [prek](https://github.com/j178/prek) (a fast Rust rewrite of pre-commit):
+
+```bash
+brew install prek   # or: cargo install prek
+prek install
+```
+
+This runs `cargo fmt --check` and `cargo clippy -- -D warnings` automatically
+on every commit, plus basic file hygiene checks. If a hook fails, fix the issue
+and re-stage your changes.
+
+To run all hooks manually:
+
+```bash
+prek run --all-files
+```
+
 ## Project structure
 
 RustQC is a **binary crate** with a nested module structure. All top-level modules are declared in `main.rs` (no `lib.rs`).
@@ -116,7 +137,7 @@ Inter-module access uses `crate::` paths (e.g., `use crate::gtf::Gene;`).
 1. Fork the repository and create a branch from `main`.
 2. Make your changes, following the code style below.
 3. Add or update tests as appropriate.
-4. Run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` locally.
+4. Run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` locally (or use `prek run --all-files` for fmt + clippy).
 5. Open a pull request against `main`.
 
 ## Code style
