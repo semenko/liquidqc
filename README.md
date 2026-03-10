@@ -9,6 +9,11 @@
 <h4 align="center">Fast genomics quality control tools for sequencing data, written in Rust.</h4>
 
 <p align="center">
+  <a href="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml"><img src="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/seqeralabs/RustQC/blob/main/LICENSE"><img src="https://img.shields.io/github/license/seqeralabs/RustQC" alt="License"></a>
+</p>
+
+<p align="center">
   <a href="https://rustqc.netlify.app/">Documentation</a> &bull;
   <a href="https://rustqc.netlify.app/getting-started/quickstart/">Quickstart</a> &bull;
   <a href="https://rustqc.netlify.app/benchmarks/combined/">Benchmarks</a> &bull;
