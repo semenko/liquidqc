@@ -96,7 +96,6 @@ impl TinResults {
     pub fn len(&self) -> usize {
         self.transcripts.len()
     }
-
 }
 
 // ===================================================================

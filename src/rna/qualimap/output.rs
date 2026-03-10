@@ -9,11 +9,11 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use log::info;
 
-use crate::cli::Strandedness;
 use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
 use super::plots;
 use super::QualimapResult;
+use crate::cli::Strandedness;
 
 // ============================= Constants =======================================
 

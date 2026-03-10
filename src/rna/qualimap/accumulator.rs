@@ -1006,7 +1006,14 @@ mod tests {
     fn test_find_enclosing_genes_empty_chrom() {
         let genes = indexmap::IndexMap::new();
         let index = QualimapIndex::from_genes(&genes);
-        let result = find_enclosing_genes(&[(100, 200)], "chr1", &index, Strandedness::Unstranded, false, true);
+        let result = find_enclosing_genes(
+            &[(100, 200)],
+            "chr1",
+            &index,
+            Strandedness::Unstranded,
+            false,
+            true,
+        );
         assert!(result.is_empty());
     }
 

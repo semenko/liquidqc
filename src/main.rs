@@ -299,10 +299,9 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         );
     }
     // Resolve effective stranded/paired early for logging (config loaded above)
-    let effective_stranded = cli::Strandedness::from_u8(
-        args.stranded.or(config.stranded).unwrap_or(0),
-    )
-    .expect("stranded value already validated");
+    let effective_stranded =
+        cli::Strandedness::from_u8(args.stranded.or(config.stranded).unwrap_or(0))
+            .expect("stranded value already validated");
     let effective_paired = args.paired || config.paired.unwrap_or(false);
     info!("Stranded: {}", effective_stranded);
     info!("Paired: {}", effective_paired);
