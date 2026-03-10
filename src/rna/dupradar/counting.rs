@@ -9,6 +9,7 @@
 //!
 //! This implements a simplified featureCounts-compatible counting strategy.
 
+use crate::cli::Strandedness;
 use crate::gtf::Gene;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
@@ -417,15 +418,15 @@ fn build_index(
 /// * `is_read1` - Whether this is the first read in a pair (for paired-end)
 /// * `paired` - Whether the library is paired-end
 /// * `gene_strand` - The strand of the gene ('+' or '-')
-/// * `stranded` - Library strandedness (0=unstranded, 1=forward, 2=reverse)
+/// * `stranded` - Library strandedness
 fn strand_matches(
     read_reverse: bool,
     is_read1: bool,
     paired: bool,
     gene_strand: char,
-    stranded: u8,
+    stranded: Strandedness,
 ) -> bool {
-    if stranded == 0 || gene_strand == '.' {
+    if stranded == Strandedness::Unstranded || gene_strand == '.' {
         return true; // Unstranded: everything matches
     }
 
@@ -445,15 +446,15 @@ fn strand_matches(
     };
 
     match stranded {
-        1 => {
+        Strandedness::Forward => {
             // Forward stranded: read (or read1) aligns to the same strand as the gene
             (effective_plus && gene_strand == '+') || (!effective_plus && gene_strand == '-')
         }
-        2 => {
+        Strandedness::Reverse => {
             // Reverse stranded: read (or read1) aligns to the opposite strand of the gene
             (!effective_plus && gene_strand == '+') || (effective_plus && gene_strand == '-')
         }
-        _ => true,
+        Strandedness::Unstranded => true,
     }
 }
 
@@ -745,7 +746,7 @@ fn process_counting_record(
     result: &mut ChromResult,
     index: &HashMap<String, ChromIndex>,
     chrom: &str,
-    stranded: u8,
+    stranded: Strandedness,
     paired: bool,
     gene_to_biotype: &[u16],
     aligned_blocks_buf: &mut Vec<(u64, u64)>,
@@ -915,7 +916,7 @@ fn process_chromosome_batch(
     tid_to_name: &[String],
     index: &HashMap<String, ChromIndex>,
     num_genes: usize,
-    stranded: u8,
+    stranded: Strandedness,
     paired: bool,
     chrom_mapping: &HashMap<String, String>,
     chrom_prefix: Option<&str>,
@@ -1084,7 +1085,7 @@ fn partition_chromosomes(lengths: &[u64], num_workers: usize) -> Vec<Vec<u32>> {
 pub fn count_reads(
     bam_path: &str,
     genes: &IndexMap<String, Gene>,
-    stranded: u8,
+    stranded: Strandedness,
     paired: bool,
     threads: usize,
     chrom_mapping: &HashMap<String, String>,
@@ -1662,45 +1663,49 @@ mod tests {
     #[test]
     fn test_strand_matching_unstranded() {
         // Unstranded: everything matches
-        assert!(strand_matches(false, true, false, '+', 0));
-        assert!(strand_matches(true, true, false, '+', 0));
-        assert!(strand_matches(false, true, false, '-', 0));
-        assert!(strand_matches(true, true, false, '-', 0));
+        let u = Strandedness::Unstranded;
+        assert!(strand_matches(false, true, false, '+', u));
+        assert!(strand_matches(true, true, false, '+', u));
+        assert!(strand_matches(false, true, false, '-', u));
+        assert!(strand_matches(true, true, false, '-', u));
     }
 
     #[test]
     fn test_strand_matching_forward_single() {
         // Forward stranded, single-end
+        let f = Strandedness::Forward;
         // Read on + strand should match + gene
-        assert!(strand_matches(false, true, false, '+', 1));
+        assert!(strand_matches(false, true, false, '+', f));
         // Read on - strand should match - gene
-        assert!(strand_matches(true, true, false, '-', 1));
+        assert!(strand_matches(true, true, false, '-', f));
         // Read on + strand should NOT match - gene
-        assert!(!strand_matches(false, true, false, '-', 1));
+        assert!(!strand_matches(false, true, false, '-', f));
         // Read on - strand should NOT match + gene
-        assert!(!strand_matches(true, true, false, '+', 1));
+        assert!(!strand_matches(true, true, false, '+', f));
     }
 
     #[test]
     fn test_strand_matching_reverse_single() {
         // Reverse stranded, single-end
+        let r = Strandedness::Reverse;
         // Read on + strand should match - gene (reversed)
-        assert!(strand_matches(false, true, false, '-', 2));
+        assert!(strand_matches(false, true, false, '-', r));
         // Read on - strand should match + gene (reversed)
-        assert!(strand_matches(true, true, false, '+', 2));
+        assert!(strand_matches(true, true, false, '+', r));
     }
 
     #[test]
     fn test_strand_matching_forward_paired() {
         // Forward stranded, paired-end
+        let f = Strandedness::Forward;
         // Read1 on + strand: effective + -> matches + gene
-        assert!(strand_matches(false, true, true, '+', 1));
+        assert!(strand_matches(false, true, true, '+', f));
         // Read2 on + strand: effective - -> matches - gene
-        assert!(strand_matches(false, false, true, '-', 1));
+        assert!(strand_matches(false, false, true, '-', f));
         // Read1 on - strand: effective - -> matches - gene
-        assert!(strand_matches(true, true, true, '-', 1));
+        assert!(strand_matches(true, true, true, '-', f));
         // Read2 on - strand: effective + -> matches + gene
-        assert!(strand_matches(true, false, true, '+', 1));
+        assert!(strand_matches(true, false, true, '+', f));
     }
 
     // ---------------------------------------------------------------

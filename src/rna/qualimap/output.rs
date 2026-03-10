@@ -9,6 +9,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use log::info;
 
+use crate::cli::Strandedness;
 use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
 use super::plots;
@@ -335,7 +336,7 @@ pub fn write_qualimap_results(
     index: &QualimapIndex,
     bam_path: &str,
     gtf_path: &str,
-    stranded: u8,
+    stranded: Strandedness,
     output_dir: &Path,
     sample_name: &str,
     junction_counts: Option<(u64, u64, u64)>,
@@ -577,7 +578,7 @@ fn write_results_file(
     bam_path: &str,
     gtf_path: &str,
     paired: bool,
-    stranded: u8,
+    stranded: Strandedness,
     five_bias: f64,
     three_bias: f64,
     five_three_bias: f64,
@@ -600,9 +601,9 @@ fn write_results_file(
     writeln!(f, "    gff file = {gtf_path}")?;
     writeln!(f, "    counting algorithm = uniquely-mapped-reads")?;
     let protocol = match stranded {
-        1 => "strand-specific-forward",
-        2 => "strand-specific-reverse",
-        _ => "non-strand-specific",
+        Strandedness::Forward => "strand-specific-forward",
+        Strandedness::Reverse => "strand-specific-reverse",
+        Strandedness::Unstranded => "non-strand-specific",
     };
     writeln!(f, "    protocol = {protocol}")?;
     writeln!(f, "    5'-3' bias region size = {NUM_PRIME_BASES}")?;
@@ -672,9 +673,9 @@ fn write_results_file(
         format_with_commas(result.not_aligned)
     )?;
 
-    // SSP estimation — only written when protocol was not pre-specified (stranded == 0)
+    // SSP estimation — only written when protocol was not pre-specified (unstranded)
     // When the user specifies --stranded, Qualimap does not output this line.
-    if stranded == 0 {
+    if stranded == Strandedness::Unstranded {
         let ssp_total = result.ssp_fwd + result.ssp_rev;
         if ssp_total > 0 {
             let fwd = result.ssp_fwd as f64 / ssp_total as f64;

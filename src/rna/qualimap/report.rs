@@ -8,6 +8,8 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+
+use crate::cli::Strandedness;
 use log::info;
 
 // ===================================================================
@@ -106,8 +108,8 @@ pub struct ReportData<'a> {
     pub gtf_path: &'a str,
     /// Whether the data is paired-end.
     pub paired: bool,
-    /// Strandedness (0 = unstranded/auto, 1 = forward, 2 = reverse).
-    pub stranded: u8,
+    /// Strandedness.
+    pub stranded: Strandedness,
     /// Left-mapped proper pairs (PE only).
     pub left_proper: u64,
     /// Right-mapped proper pairs (PE only).
@@ -279,9 +281,9 @@ fn write_input_section(html: &mut String, data: &ReportData) {
     html.push_str("<table class=\"summary hovertable\">\n");
 
     let protocol = match data.stranded {
-        1 => "strand-specific-forward",
-        2 => "strand-specific-reverse",
-        _ => "non-strand-specific",
+        Strandedness::Forward => "strand-specific-forward",
+        Strandedness::Reverse => "strand-specific-reverse",
+        Strandedness::Unstranded => "non-strand-specific",
     };
 
     // Date row — matches Qualimap's "Analysis date: " label
@@ -380,8 +382,8 @@ fn write_summary_section(html: &mut String, data: &ReportData) {
     );
     table_row(html, "Not aligned:", &format_with_commas(data.not_aligned));
 
-    // SSP estimation (if stranded == 0)
-    if data.stranded == 0 {
+    // SSP estimation (if unstranded)
+    if data.stranded == Strandedness::Unstranded {
         let total_ssp = data.ssp_fwd + data.ssp_rev;
         if total_ssp > 0 {
             let fwd_pct = data.ssp_fwd as f64 / total_ssp as f64 * 100.0;

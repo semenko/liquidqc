@@ -126,7 +126,7 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     )];
     parts.push(format!("--gtf {}", shell_escape(&args.gtf)));
     if let Some(s) = args.stranded {
-        parts.push(format!("-s {}", s));
+        parts.push(format!("-s {s}"));
     }
     if args.paired {
         parts.push("-p".to_string());
@@ -286,17 +286,12 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         );
     }
     // Resolve effective stranded/paired early for logging (config loaded above)
-    let effective_stranded = args.stranded.or(config.stranded).unwrap_or(0);
+    let effective_stranded = cli::Strandedness::from_u8(
+        args.stranded.or(config.stranded).unwrap_or(0),
+    )
+    .expect("stranded value already validated");
     let effective_paired = args.paired || config.paired.unwrap_or(false);
-    info!(
-        "Stranded: {}",
-        match effective_stranded {
-            0 => "unstranded",
-            1 => "forward",
-            2 => "reverse",
-            _ => "unknown",
-        }
-    );
+    info!("Stranded: {}", effective_stranded);
     info!("Paired: {}", effective_paired);
     info!("Threads: {}", args.threads);
 
@@ -592,8 +587,8 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
 /// that are computed once in `run_rna()` and passed to each `process_single_bam()`.
 /// This avoids a long parameter list on the processing function.
 struct SharedParams<'a> {
-    /// Library strandedness (0/1/2).
-    stranded: u8,
+    /// Library strandedness.
+    stranded: cli::Strandedness,
     /// Whether the library is paired-end.
     paired: bool,
     /// Alignment-to-GTF chromosome name mapping.

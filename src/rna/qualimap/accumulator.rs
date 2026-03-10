@@ -13,6 +13,8 @@ use coitrees::IntervalTree;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
 
+use crate::cli::Strandedness;
+
 use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
 
@@ -191,16 +193,13 @@ pub struct QualimapAccum {
     pub junction_motifs: JunctionMotifCounts,
     /// Mate buffer for PE reconciliation.
     mate_buffer: HashMap<MateKey, MateData>,
-    /// Strandedness protocol: 0=unstranded, 1=forward, 2=reverse.
-    stranded: u8,
+    /// Strandedness protocol.
+    stranded: Strandedness,
 }
 
 impl QualimapAccum {
     /// Create a new Qualimap accumulator.
-    ///
-    /// # Arguments
-    /// * `stranded` - Strandedness: 0=unstranded, 1=forward, 2=reverse.
-    pub fn new(stranded: u8) -> Self {
+    pub fn new(stranded: Strandedness) -> Self {
         Self {
             counters: QualimapCounters::default(),
             coverage: TranscriptCoverage::new(),
@@ -878,7 +877,7 @@ fn cache_block_hits(
 /// M-block and pass the strand filter to be included.
 fn find_enclosing_genes_cached(
     cached_hits: &[CachedBlockHits],
-    stranded: u8,
+    stranded: Strandedness,
     is_reverse: bool,
     is_first_of_pair: bool,
 ) -> HashSet<u32> {
@@ -888,12 +887,13 @@ fn find_enclosing_genes_cached(
 
     // Compute the effective strand of this read after protocol correction.
     // Qualimap's getReadIntervals() flips the strand of:
-    //   - read1 for strand-specific-reverse (stranded=2)
-    //   - read2 for strand-specific-forward (stranded=1)
-    let read_on_plus = if stranded == 0 {
+    //   - read1 for strand-specific-reverse (Reverse)
+    //   - read2 for strand-specific-forward (Forward)
+    let read_on_plus = if stranded == Strandedness::Unstranded {
         true // no filtering; handled by skipping strand check below
     } else {
-        let flip = (stranded == 2 && is_first_of_pair) || (stranded == 1 && !is_first_of_pair);
+        let flip = (stranded == Strandedness::Reverse && is_first_of_pair)
+            || (stranded == Strandedness::Forward && !is_first_of_pair);
         if flip {
             is_reverse
         } else {
@@ -903,7 +903,7 @@ fn find_enclosing_genes_cached(
 
     // Closure: does a gene's strand match this read?
     let strand_ok = |gene_strand: u8| -> bool {
-        if stranded == 0 {
+        if stranded == Strandedness::Unstranded {
             return true;
         }
         (read_on_plus && gene_strand == b'+') || (!read_on_plus && gene_strand == b'-')
@@ -945,7 +945,7 @@ fn find_enclosing_genes(
     m_blocks: &[(i32, i32)],
     chrom: &str,
     index: &QualimapIndex,
-    stranded: u8,
+    stranded: Strandedness,
     is_reverse: bool,
     is_first_of_pair: bool,
 ) -> HashSet<u32> {
@@ -1007,7 +1007,7 @@ mod tests {
     fn test_find_enclosing_genes_empty_chrom() {
         let genes = indexmap::IndexMap::new();
         let index = QualimapIndex::from_genes(&genes);
-        let result = find_enclosing_genes(&[(100, 200)], "chr1", &index, 0, false, true);
+        let result = find_enclosing_genes(&[(100, 200)], "chr1", &index, Strandedness::Unstranded, false, true);
         assert!(result.is_empty());
     }
 

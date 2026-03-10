@@ -12,6 +12,45 @@
 
 use clap::{Parser, Subcommand};
 
+/// Library strandedness protocol.
+///
+/// Determines how read strand is interpreted relative to the gene annotation
+/// strand during counting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Strandedness {
+    /// Count reads on either strand (library is not strand-specific).
+    #[default]
+    Unstranded,
+    /// Forward stranded: read 1 maps to the transcript strand.
+    Forward,
+    /// Reverse stranded: read 2 maps to the transcript strand (e.g. dUTP).
+    Reverse,
+}
+
+impl Strandedness {
+    /// Convert from the integer convention used by featureCounts / HTSeq.
+    ///
+    /// Returns `None` for values outside 0..=2.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0 => Some(Strandedness::Unstranded),
+            1 => Some(Strandedness::Forward),
+            2 => Some(Strandedness::Reverse),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Strandedness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Strandedness::Unstranded => write!(f, "unstranded"),
+            Strandedness::Forward => write!(f, "forward"),
+            Strandedness::Reverse => write!(f, "reverse"),
+        }
+    }
+}
+
 /// Fast quality control tools for sequencing data, written in Rust.
 ///
 /// RustQC runs a comprehensive suite of RNA-Seq QC analyses in a single pass
@@ -271,7 +310,7 @@ mod tests {
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.gtf, "genes.gtf");
-                assert_eq!(args.stranded, Some(2));
+                assert_eq!(args.stranded, Some(2)); // CLI still parses u8
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");
