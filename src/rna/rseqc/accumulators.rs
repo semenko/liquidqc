@@ -1326,6 +1326,8 @@ pub struct InferExpAccum {
     pub p_strandness: HashMap<String, u64>,
     /// Single-end strand class counts (keys: "++", "--", "+-", "-+", etc.)
     pub s_strandness: HashMap<String, u64>,
+    /// Reusable key buffer to avoid per-read format!() allocations.
+    key_buf: String,
 }
 
 impl InferExpAccum {
@@ -1382,23 +1384,32 @@ impl InferExpAccum {
             return;
         }
 
-        let strand_str: String = strands
-            .iter()
-            .map(|&s| (s as char).to_string())
-            .collect::<Vec<String>>()
-            .join(":");
-
-        if record.is_paired() {
-            let read_id = if record.is_first_in_template() {
-                "1"
+        // Build key in reusable buffer to avoid per-read allocation.
+        // Keys are small (e.g. "1++", "2+-", "++:-") with ~12 distinct values.
+        self.key_buf.clear();
+        let map = if record.is_paired() {
+            self.key_buf.push(if record.is_first_in_template() {
+                '1'
             } else {
-                "2"
-            };
-            let key = format!("{}{}{}", read_id, map_strand, strand_str);
-            *self.p_strandness.entry(key).or_insert(0) += 1;
+                '2'
+            });
+            &mut self.p_strandness
         } else {
-            let key = format!("{}{}", map_strand, strand_str);
-            *self.s_strandness.entry(key).or_insert(0) += 1;
+            &mut self.s_strandness
+        };
+        self.key_buf.push(map_strand);
+        for (i, &s) in strands.iter().enumerate() {
+            if i > 0 {
+                self.key_buf.push(':');
+            }
+            self.key_buf.push(s as char);
+        }
+        // Only allocate a new String for first-seen keys
+        match map.get_mut(self.key_buf.as_str()) {
+            Some(count) => *count += 1,
+            None => {
+                map.insert(self.key_buf.clone(), 1);
+            }
         }
     }
 
