@@ -54,4 +54,3 @@ RNA-Seq QC report
     TCCT : 2.50%
     ACCA : 2.19%
     TGTC : 2.18%
-

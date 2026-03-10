@@ -11,8 +11,8 @@ table.summary{
 }
 
 div.table-summary{
-	margin-left:auto; 
-  margin-right:auto; 
+	margin-left:auto;
+  margin-right:auto;
 	padding-bottom: 20px;
 }
 
@@ -44,7 +44,3 @@ table.hovertable td {
 	border-style: solid;
 	border-color: #a9c6c9;
 }
-
-
-
-

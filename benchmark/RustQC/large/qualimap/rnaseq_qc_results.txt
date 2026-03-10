@@ -55,4 +55,3 @@ RNA-Seq QC report
     AGGG : 2.31%
     CCCT : 2.27%
     AGAT : 2.04%
-
