@@ -329,8 +329,8 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     }
     ui.config("Stranded", &effective_stranded.to_string());
     ui.config("Paired", &effective_paired.to_string());
-    ui.config("Threads", &args.threads.to_string());
-    ui.config("Output", &args.outdir);
+    ui.config("CPU Threads", &args.threads.to_string());
+    ui.config("Output dir", &args.outdir);
 
     // Determine biotype attribute name (CLI overrides config, with auto-detection fallback)
     let configured_biotype = args
@@ -670,7 +670,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         }
     }
 
-    ui.finish(elapsed);
+    ui.finish("RustQC run finished", elapsed);
 
     if n_err > 0 {
         anyhow::bail!("{} file(s) failed to process", n_err);
@@ -1349,7 +1349,7 @@ fn process_single_bam(
             junction_counts,
         )?;
         let p = qm_dir.display().to_string();
-        ui.output_item("Qualimap", &p);
+        ui.output_item("Qualimap", &format!("{p}/*"));
         written_outputs.push(("Qualimap".into(), p));
     }
 
@@ -1376,7 +1376,7 @@ fn process_single_bam(
     written_outputs.extend(rseqc_outputs);
 
     let bam_duration = bam_start.elapsed();
-    ui.finish(bam_duration);
+    ui.finish(bam_stem, bam_duration);
 
     Ok(BamResult {
         duration: bam_duration,
@@ -1455,31 +1455,28 @@ fn write_rseqc_outputs(
     };
 
     // --- samtools-compatible outputs (flagstat, idxstats, stats) ---
-    // These consume data from BamStatAccum, so they are written before
-    // the main bam_stat output to share the same result.
     let samtools_dir = if flat {
         outdir.to_path_buf()
     } else {
         outdir.join("samtools")
     };
 
-    // --- bam_stat ---
-    if let Some(accum) = accums.bam_stat {
-        std::fs::create_dir_all(&rseqc_bam_stat_dir)?;
-        let result = accum.into_result();
-        if params.config.bam_stat.enabled {
-            let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
-            rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
-            let p = output_path.display().to_string();
-            ui.output_item("bam_stat", &p);
-            written.push(("bam_stat".into(), p));
+    // Compute bam_stat result once — used by both samtools and RSeQC outputs.
+    let bam_stat_result = accums.bam_stat.map(|accum| accum.into_result());
+
+    if let Some(ref result) = bam_stat_result {
+        let has_samtools = params.config.flagstat.enabled
+            || params.config.idxstats.enabled
+            || params.config.samtools_stats.enabled;
+        if has_samtools {
+            ui.output_group("samtools");
         }
 
         // --- flagstat ---
         if params.config.flagstat.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let flagstat_path = samtools_dir.join(format!("{}.flagstat", bam_stem));
-            rna::rseqc::flagstat::write_flagstat(&result, &flagstat_path)?;
+            rna::rseqc::flagstat::write_flagstat(result, &flagstat_path)?;
             let p = flagstat_path.display().to_string();
             ui.output_item("flagstat", &p);
             written.push(("flagstat".into(), p));
@@ -1489,7 +1486,7 @@ fn write_rseqc_outputs(
         if params.config.idxstats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let idxstats_path = samtools_dir.join(format!("{}.idxstats", bam_stem));
-            rna::rseqc::idxstats::write_idxstats(&result, bam_header_refs, &idxstats_path)?;
+            rna::rseqc::idxstats::write_idxstats(result, bam_header_refs, &idxstats_path)?;
             let p = idxstats_path.display().to_string();
             ui.output_item("idxstats", &p);
             written.push(("idxstats".into(), p));
@@ -1499,10 +1496,37 @@ fn write_rseqc_outputs(
         if params.config.samtools_stats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let stats_path = samtools_dir.join(format!("{}.stats", bam_stem));
-            rna::rseqc::stats::write_stats(&result, &stats_path)?;
+            rna::rseqc::stats::write_stats(result, &stats_path)?;
             let p = stats_path.display().to_string();
-            ui.output_item("samtools stats", &p);
+            ui.output_item("stats", &p);
             written.push(("samtools stats".into(), p));
+        }
+    }
+
+    // --- RSeQC outputs ---
+    {
+        let has_rseqc = (bam_stat_result.is_some() && params.config.bam_stat.enabled)
+            || accums.read_dup.is_some()
+            || accums.infer_exp.is_some()
+            || accums.read_dist.is_some()
+            || accums.junc_annot.is_some()
+            || accums.junc_sat.is_some()
+            || accums.inner_dist.is_some()
+            || accums.tin.is_some();
+        if has_rseqc {
+            ui.output_group("RSeQC");
+        }
+    }
+
+    // --- bam_stat ---
+    if let Some(ref result) = bam_stat_result {
+        if params.config.bam_stat.enabled {
+            std::fs::create_dir_all(&rseqc_bam_stat_dir)?;
+            let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
+            rna::rseqc::bam_stat::write_bam_stat(result, &output_path)?;
+            let p = output_path.display().to_string();
+            ui.output_item("bam_stat", &p);
+            written.push(("bam_stat".into(), p));
         }
     }
 

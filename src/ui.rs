@@ -284,6 +284,14 @@ impl Ui {
         eprintln!("      {}", self.style_dim.apply_to(text));
     }
 
+    /// Print a group header in the output checklist (e.g. "samtools", "RSeQC").
+    pub fn output_group(&self, name: &str) {
+        if self.is_quiet() {
+            return;
+        }
+        eprintln!("    {}", self.style_label.apply_to(format!("{name}:")));
+    }
+
     // ========================================================================
     // Multi-BAM summary
     // ========================================================================
@@ -318,15 +326,15 @@ impl Ui {
     // Finish
     // ========================================================================
 
-    /// Print the final completion line.
-    pub fn finish(&self, duration: Duration) {
+    /// Print a completion line with a label (e.g. BAM stem or "RustQC run finished").
+    pub fn finish(&self, label: &str, duration: Duration) {
         if self.is_quiet() {
             return;
         }
         eprintln!(
             "  {} {} {}",
             self.style_green.apply_to("\u{2713}"),
-            self.style_header.apply_to("Completed"),
+            self.style_header.apply_to(label),
             self.style_dim
                 .apply_to(format!("in {}", format_duration(duration))),
         );
@@ -406,13 +414,7 @@ pub fn format_count(n: u64) -> String {
                 number_prefix::Prefix::Tera => "T",
                 _ => return format!("{:.1}{prefix:?}", n),
             };
-            // Trim trailing zero after decimal point for cleaner output
-            // e.g. "48.0M" → "48M", but keep "48.2M" as-is
-            if n.fract().abs() < 0.05 {
-                format!("{}{suffix}", n as u64)
-            } else {
-                format!("{n:.1}{suffix}")
-            }
+            format!("{n:.1}{suffix}")
         }
     }
 }
@@ -459,22 +461,22 @@ mod tests {
 
     #[test]
     fn test_format_count_thousands() {
-        assert_eq!(format_count(1000), "1K");
+        assert_eq!(format_count(1000), "1.0K");
         assert_eq!(format_count(1500), "1.5K");
-        assert_eq!(format_count(50000), "50K");
+        assert_eq!(format_count(50000), "50.0K");
     }
 
     #[test]
     fn test_format_count_millions() {
-        assert_eq!(format_count(1_000_000), "1M");
+        assert_eq!(format_count(1_000_000), "1.0M");
         assert_eq!(format_count(48_200_000), "48.2M");
-        assert_eq!(format_count(50_000_000), "50M");
+        assert_eq!(format_count(50_000_000), "50.0M");
     }
 
     #[test]
     fn test_format_count_billions() {
-        assert_eq!(format_count(1_000_000_000), "1G");
-        assert_eq!(format_count(5_000_000_000), "5G");
+        assert_eq!(format_count(1_000_000_000), "1.0G");
+        assert_eq!(format_count(5_000_000_000), "5.0G");
     }
 
     #[test]
