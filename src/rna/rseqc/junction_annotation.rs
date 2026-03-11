@@ -188,6 +188,59 @@ pub fn write_junction_bed(results: &JunctionResults, path: &Path) -> Result<()> 
     Ok(())
 }
 
+/// Write the UCSC Interact format BED file.
+///
+/// Produces a file matching RSeQC's `.junction.Interact.bed` output: a UCSC
+/// Interact track with 1bp source/target blocks flanking each splice junction.
+pub fn write_junction_interact_bed(
+    results: &JunctionResults,
+    bam_file: &str,
+    path: &Path,
+) -> Result<()> {
+    let mut f = std::fs::File::create(path)
+        .with_context(|| format!("Failed to create file: {}", path.display()))?;
+
+    // Track header
+    writeln!(
+        f,
+        "track type=interact name=\"Splice junctions\" \
+         description=\"Splice junctions detected from {}\" \
+         maxHeightPixels=200:200:50 visibility=full",
+        bam_file
+    )?;
+
+    // Output junctions in the same order as the other output files
+    for (junction, (count, class)) in &results.junctions {
+        let chrom = format_chrom(&junction.chrom);
+        // Coordinates match the BED12 output: 1bp before intron, 1bp after
+        let chrom_start = junction.intron_start.saturating_sub(1);
+        let chrom_end = junction.intron_end + 1;
+
+        let name = format!("{}:{}-{}_{}", chrom, chrom_start, chrom_end, class.label());
+
+        // Source block: 1bp at the start of the junction
+        let source_start = chrom_start;
+        let source_end = chrom_start + 1;
+        let source_name = format!("{}:{}-{}", chrom, source_start, source_end);
+
+        // Target block: 1bp at the end of the junction
+        let target_start = chrom_end - 1;
+        let target_end = chrom_end;
+        let target_name = format!("{}:{}-{}", chrom, target_start, target_end);
+
+        let color = class.color();
+        writeln!(
+            f,
+            "{chrom}\t{chrom_start}\t{chrom_end}\t{name}\t{count}\t{count}.0\t\
+             RNAseq_junction\t{color}\t\
+             {chrom}\t{source_start}\t{source_end}\t{source_name}\t.\t\
+             {chrom}\t{target_start}\t{target_end}\t{target_name}\t.",
+        )?;
+    }
+
+    Ok(())
+}
+
 /// Write the R script for junction pie charts.
 ///
 /// Generates two pie charts: splice events and splice junctions.

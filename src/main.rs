@@ -1579,6 +1579,14 @@ fn write_rseqc_outputs(
         let bed_out_path = rseqc_junc_annot_dir.join(format!("{}.junction.bed", bam_stem));
         rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_out_path)?;
 
+        let interact_path =
+            rseqc_junc_annot_dir.join(format!("{}.junction.Interact.bed", bam_stem));
+        rna::rseqc::junction_annotation::write_junction_interact_bed(
+            &results,
+            bam_path,
+            &interact_path,
+        )?;
+
         let r_path = rseqc_junc_annot_dir.join(format!("{}.junction_plot.r", bam_stem));
         rna::rseqc::junction_annotation::write_junction_plot_r(&results, &prefix, &r_path)?;
 
