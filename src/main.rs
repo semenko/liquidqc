@@ -330,7 +330,12 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     ui.config("Stranded", &effective_stranded.to_string());
     ui.config("Paired", &effective_paired.to_string());
     ui.config("CPU Threads", &args.threads.to_string());
-    ui.config("Output dir", &args.outdir);
+    let outdir_display = if std::path::Path::new(&args.outdir).is_relative() {
+        format!("./{}", args.outdir)
+    } else {
+        args.outdir.clone()
+    };
+    ui.config("Output dir", &outdir_display);
 
     // Determine biotype attribute name (CLI overrides config, with auto-detection fallback)
     let configured_biotype = args
@@ -363,7 +368,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
                 vec!["gene_biotype", "gene_type"]
             };
             let mut found = false;
-            for alt in alternatives {
+            for alt in &alternatives {
                 if gtf::attribute_exists_in_gtf(gtf_path, alt, 1000) {
                     ui.detail(&format!(
                         "Biotype attribute '{}' not found, using '{}'",
@@ -376,9 +381,18 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
                 }
             }
             if !found {
+                let tried: Vec<_> = std::iter::once(configured_biotype.as_str())
+                    .chain(alternatives.iter().copied())
+                    .collect();
+                let names = tried
+                    .iter()
+                    .map(|a| format!("'{a}'"))
+                    .collect::<Vec<_>>()
+                    .join(" and ");
                 ui.warn(&format!(
-                    "Biotype attribute '{}' not found in GTF, skipping biotype outputs",
-                    configured_biotype
+                    "Biotype attributes {} not found in GTF, skipping biotype outputs \
+                         (use --biotype-attribute to specify)",
+                    names
                 ));
             }
         } else {
