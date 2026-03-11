@@ -1672,7 +1672,8 @@ fn write_rseqc_outputs(
         rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
 
         let mean_path = format!("{prefix}.inner_distance_mean.txt");
-        rna::rseqc::inner_distance::write_mean_file(&results, bam_stem, &mean_path)?;
+        let clean_name = clean_sample_name(bam_stem);
+        rna::rseqc::inner_distance::write_mean_file(&results, &clean_name, &mean_path)?;
 
         let p = rseqc_inner_dist_dir.display().to_string();
         ui.output_item("inner_distance", &format!("{p}/{bam_stem}.*"));

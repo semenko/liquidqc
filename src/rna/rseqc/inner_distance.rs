@@ -8,6 +8,23 @@ use crate::gtf::Gene;
 use anyhow::{ensure, Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
+
+/// Format a float with 15 significant digits (matching R's default `format()`
+/// / `write.table()`), trimming trailing zeros after the decimal point.
+fn format_sig15(v: f64) -> String {
+    if v == 0.0 {
+        return "0".to_string();
+    }
+    let abs_v = v.abs();
+    let digits_before = (abs_v.log10().floor() as i32) + 1;
+    let decimal_places = (15 - digits_before).max(0) as usize;
+    let s = format!("{:.*}", decimal_places, v);
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
+}
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -463,7 +480,15 @@ pub fn write_mean_file(result: &InnerDistanceResult, sample_name: &str, path: &s
             let variance: f64 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
             let sd = variance.sqrt();
 
-            writeln!(file, "{}\t{}\t{}\t{}", sample_name, mean, median, sd)?;
+            // R's write.table uses format() with the default digits = 15.
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}",
+                sample_name,
+                format_sig15(mean),
+                format_sig15(median),
+                format_sig15(sd),
+            )?;
         }
     }
 
