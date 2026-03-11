@@ -121,6 +121,17 @@ RustQC's TIN output uses the same file format and column names as RSeQC's
 the longest transcript as representative), while RSeQC reports one row per
 **transcript**. TIN scores are computed using the same Shannon entropy formula.
 
+:::note[Minor differences from upstream `tin.py`]
+TIN scores may differ very slightly from RSeQC's `tin.py`.
+Both tools sample identical positions and apply identical flag filters, but they
+count per-position coverage differently: upstream uses pysam's pileup engine
+(`bam_plp_auto`) while RustQC uses CIGAR-derived aligned blocks via the BAM
+index. The htslib pileup engine uses a different internal read traversal that can
+miss a small number of reads at certain positions, leading to minor coverage
+differences. In practice, ~70% of TIN values are identical and the mean absolute
+difference is <0.1 TIN units.
+:::
+
 ## References
 
 - **TIN:** Wang L, Nie J, Sicotte H, et al. Measure transcript integrity using
