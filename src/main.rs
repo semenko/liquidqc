@@ -1153,12 +1153,6 @@ fn process_single_bam(
             let matrix_path = dr_dir.join(format!("{}_dupMatrix.txt", bam_stem));
             dup_matrix.write_tsv(&matrix_path)?;
             let p = matrix_path.display().to_string();
-            ui.output_item("dupRadar matrix", &p);
-            ui.output_detail(&format!(
-                "{} genes, {} with reads",
-                format_count(stats.n_regions as u64),
-                format_count(stats.n_regions_covered as u64),
-            ));
             written_outputs.push(("dupRadar matrix".into(), p));
         }
 
@@ -1205,8 +1199,6 @@ fn process_single_bam(
             || config.dupradar.expression_histogram;
 
         if any_plot {
-            let plot_start = Instant::now();
-
             let rpkm_threshold = 0.5;
             let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
                 let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
@@ -1222,7 +1214,6 @@ fn process_single_bam(
             let boxplot_path = dr_dir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
             let histogram_path = dr_dir.join(format!("{}_expressionHist.png", bam_stem));
 
-            let mut plot_count = 0u32;
             std::thread::scope(|s| -> Result<()> {
                 // Density scatter plot (only if fit succeeded and enabled)
                 let density_handle = if config.dupradar.density_scatter_plot {
@@ -1272,34 +1263,22 @@ fn process_single_bam(
                     handle
                         .join()
                         .map_err(|_| anyhow::anyhow!("density scatter plot thread panicked"))??;
-                    plot_count += 1;
                 }
                 if let Some(handle) = boxplot_handle {
                     handle
                         .join()
                         .map_err(|_| anyhow::anyhow!("boxplot thread panicked"))??;
-                    plot_count += 1;
                 }
                 if let Some(handle) = histogram_handle {
                     handle
                         .join()
                         .map_err(|_| anyhow::anyhow!("histogram thread panicked"))??;
-                    plot_count += 1;
                 }
 
                 Ok(())
             })?;
 
             let plots_dir = dr_dir.display().to_string();
-            ui.output_item(
-                "Plots",
-                &format!(
-                    "{}/*.png ({} files, {})",
-                    plots_dir,
-                    plot_count,
-                    format_duration(plot_start.elapsed())
-                ),
-            );
             written_outputs.push(("dupRadar plots".into(), plots_dir));
         }
 
@@ -1323,6 +1302,20 @@ fn process_single_bam(
                     mqc_curve_path.display().to_string(),
                 ));
             }
+        }
+
+        // Consolidated dupRadar output line
+        ui.output_item("dupRadar", &format!("{}/*", dr_dir.display()));
+        ui.output_detail(&format!(
+            "{} genes, {} with reads",
+            format_count(stats.n_regions as u64),
+            format_count(stats.n_regions_covered as u64),
+        ));
+        if let (Some(intercept), Some(slope)) = (dupradar_intercept, dupradar_slope) {
+            ui.output_detail(&format!(
+                "Model fit: intercept={:.6}, slope={:.6}",
+                intercept, slope,
+            ));
         }
     }
     // === Qualimap RNA-Seq QC output ===
