@@ -241,28 +241,48 @@ fn format_float(v: f64) -> String {
     } else if v == 0.0 {
         "0".to_string()
     } else {
-        // R's write.table uses format() which defaults to 15 significant digits.
-        // We need to replicate this: fixed notation with trailing zeros trimmed.
-        //
-        // Strategy: compute how many decimal places give ~15 significant digits,
-        // then trim trailing zeros (but keep at least one decimal if present).
-        //
-        // For any non-zero value, floor(log10(|v|)) + 1 gives the number of
-        // digits before the decimal point. For values < 1 this is 0 or negative
-        // (e.g., 0.035 → log10 ≈ -1.45 → floor = -2 → +1 = -1), which
-        // correctly increases the number of decimal places to preserve 15
-        // significant digits through leading zeros.
+        // R's write.table uses format() which defaults to 15 significant digits
+        // and scipen = 0.  We replicate both behaviours:
+        //  1. Format with 15 significant digits, trailing zeros trimmed.
+        //  2. Choose between fixed and scientific notation using R's scipen rule:
+        //     prefer scientific when it is shorter (scipen = 0).
+
+        // --- fixed notation ---
         let abs_v = v.abs();
         let digits_before_decimal = (abs_v.log10().floor() as i32) + 1;
         let decimal_places = (15 - digits_before_decimal).max(0) as usize;
-
-        let s = format!("{:.*}", decimal_places, v);
-
-        // Trim trailing zeros after decimal point, but keep the string meaningful
-        if s.contains('.') {
-            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        let fixed = format!("{:.*}", decimal_places, v);
+        let fixed = if fixed.contains('.') {
+            fixed
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
         } else {
-            s
+            fixed
+        };
+
+        // --- scientific notation ---
+        // Format with 14 decimal places (1 digit before `.` + 14 = 15 sig digits),
+        // then trim trailing zeros after the decimal point.
+        let sci_raw = format!("{:.14e}", v);
+        // Rust's {:.14e} produces e.g. "9.31000000000000e-5" — trim zeros and
+        // normalise the exponent to R's 2-digit-minimum format (e-05, e+02).
+        let sci = {
+            let (mantissa, exp) = sci_raw.split_once('e').unwrap();
+            let mantissa = if mantissa.contains('.') {
+                mantissa.trim_end_matches('0').trim_end_matches('.')
+            } else {
+                mantissa
+            };
+            let exp_val: i32 = exp.parse().unwrap();
+            format!("{}e{:+03}", mantissa, exp_val)
+        };
+
+        // R's scipen = 0: prefer scientific when it is strictly shorter.
+        if sci.len() < fixed.len() {
+            sci
+        } else {
+            fixed
         }
     }
 }
@@ -330,5 +350,18 @@ mod tests {
         assert_eq!(format_float(4.9243756595146), "4.9243756595146");
         // Large values: 46.795... → 2 digits before decimal, 13 decimal places
         assert_eq!(format_float(46.795523906409), "46.795523906409");
+    }
+
+    #[test]
+    fn test_format_float_scientific_notation() {
+        // R uses scientific notation when it is shorter than fixed (scipen=0).
+        // 9.31e-05 → "9.31e-05" (8 chars) vs "0.0000931" (9 chars)
+        assert_eq!(format_float(9.31e-05), "9.31e-05");
+        // 0.0001 → "1e-04" (5 chars) vs "0.0001" (6 chars)
+        assert_eq!(format_float(0.0001), "1e-04");
+        // 0.001 → "0.001" (5 chars) vs "1e-03" (5 chars) — tied, prefer fixed
+        assert_eq!(format_float(0.001), "0.001");
+        // 0.000123456 → "0.000123456" (11 chars) vs "1.23456e-04" (11 chars) — tied
+        assert_eq!(format_float(0.000123456), "0.000123456");
     }
 }
