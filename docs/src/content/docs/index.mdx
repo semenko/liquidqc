@@ -43,7 +43,9 @@ export const base = import.meta.env.BASE_URL;
             class="bench-bar rustqc-bar"
             style="--pct: 1.60%"
             data-tip="RustQC total runtime — 14m 54s"
-          ></div>
+          >
+            <div class="bench-seg" style="flex: 894"></div>
+          </div>
           <span class="bench-time">14m 54s</span>
         </div>
       </div>
@@ -231,6 +233,9 @@ export const base = import.meta.env.BASE_URL;
     border-radius: 5px;
     overflow: hidden;
     min-width: 2rem;
+  }
+  .rustqc-bar {
+    min-width: 0;
   }
   .bench-seg {
     height: 100%;
