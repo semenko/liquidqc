@@ -129,7 +129,7 @@ count per-position coverage differently: upstream uses pysam's pileup engine
 index. The htslib pileup engine uses a different internal read traversal that can
 miss a small number of reads at certain positions, leading to minor coverage
 differences. In practice, ~70% of TIN values are identical and the mean absolute
-difference is <0.1 TIN units.
+difference is less than 0.1 TIN units.
 :::
 
 ## References

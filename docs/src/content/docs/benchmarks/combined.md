@@ -45,7 +45,7 @@ A real-world large paired-end RNA-seq BAM aligned to GRCh38 (63,677 genes).
 | **Sequential total**         |         **~15h 34m** | **14m 54s** |
 
 RustQC ran with 174.2% average CPU utilisation (multi-threaded), processing the
-entire BAM in under 42 minutes while the sum of all individual tool runtimes
+entire BAM in 14m 54s while the sum of all individual tool runtimes
 exceeds 15 hours and 34 minutes.
 
 > **Note:** In a real pipeline, some tools can run in parallel after the BAM is
