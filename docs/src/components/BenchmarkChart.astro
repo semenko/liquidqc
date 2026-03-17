@@ -1,0 +1,218 @@
+---
+interface Props {
+  className?: string;
+}
+
+const { className = '' } = Astro.props;
+---
+
+<div
+  class={`benchmark-chart ${className}`.trim()}
+  role="img"
+  aria-label="Benchmark: RustQC 14m 54s vs traditional tools ~15h 34m sequential (AWS)"
+>
+  <div class="bench-row">
+    <span class="bench-label">RustQC</span>
+    <div class="bench-track">
+      <div
+        class="bench-bar rustqc-bar"
+        style="--pct: 1.60%"
+        data-tip="RustQC total runtime — 14m 54s"
+      >
+        <div class="bench-seg" style="flex: 894"></div>
+      </div>
+      <span class="bench-time">14m 54s</span>
+    </div>
+  </div>
+  <div class="bench-row">
+    <span class="bench-label">Traditional tools</span>
+    <div class="bench-track">
+      <div class="bench-bar trad-bar" style="--pct: 100%">
+        <div
+          class="bench-seg seg-dupradar"
+          data-tip="dupRadar — 2h 14m"
+          style="flex: 8064"
+        ></div>
+        <div
+          class="bench-seg seg-qualimap"
+          data-tip="Qualimap — 1h 02m"
+          style="flex: 3734"
+        ></div>
+        <div
+          class="bench-seg seg-samtools"
+          data-tip="samtools (3 tools) — 13m 09s"
+          style="flex: 789"
+        ></div>
+        <div
+          class="bench-seg seg-preseq"
+          data-tip="preseq — 39m 09s"
+          style="flex: 2349"
+        ></div>
+        <div
+          class="bench-seg seg-fc"
+          data-tip="featureCounts — 3m 03s"
+          style="flex: 183"
+        ></div>
+        <div
+          class="bench-seg seg-rseqc"
+          data-tip="RSeQC (7 tools, excl. TIN) — 1h 37m"
+          style="flex: 5843"
+        ></div>
+        <div
+          class="bench-seg seg-tin"
+          data-tip="tin.py — 9h 45m"
+          style="flex: 35086"
+        ></div>
+      </div>
+      <span class="bench-time">15h 34m</span>
+    </div>
+  </div>
+  <div class="bench-tooltip"></div>
+  <p class="bench-caption">
+    Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC TIN
+    alone takes 9h 45m; RustQC completes everything in 14m 54s.
+  </p>
+</div>
+
+<style>
+  .benchmark-chart {
+    text-align: center;
+    position: relative;
+    max-width: 42rem;
+    margin-inline: auto;
+    padding-block: 0.75rem;
+  }
+  .bench-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+  }
+  .bench-label {
+    flex: 0 0 9rem;
+    text-align: right;
+    font-weight: 700;
+    font-size: 1.1rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    color: var(--sl-color-white);
+  }
+  .bench-track {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .bench-bar {
+    height: 2.8rem;
+    width: var(--pct);
+    display: flex;
+    overflow: hidden;
+    min-width: 2rem;
+  }
+  .rustqc-bar {
+    min-width: 0;
+  }
+  .bench-seg {
+    height: 100%;
+    margin: 0;
+    transition: opacity 0.15s, filter 0.15s;
+    cursor: default;
+    position: relative;
+    border-right: 1px solid rgba(0, 0, 0, 0.15);
+  }
+  .bench-seg:last-child {
+    border-right: none;
+  }
+  .bench-seg:hover {
+    filter: brightness(1.25);
+    z-index: 1;
+  }
+  .rustqc-bar .bench-seg {
+    background: var(--sl-color-accent);
+  }
+  .seg-dupradar {
+    background: #e05252;
+  }
+  .seg-qualimap {
+    background: #8b5cf6;
+  }
+  .seg-samtools {
+    background: #22c55e;
+  }
+  .seg-preseq {
+    background: #f59e0b;
+  }
+  .seg-fc {
+    background: #f97316;
+  }
+  .seg-rseqc {
+    background: #3b82f6;
+  }
+  .seg-tin {
+    background: #3b82f6;
+    opacity: 0.7;
+  }
+  .bench-time {
+    font-weight: 700;
+    font-size: 1.25rem;
+    white-space: nowrap;
+    color: var(--sl-color-white);
+  }
+  .bench-tooltip {
+    display: none;
+    position: absolute;
+    background: var(--sl-color-gray-1);
+    color: var(--sl-color-gray-7);
+    padding: 0.35rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+  .bench-caption {
+    font-style: italic;
+    font-size: 0.78rem;
+    color: var(--sl-color-gray-3);
+    margin-top: 0.25rem;
+  }
+</style>
+
+<script>
+  (() => {
+    function initBenchTooltips() {
+      document.querySelectorAll('.benchmark-chart').forEach((chart) => {
+        const tip = chart.querySelector('.bench-tooltip');
+        if (!tip) return;
+        chart.querySelectorAll('.bench-seg[data-tip]').forEach((seg) => {
+          seg.addEventListener('mouseenter', (e) => {
+            tip.textContent = e.target.dataset.tip;
+            tip.style.display = 'block';
+          });
+          seg.addEventListener('mousemove', (e) => {
+            const r = chart.getBoundingClientRect();
+            let x = e.clientX - r.left + 12;
+            let y = e.clientY - r.top - 32;
+            if (x + tip.offsetWidth > r.width) {
+              x = e.clientX - r.left - tip.offsetWidth - 8;
+            }
+            if (y < 0) {
+              y = e.clientY - r.top + 16;
+            }
+            tip.style.left = `${x}px`;
+            tip.style.top = `${y}px`;
+          });
+          seg.addEventListener('mouseleave', () => {
+            tip.style.display = 'none';
+          });
+        });
+      });
+    }
+
+    initBenchTooltips();
+    document.addEventListener('astro:page-load', initBenchTooltips);
+  })();
+</script>

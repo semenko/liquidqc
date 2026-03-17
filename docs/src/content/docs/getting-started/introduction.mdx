@@ -3,6 +3,8 @@ title: Introduction
 description: What is RustQC and why use it for RNA-seq quality control.
 ---
 
+import BenchmarkChart from "../../../components/BenchmarkChart.astro";
+
 RustQC is a fast quality control toolkit for sequencing data, written in Rust. It reimplements several established bioinformatics QC tools as a single compiled binary with no runtime dependencies:
 
 - **[dupRadar](https://bioconductor.org/packages/dupRadar/)** -- RNA-seq PCR duplicate rate analysis
@@ -16,15 +18,11 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 
 RNA-seq quality control typically involves running multiple tools written in R and Python, each with their own dependencies, interpreters, and runtime overhead. RustQC consolidates these into a single fast binary.
 
-<div class="benchmark-chart">
-  <img class="only-dark" src="/benchmarks/benchmark_dark.png" alt="Benchmark: RustQC ~41m vs traditional tools ~15h 34m (sequential)" />
-  <img class="only-light" src="/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~41m vs traditional tools ~15h 34m (sequential)" />
-  <p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC TIN alone takes 9h 45m; RustQC completes everything in 41 minutes.</em></p>
-</div>
+<BenchmarkChart />
 
 Key advantages:
 
-- **Speed**: Processes ~186M reads in ~41 minutes vs. ~15h 34m of sequential tool runtimes on AWS — including TIN, which takes 9h 45m alone in the traditional workflow
+- **Speed**: Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS — including TIN, which takes 9h 45m alone in the traditional workflow
 - **Single binary**: No runtime dependencies -- no R, Python, or Bioconductor installation required
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
 - **Identical output**: Produces bit-for-bit identical results to the original tools (verified across 820,000+ values with zero mismatches for dupRadar)
