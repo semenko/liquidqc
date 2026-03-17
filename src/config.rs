@@ -11,12 +11,36 @@ use std::path::Path;
 
 /// Top-level configuration structure.
 ///
-/// Designed to be extensible — new sections can be added as optional fields
-/// without breaking existing config files. Tool-specific settings are nested
-/// under their tool name (e.g. `dupradar:`, `featurecounts:`, `bam_stat:`).
+/// Mirrors the CLI hierarchy: each subcommand (e.g. `rna`) has its own
+/// configuration section. This allows the config file to grow naturally
+/// as new subcommands are added.
+///
+/// Example:
+/// ```yaml
+/// rna:
+///   chromosome_prefix: "chr"
+///   bam_stat:
+///     enabled: true
+/// ```
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
+    /// RNA-Seq QC configuration (matches the `rna` subcommand).
+    #[serde(default)]
+    pub rna: RnaConfig,
+}
+
+/// RNA-Seq QC configuration.
+///
+/// Contains all settings for the `rustqc rna` subcommand. Tool-specific
+/// settings are nested under their tool name (e.g. `dupradar:`,
+/// `featurecounts:`, `bam_stat:`).
+///
+/// Designed to be extensible — new sections can be added as optional fields
+/// without breaking existing config files.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct RnaConfig {
     /// Prefix to prepend to alignment file chromosome names before matching to GTF names.
     ///
     /// Applied before explicit chromosome_mapping lookups. For example, if the
@@ -681,7 +705,9 @@ impl Config {
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
         Ok(config)
     }
+}
 
+impl RnaConfig {
     /// Build a reverse mapping: alignment chromosome name -> GTF chromosome name.
     ///
     /// The config file maps GTF -> alignment, but at lookup time we need
@@ -734,9 +760,51 @@ impl Config {
 mod tests {
     use super::*;
 
+    // --- Tests for the top-level Config (rna: wrapper) ---
+
     #[test]
-    fn test_empty_config() {
+    fn test_top_level_rna_wrapper() {
+        let yaml = r#"
+rna:
+  chromosome_prefix: "chr"
+  stranded: 2
+  paired: true
+  bam_stat:
+    enabled: false
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.rna.chromosome_prefix, Some("chr".to_string()));
+        assert_eq!(config.rna.stranded, Some(2));
+        assert_eq!(config.rna.paired, Some(true));
+        assert!(!config.rna.bam_stat.enabled);
+    }
+
+    #[test]
+    fn test_empty_top_level_config() {
         let config: Config = serde_yaml_ng::from_str("").unwrap();
+        // rna section defaults to RnaConfig::default()
+        assert!(config.rna.chromosome_mapping.is_empty());
+        assert!(config.rna.bam_stat.enabled);
+        assert!(config.rna.preseq.enabled);
+    }
+
+    #[test]
+    fn test_unknown_top_level_fields_ignored() {
+        let yaml = r#"
+rna:
+  chromosome_prefix: "chr"
+future_subcommand:
+  key: value
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.rna.chromosome_prefix, Some("chr".to_string()));
+    }
+
+    // --- Tests for RnaConfig (inner struct) ---
+
+    #[test]
+    fn test_empty_rna_config() {
+        let config: RnaConfig = serde_yaml_ng::from_str("").unwrap();
         assert!(config.chromosome_mapping.is_empty());
         assert!(!config.has_chromosome_mapping());
         // stranded/paired default to None (defer to CLI)
@@ -774,19 +842,19 @@ mod tests {
     #[test]
     fn test_stranded_paired_config() {
         // Defaults: None (defer to CLI)
-        let config: Config = serde_yaml_ng::from_str("").unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str("").unwrap();
         assert_eq!(config.stranded, None);
         assert_eq!(config.paired, None);
 
         // Explicit values
         let yaml = "stranded: 2\npaired: true\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.stranded, Some(2));
         assert_eq!(config.paired, Some(true));
 
         // Zero is a valid explicit value
         let yaml = "stranded: 0\npaired: false\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.stranded, Some(0));
         assert_eq!(config.paired, Some(false));
     }
@@ -794,11 +862,11 @@ mod tests {
     #[test]
     fn test_flat_output_config() {
         let yaml = "flat_output: true\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(config.flat_output);
 
         let yaml = "flat_output: false\n";
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(!config.flat_output);
     }
 
@@ -811,7 +879,7 @@ chromosome_mapping:
   chrX: "X"
   chrM: "MT"
 "#;
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.chromosome_mapping.len(), 4);
         assert_eq!(config.chromosome_mapping.get("chr1").unwrap(), "1");
         assert_eq!(config.chromosome_mapping.get("chrM").unwrap(), "MT");
@@ -822,7 +890,7 @@ chromosome_mapping:
     }
 
     #[test]
-    fn test_unknown_fields_ignored() {
+    fn test_unknown_rna_fields_ignored() {
         let yaml = r#"
 chromosome_mapping:
   chr1: "1"
@@ -830,7 +898,7 @@ future_setting: true
 another_section:
   key: value
 "#;
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.chromosome_mapping.len(), 1);
     }
 
@@ -845,7 +913,7 @@ featurecounts:
   summary_file: false
   biotype_attribute: "gene_type"
 "#;
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(config.dupradar.dup_matrix);
         assert!(!config.dupradar.boxplot);
         assert!(config.featurecounts.counts_file);
@@ -865,7 +933,7 @@ dupradar:
   multiqc_intercept: false
   multiqc_curve: false
 "#;
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(!config.any_dupradar_output());
     }
 
@@ -887,7 +955,7 @@ junction_saturation:
 inner_distance:
   enabled: false
 "#;
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(!config.bam_stat.enabled);
         assert!(!config.infer_experiment.enabled);
         assert!(!config.read_duplication.enabled);
@@ -916,7 +984,7 @@ inner_distance:
   upper_bound: 500
   step: 10
 "#;
-        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.infer_experiment.sample_size, Some(500_000));
         assert_eq!(config.junction_saturation.min_coverage, Some(5));
         assert_eq!(config.junction_saturation.percentile_floor, Some(10));

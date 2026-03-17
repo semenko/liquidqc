@@ -199,19 +199,19 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         args.threads
     );
 
-    // Load configuration file if provided
+    // Load configuration file if provided, then extract the `rna` section
     let mut config = if let Some(ref config_path) = args.config {
         let cfg = config::Config::from_file(Path::new(config_path))?;
         ui.detail(&format!("Loaded config from: {}", config_path));
-        if cfg.has_chromosome_mapping() {
+        if cfg.rna.has_chromosome_mapping() {
             ui.detail(&format!(
                 "Chromosome name mapping: {} entries",
-                cfg.chromosome_mapping.len()
+                cfg.rna.chromosome_mapping.len()
             ));
         }
-        cfg
+        cfg.rna
     } else {
-        config::Config::default()
+        config::RnaConfig::default()
     };
 
     // Apply CLI overrides to skip flags
@@ -722,7 +722,7 @@ struct SharedParams<'a> {
     /// Whether to skip duplicate-marking validation.
     skip_dup_check: bool,
     /// Configuration for conditional outputs.
-    config: &'a config::Config,
+    config: &'a config::RnaConfig,
     /// GTF attribute name for biotype counting.
     biotype_attribute: &'a str,
     /// Whether the biotype attribute was found in the GTF.

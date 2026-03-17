@@ -132,8 +132,8 @@ them into subdirectories. By default, RustQC creates `dupradar/`,
 subdirectories under the output directory. With `--flat-output`, all files are
 written to the top-level output directory.
 
-This can also be set in the [configuration file](/usage/configuration/) as
-`flat_output: true`.
+This can also be set in the [configuration file](/usage/configuration/) under
+the `rna:` section as `flat_output: true`.
 
 **Default:** `false` (nested subdirectories)
 

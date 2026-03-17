@@ -236,8 +236,8 @@ cargo build --release
 ```
 
 > **Note:** The config file adds a `chr` prefix to alignment chromosome names
-> to match the GENCODE GTF. The `--biotype-attribute gene_type` flag is needed
-> because GENCODE uses `gene_type` instead of the Ensembl default `gene_biotype`.
+> (under the `rna:` section) to match the GENCODE GTF. The `--biotype-attribute gene_type`
+> flag is needed because GENCODE uses `gene_type` instead of the Ensembl default `gene_biotype`.
 
 ### 5. RSeQC tools (RustQC reimplementations)
 

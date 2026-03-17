@@ -1,2 +1,3 @@
-# Prepend "chr" to all BAM chromosome names before matching to GTF
-chromosome_prefix: "chr"
+rna:
+  # Prepend "chr" to all BAM chromosome names before matching to GTF
+  chromosome_prefix: "chr"

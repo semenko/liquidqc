@@ -268,13 +268,15 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
 - **IMPORTANT:** When benchmarks are re-run, verify that all results referenced in both `benchmark/README.md`
   and the top-level `README.md` are updated to reflect the new numbers (timings, percentages, etc.).
   These documents must always accurately reflect the latest benchmark data.
-- The YAML config nests output toggles under `dupradar:` and `featurecounts:` keys.
-  Each output file can be individually enabled/disabled (all default to `true`).
-- The YAML config also has sections for each of the 8 RSeQC tools (`bam_stat:`,
+- The YAML config mirrors the CLI subcommand hierarchy: all RNA-Seq settings live
+  under a top-level `rna:` key. Within `rna:`, output toggles are nested under
+  `dupradar:` and `featurecounts:` keys. Each output file can be individually
+  enabled/disabled (all default to `true`).
+- Under `rna:`, there are sections for each of the 8 RSeQC tools (`bam_stat:`,
   `infer_experiment:`, `read_duplication:`, `read_distribution:`, `junction_annotation:`,
   `junction_saturation:`, `inner_distance:`, `tin:`). Each has an `enabled: bool` toggle
   and tool-specific parameter overrides. CLI flags take precedence over config values.
-- The YAML config also has sections for `tin:`, `preseq:`,
+- Under `rna:`, there are also sections for `preseq:`, `qualimap:`,
   `flagstat:`, `idxstats:`, and `samtools_stats:`. Each has an `enabled: bool` toggle.
   Preseq has additional parameters: `max_extrap`, `step_size`, `n_bootstraps`,
   `confidence_level`, `seed`, `max_terms`, `defects`. TIN has `sample_size` and
