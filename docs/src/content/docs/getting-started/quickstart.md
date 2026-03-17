@@ -30,10 +30,8 @@ This command:
 
 Output files are organized into subdirectories by tool group.
 Files are generally named the same as their upstream tool equivalents.
-
 This means that MultiQC should find them and report them as if they were created
 by the original tool.
-
 One addition is that RustQC produces SVG versions of all plots.
 
 Use `--flat-output` to write all files directly to the output directory without subdirectories.
@@ -50,11 +48,3 @@ rustqc rna sample1.bam sample2.bam sample3.bam \
 
 The annotation file is parsed once and shared across all samples. Threads
 are distributed automatically among concurrent jobs.
-
-## Next steps
-
-- [CLI Reference](/usage/cli-reference/) for all available options
-- [dupRadar Outputs](/outputs/dupradar/) for duplication analysis output details
-- [featureCounts Outputs](/outputs/featurecounts/) for read counting output details
-- [RSeQC Outputs](/outputs/rseqc/) for RSeQC tool output details
-- [Configuration](/usage/configuration/) for YAML config options
