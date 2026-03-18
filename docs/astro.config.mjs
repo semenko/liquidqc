@@ -50,7 +50,6 @@ export default defineConfig({
             { label: "dupRadar", slug: "outputs/dupradar" },
             { label: "featureCounts", slug: "outputs/featurecounts" },
             { label: "RSeQC", slug: "outputs/rseqc" },
-            { label: "TIN", slug: "outputs/tin" },
             { label: "Qualimap", slug: "outputs/qualimap" },
             { label: "Preseq", slug: "outputs/preseq" },
             { label: "Samtools", slug: "outputs/samtools" },
