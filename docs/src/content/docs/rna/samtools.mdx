@@ -1,36 +1,36 @@
 ---
 title: Samtools
-description: Output files and benchmark comparisons for RustQC's samtools-compatible flagstat, idxstats, and stats outputs.
+description: Output files and benchmark comparisons for RustQC's Samtools-compatible flagstat, idxstats, and stats outputs.
 ---
 
 import { Aside, FileTree } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
-<Aside type="note" title="About samtools">
+<Aside type="note" title="About Samtools">
 Samtools is a suite of programs for interacting with high-throughput sequencing data, providing utilities for alignment statistics (`flagstat`), per-chromosome read counts (`idxstats`), and comprehensive alignment metrics (`stats`).
 
 [Documentation](http://www.htslib.org/doc/samtools.html) | [Source code](https://github.com/samtools/samtools)
 </Aside>
 
 RustQC produces output files compatible with three core
-[samtools](http://www.htslib.org/) commands: `flagstat`, `idxstats`, and
+[Samtools](http://www.htslib.org/) commands: `flagstat`, `idxstats`, and
 `stats`. These are generated during the same single-pass BAM scan as all other
 analyses, with no additional runtime cost.
 
 The output files are drop-in replacements that downstream tools
 (particularly [MultiQC](https://multiqc.info/)) can parse as if they came
-directly from samtools.
+directly from Samtools.
 
 ## Output files
 
-All samtools-compatible output files use the BAM file stem as a prefix and are
+All Samtools-compatible output files use the BAM file stem as a prefix and are
 written to a `samtools/` subdirectory under the output directory. Use
 `--flat-output` to write all files directly to the output directory instead.
 
 <FileTree>
   - samtools/ - sample.flagstat Alignment flag summary statistics -
-  sample.idxstats Per-chromosome read counts - sample.stats Full samtools stats
+  sample.idxstats Per-chromosome read counts - sample.stats Full Samtools stats
   output (SN, histograms, checksums)
 </FileTree>
 
@@ -174,7 +174,7 @@ CHK	1a2b3c4d	5e6f7a8b	9c0d1e2f
 
 ## Benchmarks
 
-RustQC produces samtools-compatible output files (flagstat, idxstats, and full stats
+RustQC produces Samtools-compatible output files (flagstat, idxstats, and full stats
 output including SN and all histogram sections) as part of its single-pass BAM
 processing. This section compares the output of each tool against the originals,
 validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-09).
@@ -183,7 +183,7 @@ validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-
 
 > **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Benchmark Details](/rna/benchmark-details/) for a full breakdown.
 
-Individual samtools tool times are shown for reference.
+Individual Samtools tool times are shown for reference.
 
 #### Small dataset (~52K reads, chr6 subset)
 
@@ -225,7 +225,7 @@ the small and large datasets.
 
 #### Small dataset (test, ~52K reads, chr6 subset)
 
-| Metric          |         samtools |           RustQC |
+| Metric          |         Samtools |           RustQC |
 | --------------- | ---------------: | ---------------: |
 | Total reads     |           52,839 |           52,839 |
 | Primary         |           49,573 |           49,573 |
@@ -237,7 +237,7 @@ the small and large datasets.
 | Singletons      |               27 |               27 |
 
 The output format is fully compatible with MultiQC and other tools that parse
-samtools flagstat output.
+Samtools flagstat output.
 
 ### idxstats comparison
 
@@ -256,7 +256,7 @@ RustQC on both datasets.
 
 #### Large dataset (GM12878)
 
-| Metric                |     samtools |       RustQC |
+| Metric                |     Samtools |       RustQC |
 | --------------------- | -----------: | -----------: |
 | sequences             |  186,289,286 |  186,289,286 |
 | reads mapped          |  173,798,309 |  173,798,309 |
@@ -271,7 +271,7 @@ RustQC on both datasets.
 
 #### Small dataset (test, chr6 subset)
 
-| Metric                |     samtools |       RustQC |
+| Metric                |     Samtools |       RustQC |
 | --------------------- | -----------: | -----------: |
 | sequences             |       49,573 |       49,573 |
 | reads mapped          |       49,573 |       49,573 |
@@ -296,13 +296,13 @@ See the [Configuration](/usage/configuration/#samtools) page for details.
 
 ## Compatibility
 
-The output files are format-compatible with samtools and can be used
+The output files are format-compatible with Samtools and can be used
 interchangeably with MultiQC and other downstream tools. All integer counts
 and derived metrics (total reads, mapped, duplicates, error rate, insert size
-statistics, etc.) match samtools exactly on validated datasets.
+statistics, etc.) match Samtools exactly on validated datasets.
 
 ## References
 
-- **samtools:** Danecek P, Bonfield JK, et al. Twelve years of SAMtools and
+- **Samtools:** Danecek P, Bonfield JK, et al. Twelve years of SAMtools and
   BCFtools. _GigaScience_. 2021;10(2):giab008.
-  [samtools website](http://www.htslib.org/)
+  [Samtools website](http://www.htslib.org/)

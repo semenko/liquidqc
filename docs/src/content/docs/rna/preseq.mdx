@@ -7,8 +7,8 @@ import { Aside, FileTree } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
-<Aside type="note" title="About preseq">
-preseq is a tool for predicting the molecular complexity of sequencing libraries, estimating the expected number of distinct molecules at increasing sequencing depths.
+<Aside type="note" title="About Preseq">
+Preseq is a tool for predicting the molecular complexity of sequencing libraries, estimating the expected number of distinct molecules at increasing sequencing depths.
 
 [Documentation](http://smithlabresearch.org/software/preseq/) | [Source code](https://github.com/smithlabcode/preseq)
 </Aside>
@@ -21,8 +21,8 @@ depths. This helps answer a practical question: if I sequence more, will I disco
 new molecules?
 
 RustQC reimplements the `preseq lc_extrap` command, matching the behavior of
-preseq v3.2.0 (the version used by [nf-core/rnaseq](https://nf-co.re/rnaseq)).
-On Linux, the output is **byte-identical** to upstream preseq. On macOS, minor
+Preseq v3.2.0 (the version used by [nf-core/rnaseq](https://nf-co.re/rnaseq)).
+On Linux, the output is **byte-identical** to upstream Preseq. On macOS, minor
 differences may occur due to different `std::binomial_distribution` implementations
 between libstdc++ (Linux) and libc++ (macOS) - see [Compatibility](#compatibility-with-preseq)
 below. The analysis runs automatically as part of `rustqc rna` at zero additional
@@ -49,7 +49,7 @@ confidence intervals around the extrapolation.
 
 ## Output files
 
-All preseq output files use the BAM file stem as a prefix and are written to a
+All Preseq output files use the BAM file stem as a prefix and are written to a
 `preseq/` subdirectory under the output directory. Use `--flat-output` to write
 all files directly to the output directory instead.
 
@@ -85,7 +85,7 @@ TOTAL_READS	EXPECTED_DISTINCT	LOWER_0.95CI	UPPER_0.95CI
 3000000.0	2450443.8	2446703.6	2456603.0
 ```
 
-This file is directly compatible with MultiQC's preseq module for visualization
+This file is directly compatible with MultiQC's Preseq module for visualization
 in multi-sample QC reports.
 
 ## Interpreting results
@@ -109,7 +109,7 @@ indicate a well-behaved estimate.
 
 ## Benchmarks
 
-This section compares RustQC's preseq lc_extrap output against preseq v3.2.0,
+This section compares RustQC's Preseq `lc_extrap` output against Preseq v3.2.0,
 the version used by [nf-core/rnaseq](https://nf-co.re/rnaseq). Benchmarks were
 run on AWS cloud infrastructure on 2026-03-09.
 
@@ -137,12 +137,12 @@ The extrapolation computation itself is fast (under 1 second) -- it is purely a 
 
 #### Small dataset (test, ~52K reads, chr6)
 
-The small dataset produces byte-identical output between preseq v3.2.0 and
+The small dataset produces byte-identical output between Preseq v3.2.0 and
 RustQC. All values in all columns match exactly across all sampled read depths.
 
 Sample output (first few rows):
 
-| Total reads | preseq v3.2.0 |      RustQC | Difference |
+| Total reads | Preseq v3.2.0 |      RustQC | Difference |
 | ----------: | ------------: | ----------: | ---------: |
 |           0 |           0.0 |         0.0 |      0.00% |
 |   1,000,000 |     614,257.9 |   614,257.9 |      0.00% |
@@ -159,7 +159,7 @@ Sample output (first few rows):
 
 #### Large dataset (GM12878 REP1, ~186M reads, 10 GB BAM)
 
-On Linux, RustQC produces byte-identical output to preseq v3.2.0 - every
+On Linux, RustQC produces byte-identical output to Preseq v3.2.0 - every
 value in every column matches exactly. This is achieved by using the same C++
 standard library's `std::mt19937` and `std::binomial_distribution` via FFI,
 which gives identical random number sequences for the same seed.
@@ -168,7 +168,7 @@ Observed differences between the two tools on AWS Linux are at most plus or minu
 the floating-point representation - sub-ULP rounding noise with no practical
 significance.
 
-|   Total reads | preseq v3.2.0 |       RustQC | Difference |
+|   Total reads | Preseq v3.2.0 |       RustQC | Difference |
 | ------------: | ------------: | -----------: | ---------: |
 |     1,000,000 |     900,745.5 |    900,745.0 |     ~0.00% |
 |    10,000,000 |   6,604,169.5 |  6,604,169.0 |     ~0.00% |
@@ -186,11 +186,11 @@ significance.
 ### Fragment counting
 
 The fragment histogram (frequency-of-frequencies table) is the input to the
-extrapolation algorithm. RustQC's parallel hash-based counting matches preseq's
+extrapolation algorithm. RustQC's parallel hash-based counting matches Preseq's
 priority-queue-based mate merging within 0.001% for the singleton count (the
 most sensitive histogram bin).
 
-| Metric             |         preseq v3.2.0 |                RustQC |
+| Metric             |         Preseq v3.2.0 |                RustQC |
 | ------------------ | --------------------: | --------------------: |
 | Total fragments    |            93,003,768 |            93,003,768 |
 | Distinct fragments |                ~52.4M |                ~52.4M |
@@ -198,7 +198,7 @@ most sensitive histogram bin).
 
 ### Confidence intervals
 
-Bootstrap confidence intervals overlap between preseq and RustQC at every
+Bootstrap confidence intervals overlap between Preseq and RustQC at every
 extrapolation point. Differences in CI bounds are at most plus or minus 2 in the
 floating-point representation, indistinguishable from rounding noise.
 
@@ -206,24 +206,24 @@ floating-point representation, indistinguishable from rounding noise.
 
 Preseq parameters can be set via CLI flags or the YAML config file. See the [CLI reference](/usage/cli-reference/#preseq-options) and [Configuration](/usage/configuration/#preseq) pages for the full list of options.
 
-## Compatibility with preseq
+## Compatibility with Preseq
 
 The output file format is identical to `preseq lc_extrap` output and is
-compatible with downstream tools that parse preseq output, including
+compatible with downstream tools that parse Preseq output, including
 [MultiQC](https://multiqc.info/).
 
-RustQC's implementation matches preseq v3.2.0's `load_counts_BAM_pe` behavior:
+RustQC's implementation matches Preseq v3.2.0's `load_counts_BAM_pe` behavior:
 
 - **PE mate merging**: Both mates of a paired-end read are collated by read
   name and merged into a single genomic interval `(chrom, min_start, max_end)`.
   Merged fragments exceeding `max_segment_length` are split back into individual
-  reads, matching preseq's `-seg_len` behavior.
+  reads, matching Preseq's `-seg_len` behavior.
 - **Fragment counting**: Unique fragments are identified by their `(chrom, start,
 end)` tuple. Duplicate fragments (same interval) are counted for the
   frequency-of-frequencies histogram that drives the extrapolation.
 - **Extrapolation**: Good-Toulmin rational function approximation via continued
   fractions, with degree selection and bootstrap confidence intervals, all
-  matching the preseq v3.2.0 algorithm.
+  matching the Preseq v3.2.0 algorithm.
 
 ### C++ FFI for exact bootstrap matching
 
@@ -246,11 +246,11 @@ via a small FFI shim (`cpp/rng_shim.cpp`) compiled at build time by the
 [`cc`](https://crates.io/crates/cc) crate. This means:
 
 - On Linux (libstdc++), RustQC uses the same Devroye algorithm as a
-  GCC-compiled preseq binary.
+  GCC-compiled Preseq binary.
 - On macOS (libc++), RustQC uses the same Kemp algorithm as a Clang-compiled
-  preseq binary.
+  Preseq binary.
 
-The result is **byte-identical** bootstrap output when RustQC and preseq are
+The result is **byte-identical** bootstrap output when RustQC and Preseq are
 compiled with the same C++ standard library and use the same seed.
 
 ### Platform summary
@@ -265,6 +265,6 @@ Linux arm64 and x86_64 produce identical results - glibc math functions (`exp`,
 
 ## References
 
-- **preseq:** Daley T, Smith AD. Predicting the molecular complexity of
+- **Preseq:** Daley T, Smith AD. Predicting the molecular complexity of
   sequencing libraries. _Nature Methods_. 2013;10(4):325-327.
-  [preseq website](http://smithlabresearch.org/software/preseq/)
+  [Preseq website](http://smithlabresearch.org/software/preseq/)
