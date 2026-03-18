@@ -3,14 +3,14 @@ title: Qualimap Outputs
 description: Output files produced by RustQC's Qualimap rnaseq-compatible RNA-Seq quality control analysis.
 ---
 
-import { Card, CardGrid, FileTree } from "@astrojs/starlight/components";
+import { Aside, Card, CardGrid, FileTree } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
-:::info[About Qualimap]
+<Aside type="note" title="About Qualimap">
 Qualimap is a platform-independent application for quality control of sequencing alignment data, providing gene body coverage profiling, read origin classification, and bias metrics for RNA-Seq experiments.
 [Documentation](http://qualimap.conesalab.org/) | [Source code](https://bitbucket.org/kokonech/qualimap/)
-:::
+</Aside>
 
 ## What is Qualimap?
 
@@ -40,12 +40,12 @@ RustQC's Qualimap module computes:
 - **Alignment statistics** -- primary/secondary alignments, multi-mappers,
   proper pairs, and supplementary read counts
 
-:::tip[No name-sorted BAM required]
+<Aside type="tip" title="No name-sorted BAM required">
 The original Qualimap requires **name-sorted** BAM files as input, which
 typically means adding an extra `samtools sort -n` step to your pipeline.
 RustQC works directly with **coordinate-sorted** BAM files (the standard
 output of most aligners), so you can skip this sorting step entirely.
-:::
+</Aside>
 
 ## Output files
 

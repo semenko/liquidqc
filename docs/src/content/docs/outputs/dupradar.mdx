@@ -3,14 +3,14 @@ title: dupRadar Outputs
 description: RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and how to interpret them.
 ---
 
-import { Card, CardGrid, FileTree } from "@astrojs/starlight/components";
+import { Aside, Card, CardGrid, FileTree } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
-:::info[About dupRadar]
+<Aside type="note" title="About dupRadar">
 dupRadar is a Bioconductor R package that assesses PCR duplication rates in RNA-Seq data by modelling the relationship between gene expression level and duplication rate.
 [Documentation](https://bioconductor.org/packages/dupRadar/) | [Source code](https://github.com/ssayols/dupRadar)
-:::
+</Aside>
 
 ## What is dupRadar?
 
