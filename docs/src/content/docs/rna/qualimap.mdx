@@ -183,36 +183,221 @@ plot.
 Chart images are generated in `images_qualimapReport/`, matching the plots
 produced by Qualimap's HTML report:
 
-<CardGrid>
-  <Card title="Coverage Profile Along Genes (Total)">
-    <img
-      src={`${base}examples/qualimap/Coverage Profile Along Genes (Total).png`}
-      alt="Coverage Profile Along Genes (Total)"
-      style={{ width: "100%" }}
-    />
-  </Card>
-  <Card title="Transcript coverage histogram">
-    <img
-      src={`${base}examples/qualimap/Transcript coverage histogram.png`}
-      alt="Coverage Histogram (0-50X)"
-      style={{ width: "100%" }}
-    />
-  </Card>
-  <Card title="Reads Genomic Origin">
-    <img
-      src={`${base}examples/qualimap/Reads Genomic Origin.png`}
-      alt="Reads Genomic Origin"
-      style={{ width: "100%" }}
-    />
-  </Card>
-  <Card title="Junction Analysis">
-    <img
-      src={`${base}examples/qualimap/Junction Analysis.png`}
-      alt="Junction Analysis"
-      style={{ width: "100%" }}
-    />
-  </Card>
-</CardGrid>
+#### Coverage Profile Along Genes (Total)
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/Qualimap/Coverage Profile Along Genes (Total).png`}
+        alt="Qualimap coverage profile (total)"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>Qualimap (Java)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/RustQC/Coverage Profile Along Genes (Total).png`}
+        alt="RustQC coverage profile (total)"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Coverage Profile Along Genes (High)
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/Qualimap/Coverage Profile Along Genes (High).png`}
+        alt="Qualimap coverage profile (high)"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>Qualimap (Java)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/RustQC/Coverage Profile Along Genes (High).png`}
+        alt="RustQC coverage profile (high)"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Coverage Profile Along Genes (Low)
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/Qualimap/Coverage Profile Along Genes (Low).png`}
+        alt="Qualimap coverage profile (low)"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>Qualimap (Java)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/RustQC/Coverage Profile Along Genes (Low).png`}
+        alt="RustQC coverage profile (low)"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Transcript coverage histogram
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/Qualimap/Transcript coverage histogram.png`}
+        alt="Qualimap transcript coverage histogram"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>Qualimap (Java)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/RustQC/Transcript coverage histogram.png`}
+        alt="RustQC transcript coverage histogram"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Reads Genomic Origin
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/Qualimap/Reads Genomic Origin.png`}
+        alt="Qualimap reads genomic origin"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>Qualimap (Java)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/RustQC/Reads Genomic Origin.png`}
+        alt="RustQC reads genomic origin"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Junction Analysis
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/Qualimap/Junction Analysis.png`}
+        alt="Qualimap junction analysis"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>Qualimap (Java)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/qualimap/RustQC/Junction Analysis.png`}
+        alt="RustQC junction analysis"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
 
 ### HTML report
 
@@ -369,155 +554,6 @@ All other values are identical.
 
 Junction motif type percentages match with rounding differences less than 0.05
 percentage points. The underlying read counts are identical.
-
-### Chart comparison
-
-RustQC generates the same set of charts as Qualimap's HTML report. Below are
-side-by-side comparisons from the large benchmark dataset (GM12878).
-
-#### Coverage Profile Along Genes (Total)
-
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "1rem",
-    margin: "1rem 0",
-  }}
->
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/Qualimap/Coverage Profile Along Genes (Total).png`}
-        alt="Qualimap coverage profile"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>Qualimap (Java)</figcaption>
-  </figure>
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/RustQC/Coverage Profile Along Genes (Total).png`}
-        alt="RustQC coverage profile"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>RustQC</figcaption>
-  </figure>
-</div>
-
-#### Coverage Histogram (0-50X)
-
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "1rem",
-    margin: "1rem 0",
-  }}
->
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/Qualimap/Transcript coverage histogram.png`}
-        alt="Qualimap coverage histogram"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>Qualimap (Java)</figcaption>
-  </figure>
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/RustQC/Transcript coverage histogram.png`}
-        alt="RustQC coverage histogram"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>RustQC</figcaption>
-  </figure>
-</div>
-
-#### Reads Genomic Origin
-
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "1rem",
-    margin: "1rem 0",
-  }}
->
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/Qualimap/Reads Genomic Origin.png`}
-        alt="Qualimap reads genomic origin"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>Qualimap (Java)</figcaption>
-  </figure>
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/RustQC/Reads Genomic Origin.png`}
-        alt="RustQC reads genomic origin"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>RustQC</figcaption>
-  </figure>
-</div>
-
-#### Junction Analysis
-
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "1rem",
-    margin: "1rem 0",
-  }}
->
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/Qualimap/Junction Analysis.png`}
-        alt="Qualimap junction analysis"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>Qualimap (Java)</figcaption>
-  </figure>
-  <figure style={{ margin: 0, textAlign: "center" }}>
-    <div
-      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
-    >
-      <img
-        src={`${base}benchmarks/large/qualimap/RustQC/Junction Analysis.png`}
-        alt="RustQC junction analysis"
-        style={{ width: "100%", borderRadius: "8px" }}
-      />
-    </div>
-    <figcaption>RustQC</figcaption>
-  </figure>
-</div>
 
 ### HTML reports
 

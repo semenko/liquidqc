@@ -173,38 +173,6 @@ The duplication rate plot shows two curves: **sequence-based** (blue) and
 level. Most reads should appear at low occurrence counts; a long tail indicates
 high duplication.
 
-<CardGrid>
-  <Card title="Duplication rate">
-    <img
-      src={`${base}examples/rseqc/read_duplication.png`}
-      alt="Read duplication rate plot"
-    />
-  </Card>
-</CardGrid>
-
-### Benchmarks
-
-All values are identical on both datasets.
-
-#### Small dataset (first few duplication levels)
-
-| Level | Seq-based (unique reads) | Pos-based (unique reads) |
-| ----: | -----------------------: | -----------------------: |
-|    1x |                   37,943 |                   33,183 |
-|    2x |                    1,844 |                    2,984 |
-|    3x |                      492 |                      693 |
-|    4x |                      200 |                      289 |
-
-#### Large dataset (first few duplication levels)
-
-| Level | Seq-based (unique reads) | Pos-based (unique reads) |
-| ----: | -----------------------: | -----------------------: |
-|    1x |               24,661,232 |               15,958,022 |
-|    2x |                5,199,146 |                4,781,421 |
-|    3x |                3,211,713 |                2,988,951 |
-
-#### Read duplication plots (large dataset)
-
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
     <strong>RSeQC</strong>
@@ -227,6 +195,27 @@ All values are identical on both datasets.
     </div>
   </div>
 </div>
+
+### Benchmarks
+
+All values are identical on both datasets.
+
+#### Small dataset (first few duplication levels)
+
+| Level | Seq-based (unique reads) | Pos-based (unique reads) |
+| ----: | -----------------------: | -----------------------: |
+|    1x |                   37,943 |                   33,183 |
+|    2x |                    1,844 |                    2,984 |
+|    3x |                      492 |                      693 |
+|    4x |                      200 |                      289 |
+
+#### Large dataset (first few duplication levels)
+
+| Level | Seq-based (unique reads) | Pos-based (unique reads) |
+| ----: | -----------------------: | -----------------------: |
+|    1x |               24,661,232 |               15,958,022 |
+|    2x |                5,199,146 |                4,781,421 |
+|    3x |                3,211,713 |                2,988,951 |
 
 ## read_distribution
 
@@ -298,20 +287,55 @@ Two pie charts are generated, one for splice **events** (reads) and one for
 splice **junctions** (unique splice sites). Each chart shows the proportion of
 known (blue), partial novel (red), and complete novel (green) splicing.
 
-<CardGrid>
-  <Card title="Splice events">
-    <img
-      src={`${base}examples/rseqc/splice_events.png`}
-      alt="Splice events pie chart"
-    />
-  </Card>
-  <Card title="Splice junctions">
-    <img
-      src={`${base}examples/rseqc/splice_junction.png`}
-      alt="Splice junctions pie chart"
-    />
-  </Card>
-</CardGrid>
+#### Splice events
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <strong>RSeQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`}
+        alt="RSeQC splice events plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
+  </div>
+  <div>
+    <strong>RustQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`}
+        alt="RustQC splice events plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
+  </div>
+</div>
+
+#### Splice junctions
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <strong>RSeQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`}
+        alt="RSeQC splice junction plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
+  </div>
+  <div>
+    <strong>RustQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`}
+        alt="RustQC splice junction plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
+  </div>
+</div>
 
 ### Benchmarks
 
@@ -349,56 +373,6 @@ All values are identical on both datasets.
 
 The data files and R plotting scripts match upstream RSeQC output.
 
-#### Splice event plots (large dataset)
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
-    <strong>RSeQC</strong>
-    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
-      <img
-        src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`}
-        alt="RSeQC splice events plot"
-        style="width: 100%; border-radius: 8px;"
-      />
-    </div>
-  </div>
-  <div>
-    <strong>RustQC</strong>
-    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
-      <img
-        src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`}
-        alt="RustQC splice events plot"
-        style="width: 100%; border-radius: 8px;"
-      />
-    </div>
-  </div>
-</div>
-
-#### Splice junction plots (large dataset)
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
-    <strong>RSeQC</strong>
-    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
-      <img
-        src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`}
-        alt="RSeQC splice junction plot"
-        style="width: 100%; border-radius: 8px;"
-      />
-    </div>
-  </div>
-  <div>
-    <strong>RustQC</strong>
-    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
-      <img
-        src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`}
-        alt="RustQC splice junction plot"
-        style="width: 100%; border-radius: 8px;"
-      />
-    </div>
-  </div>
-</div>
-
 ## junction_saturation
 
 Splice junction discovery rate at increasing sequencing depths.
@@ -423,14 +397,28 @@ The junction saturation plot shows three lines: **all junctions** (blue),
 percentage of total reads used and the y-axis is the number of splice junctions
 detected (in thousands). A plateau in the curves indicates saturation.
 
-<CardGrid>
-  <Card title="Junction saturation">
-    <img
-      src={`${base}examples/rseqc/junction_saturation.png`}
-      alt="Junction saturation plot"
-    />
-  </Card>
-</CardGrid>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <div>
+    <strong>RSeQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`}
+        alt="RSeQC junction saturation plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
+  </div>
+  <div>
+    <strong>RustQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`}
+        alt="RustQC junction saturation plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
+  </div>
+</div>
 
 ### Benchmarks
 
@@ -456,31 +444,6 @@ At 100% sampling depth:
 
 Intermediate sampling percentages show minor stochastic variation from random
 subsampling, as expected.
-
-#### Junction saturation plots (large dataset)
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
-    <strong>RSeQC</strong>
-    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
-      <img
-        src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`}
-        alt="RSeQC junction saturation plot"
-        style="width: 100%; border-radius: 8px;"
-      />
-    </div>
-  </div>
-  <div>
-    <strong>RustQC</strong>
-    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
-      <img
-        src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`}
-        alt="RustQC junction saturation plot"
-        style="width: 100%; border-radius: 8px;"
-      />
-    </div>
-  </div>
-</div>
 
 ## inner_distance
 
@@ -517,25 +480,6 @@ inner distances, with a Gaussian density curve (red) overlaid. The title
 displays the mean and standard deviation. The distribution should be
 approximately normal for a well-prepared library.
 
-<CardGrid>
-  <Card title="Inner distance">
-    <img
-      src={`${base}examples/rseqc/inner_distance.png`}
-      alt="Inner distance histogram"
-    />
-  </Card>
-</CardGrid>
-
-### Benchmarks
-
-All frequency values are identical on both datasets.
-
-Large dataset summary: mean = 29.378, median = 27.5, std dev = 32.799
-
-The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
-
-#### Inner distance plots (large dataset)
-
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
     <strong>RSeQC</strong>
@@ -558,6 +502,14 @@ The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
     </div>
   </div>
 </div>
+
+### Benchmarks
+
+All frequency values are identical on both datasets.
+
+Large dataset summary: mean = 29.378, median = 27.5, std dev = 32.799
+
+The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
 
 ## TIN (Transcript Integrity Number)
 
