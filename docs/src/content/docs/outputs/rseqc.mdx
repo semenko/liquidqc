@@ -9,6 +9,7 @@ export const base = import.meta.env.BASE_URL;
 
 <Aside type="note" title="About RSeQC">
 RSeQC is a Python package providing a suite of quality control tools for RNA-Seq data, including strandedness inference, read distribution analysis, junction annotation, and more.
+
 [Documentation](https://rseqc.sourceforge.net/) | [Source code](https://github.com/MonashBioinformaticsPlatform/RSeQC)
 </Aside>
 
@@ -244,17 +245,99 @@ approximately normal for a well-prepared library.
 
 ## tin (Transcript Integrity Number)
 
-Measures transcript integrity via Shannon entropy of read coverage uniformity.
-TIN scores range from 0 (completely degraded) to 100 (perfectly uniform coverage).
-See the dedicated [TIN output page](/outputs/tin/) for full details, configuration
-options, and interpretation guidance.
+TIN (Transcript Integrity Number) measures the uniformity of read coverage
+across a transcript. A TIN score of 100 means perfectly uniform coverage; lower
+scores indicate degradation or bias. TIN is computed using Shannon entropy of
+read-start coverage at sampled positions along each transcript's exonic regions.
+
+RustQC reimplements [RSeQC's `tin.py`](https://rseqc.sourceforge.net/#tin-py),
+computing TIN scores automatically as part of `rustqc rna` in the same
+single-pass BAM scan as all other analyses.
+
+TIN is particularly useful for:
+
+- **Detecting RNA degradation** -- degraded samples show low TIN scores across
+  most transcripts
+- **Sample QC** -- median TIN provides a single-number summary of RNA integrity,
+  complementing RIN (RNA Integrity Number) from Bioanalyzer/TapeStation
+- **Identifying problematic samples** -- samples with unusually low median TIN
+  should be flagged for potential exclusion
 
 | File                 | Description                                                            |
 | -------------------- | ---------------------------------------------------------------------- |
 | `{stem}.tin.xls`     | Per-gene TIN scores (TSV: geneID, chrom, tx_start, tx_end, TIN)        |
 | `{stem}.summary.txt` | Summary statistics: mean, median, and standard deviation of TIN scores |
 
-For details on minor differences from upstream `tin.py`, see the [TIN output page](/outputs/tin/#compatibility).
+### TIN scores file
+
+The `{stem}.tin.xls` file is a tab-separated file with one row per transcript (gene):
+
+| Column     | Description                         |
+| ---------- | ----------------------------------- |
+| `geneID`   | Gene identifier from the annotation |
+| `chrom`    | Chromosome                          |
+| `tx_start` | Transcript start position           |
+| `tx_end`   | Transcript end position             |
+| `TIN`      | Transcript Integrity Number (0-100) |
+
+Transcripts below the minimum coverage threshold are excluded from the output.
+TIN values are formatted to 2 decimal places.
+
+### Summary file
+
+The `{stem}.summary.txt` file is a single-row tab-separated summary:
+
+| Column        | Description                     |
+| ------------- | ------------------------------- |
+| `Bam_file`    | Path to the input BAM file      |
+| `TIN(mean)`   | Mean TIN across all transcripts |
+| `TIN(median)` | Median TIN                      |
+| `TIN(stdev)`  | Standard deviation of TIN       |
+
+### Interpreting TIN scores
+
+| Median TIN | Interpretation                                |
+| ---------- | --------------------------------------------- |
+| > 70       | Good RNA integrity                            |
+| 50-70      | Moderate degradation                          |
+| < 50       | Significant degradation -- consider excluding |
+| < 30       | Severe degradation                            |
+
+A bimodal distribution of per-transcript TIN scores (some very high, some very
+low) can indicate selective degradation of certain transcript classes rather
+than global degradation.
+
+### Configuration
+
+TIN parameters (`sample_size`, `min_coverage`) can be set in the YAML config file.
+See the [Configuration](/usage/configuration/#tin) page for details.
+TIN uses the shared `--mapq` / `-q` flag for mapping quality filtering.
+
+### Performance
+
+The upstream `tin.py` tool processes each transcript independently and scales
+poorly with BAM size. On large production datasets (e.g., ~186M reads), `tin.py`
+can take **6+ hours** and may fail to complete within typical pipeline time limits.
+RustQC computes TIN scores as part of its single-pass BAM scan, completing the
+analysis in the same ~19 minutes it takes to run all other tools combined.
+
+### Compatibility
+
+RustQC's TIN output uses the same file format and column names as RSeQC's
+`tin.py`. The main difference is that RustQC reports one row per **gene** (using
+the longest transcript as representative), while RSeQC reports one row per
+**transcript**. TIN scores are computed using the same Shannon entropy formula.
+
+<Aside type="note" title="Minor differences from upstream tin.py">
+TIN scores may differ very slightly from RSeQC's `tin.py`.
+Both tools sample identical positions and apply identical flag filters, but they
+count per-position coverage differently: upstream uses pysam's pileup engine
+(`bam_plp_auto`) while RustQC uses CIGAR-derived aligned blocks via the BAM
+index. The htslib pileup engine uses a different internal read traversal that can
+miss a small number of reads at certain positions, leading to minor coverage
+differences. In practice, ~70% of TIN values are identical and the mean absolute
+difference is less than 0.1 TIN units.
+</Aside>
 
 ## Compatibility with RSeQC
 

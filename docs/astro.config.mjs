@@ -52,7 +52,7 @@ export default defineConfig({
             { label: "RSeQC", slug: "outputs/rseqc" },
             { label: "TIN", slug: "outputs/tin" },
             { label: "Qualimap", slug: "outputs/qualimap" },
-            { label: "preseq", slug: "outputs/preseq" },
+            { label: "Preseq", slug: "outputs/preseq" },
             { label: "Samtools", slug: "outputs/samtools" },
           ],
         },
@@ -64,7 +64,7 @@ export default defineConfig({
             { label: "featureCounts", slug: "benchmarks/featurecounts" },
             { label: "RSeQC", slug: "benchmarks/rseqc" },
             { label: "Qualimap", slug: "benchmarks/qualimap" },
-            { label: "preseq", slug: "benchmarks/preseq" },
+            { label: "Preseq", slug: "benchmarks/preseq" },
             { label: "Samtools", slug: "benchmarks/samtools" },
             {
               label: "Performance & Tuning",
