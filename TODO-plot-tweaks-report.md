@@ -76,3 +76,28 @@ This wasn't listed in the TODO items.
 **Verification**: Built, clippy clean, all 217 tests pass. Generated full-size plot and
 confirmed visual match: title, axes, labels, legend placement, marker styles, and data
 curves all match upstream closely.
+
+### junction_annotation — FIXED (3 items)
+
+**Problems & Fixes**:
+
+1. **Colours wrong**: Updated to exact R `palette()` colours:
+   - `partial_novel`: `#DF536B` / RGB(223, 83, 107) — pink/red
+   - `complete_novel`: `#61D04F` / RGB(97, 208, 79) — green
+   - `known`: `#2297E6` / RGB(34, 151, 230) — blue
+   Also removed 0.85 opacity mixing — now full opacity to match R.
+
+2. **Labels falling off plot area**: Changed label radius from 1.25× to 1.1× (matching R's
+   `text(1.1 * P$x, 1.1 * P$y, ...)`). Added proper text anchoring: `HPos::Right` for
+   left-side labels, `HPos::Left` for right-side labels (matching R's `adj` parameter).
+   Added leader lines from 1.0× to 1.05× radius like R.
+
+3. **Pie chart rotation**: Changed slice order from `known, partial_novel, complete_novel`
+   to `partial_novel, complete_novel, known` matching the R script's `c()` order.
+
+**Note**: R uses hatched/density fill patterns; RustQC uses solid fill. This is a minor
+cosmetic difference not listed in the TODO. Title casing also differs slightly
+("Splicing Events" vs "splicing events").
+
+**Verification**: Built, clippy clean, all 217 tests pass. Visual comparison confirms
+colours, label placement, and rotation now match upstream.

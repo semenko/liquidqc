@@ -253,13 +253,19 @@ fn compute_weighted_mean_sd(bins: &[(i64, i64, u64)], step: i64) -> (f64, f64) {
 ///
 /// Matches the plots produced by RSeQC's junction_annotation.py R script:
 /// - Two pie charts: splicing events and splicing junctions
-/// - Three categories: known (blue), partial_novel (red), complete_novel (green)
+/// - Three categories in R slice order: partial_novel (red), complete_novel (green), known (blue)
+/// - Colours match R's default `palette()`: `#DF536B`, `#61D04F`, `#2297E6`
 /// - Labels show rounded integer percentages
 ///
 /// # Arguments
 /// * `results` — junction annotation analysis results
 /// * `prefix` — output path prefix (e.g. `outdir/sample`)
 pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Result<()> {
+    // R default palette colours:  palette()[2] = #DF536B, [3] = #61D04F, [4] = #2297E6
+    let col_partial_novel = RGBColor(223, 83, 107); // R palette()[2] — red / pink
+    let col_complete_novel = RGBColor(97, 208, 79); // R palette()[3] — green
+    let col_known = RGBColor(34, 151, 230); // R palette()[4] — blue
+
     // --- Splice events pie chart ---
     {
         let total_classified_events =
@@ -274,10 +280,11 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
             (0.0, 0.0, 0.0)
         };
 
+        // Slice order matches R: c(partial_novel, complete_novel, known)
         let events_slices = [
-            ("known", e_known_pct, RGBColor(0, 0, 205)),
-            ("partial_novel", e_partial_pct, RGBColor(205, 0, 0)),
-            ("complete_novel", e_novel_pct, RGBColor(0, 205, 0)),
+            ("partial_novel", e_partial_pct, col_partial_novel),
+            ("complete_novel", e_novel_pct, col_complete_novel),
+            ("known", e_known_pct, col_known),
         ];
 
         let events_png = format!("{}.splice_events.png", prefix);
@@ -315,10 +322,11 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
             (0.0, 0.0, 0.0)
         };
 
+        // Slice order matches R: c(partial_novel, complete_novel, known)
         let junctions_slices = [
-            ("known", j_known_pct, RGBColor(0, 0, 205)),
-            ("partial_novel", j_partial_pct, RGBColor(205, 0, 0)),
-            ("complete_novel", j_novel_pct, RGBColor(0, 205, 0)),
+            ("partial_novel", j_partial_pct, col_partial_novel),
+            ("complete_novel", j_novel_pct, col_complete_novel),
+            ("known", j_known_pct, col_known),
         ];
 
         let junctions_png = format!("{}.splice_junction.png", prefix);
@@ -351,6 +359,12 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
 ///
 /// The `plotters` crate does not have built-in pie chart support, so this
 /// is drawn manually using filled arc segments and text labels.
+///
+/// Matches R's `pie()` behaviour:
+/// - `init.angle = 30` (30° counter-clockwise from 3-o'clock / east)
+/// - Leader lines from 1.0× to 1.05× radius
+/// - Labels at 1.1× radius, right-aligned on the left side (`adj=1`)
+/// - Slices drawn counter-clockwise
 fn render_pie_chart<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     title: &str,
@@ -360,6 +374,8 @@ fn render_pie_chart<DB: DrawingBackend>(
 where
     DB::ErrorType: 'static,
 {
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+
     let ps = |v: f64| (v * pxs) as i32;
 
     root.fill(&WHITE)?;
@@ -368,9 +384,11 @@ where
     let w = w as i32;
     let h = h as i32;
 
-    // Title
-    let title_style = TextStyle::from(("sans-serif", ps(16.0) as f64).into_font()).color(&BLACK);
-    root.draw_text(title, &title_style, (w / 2 - ps(60.0), ps(10.0)))?;
+    // Title — centred horizontally
+    let title_style = TextStyle::from(("sans-serif", ps(16.0) as f64).into_font())
+        .color(&BLACK)
+        .pos(Pos::new(HPos::Center, VPos::Top));
+    root.draw_text(title, &title_style, (w / 2, ps(10.0)))?;
 
     let cx = w / 2;
     let cy = h / 2 + ps(10.0);
@@ -382,8 +400,8 @@ where
         return Ok(());
     }
 
-    // Draw pie segments using filled polygons
-    // RSeQC uses init.angle=30 degrees, so start at 30° from top
+    // Draw pie segments using filled polygons.
+    // R's pie() with init.angle=30: start 30° counter-clockwise from east.
     let init_angle: f64 = 30.0_f64.to_radians();
     let mut current_angle = init_angle;
 
@@ -405,33 +423,57 @@ where
             points.push((px, py));
         }
 
-        // Draw the filled polygon
+        // Draw the filled polygon (full opacity, matching R)
         root.draw(&Polygon::new(
             points,
             ShapeStyle {
-                color: color.mix(0.85),
+                color: color.to_rgba(),
                 filled: true,
                 stroke_width: ps(1.0) as u32,
             },
         ))?;
 
-        // Draw label at midpoint of arc, outside the pie
+        // Label positioning matches R's pie():
+        //   leader line from 1.0× to 1.05× radius
+        //   text at 1.1× radius
+        //   adj = ifelse(P$x < 0, 1, 0) — right-align on left side
         let mid_angle = current_angle + sweep / 2.0;
-        let label_r = radius as f64 * 1.25;
-        let lx = cx as f64 + label_r * mid_angle.cos();
-        let ly = cy as f64 - label_r * mid_angle.sin();
+        let cos_mid = mid_angle.cos();
+        let sin_mid = mid_angle.sin();
+
+        // Leader line: from pie edge (1.0r) to 1.05r
+        let line_start_x = cx as f64 + radius as f64 * cos_mid;
+        let line_start_y = cy as f64 - radius as f64 * sin_mid;
+        let line_end_x = cx as f64 + radius as f64 * 1.05 * cos_mid;
+        let line_end_y = cy as f64 - radius as f64 * 1.05 * sin_mid;
+        root.draw(&PathElement::new(
+            vec![
+                (line_start_x as i32, line_start_y as i32),
+                (line_end_x as i32, line_end_y as i32),
+            ],
+            BLACK.stroke_width(ps(1.0) as u32),
+        ))?;
+
+        // Text at 1.1× radius, anchored like R's adj parameter
+        let label_r = radius as f64 * 1.1;
+        let lx = cx as f64 + label_r * cos_mid;
+        let ly = cy as f64 - label_r * sin_mid;
 
         let label_text = format!("{} {}%", label, pct as u64);
-        let label_style =
-            TextStyle::from(("sans-serif", ps(10.0) as f64).into_font()).color(&BLACK);
 
-        // Adjust text position based on which side of the pie
-        let text_x = if mid_angle.cos() >= 0.0 {
-            lx as i32
+        // R: adj = ifelse(P$x < 0, 1, 0)
+        //   P$x < 0 ⟹ left side ⟹ adj=1 ⟹ right-aligned
+        //   P$x >= 0 ⟹ right side ⟹ adj=0 ⟹ left-aligned
+        let h_anchor = if cos_mid < 0.0 {
+            HPos::Right
         } else {
-            lx as i32 - ps(80.0)
+            HPos::Left
         };
-        root.draw_text(&label_text, &label_style, (text_x, ly as i32 - ps(5.0)))?;
+        let label_style = TextStyle::from(("sans-serif", ps(10.0) as f64).into_font())
+            .color(&BLACK)
+            .pos(Pos::new(h_anchor, VPos::Center));
+
+        root.draw_text(&label_text, &label_style, (lx as i32, ly as i32))?;
 
         current_angle = end_angle;
     }
