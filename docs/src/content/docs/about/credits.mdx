@@ -3,10 +3,16 @@ title: Credits & Citation
 description: Credits, citations, and acknowledgments for the tools and libraries that RustQC builds upon.
 ---
 
+import { Aside } from "@astrojs/starlight/components";
+
+RustQC was developed for the community by <a href="https://seqera.io" target="_blank" rel="noopener noreferrer">Seqera</a>.
+
 RustQC stands on the shoulders of giants. It is a reimplementation of established
 bioinformatics tools, and would not exist without their foundational work.
 
-**If you use RustQC, please cite the original tools.**
+<Aside type="tip" title="About RSeQC">
+If you use RustQC, please cite the original tools.
+</Aside>
 
 ## dupRadar
 
@@ -19,8 +25,8 @@ data by modeling duplication rates as a function of gene expression level.
 > assessment of PCR artifacts in RNA-Seq data. *BMC Bioinformatics*.
 > 2016;17(1):428.
 
-- Bioconductor: <https://bioconductor.org/packages/dupRadar/>
-- Publication: <https://doi.org/10.1186/s12859-016-1276-2>
+- Bioconductor: [bioconductor.org/packages/dupRadar](https://bioconductor.org/packages/dupRadar/)
+- Publication: [doi.org/10.1186/s12859-016-1276-2](https://doi.org/10.1186/s12859-016-1276-2)
 
 ## Subread / featureCounts
 
@@ -33,8 +39,8 @@ sequence reads to genomic features.
 > for assigning sequence reads to genomic features. *Bioinformatics*.
 > 2014;30(7):923-930.
 
-- Website: <http://subread.sourceforge.net/>
-- Publication: <https://doi.org/10.1093/bioinformatics/btt656>
+- Website: [subread.sourceforge.net](http://subread.sourceforge.net/)
+- Publication: [doi.org/10.1093/bioinformatics/btt656](https://doi.org/10.1093/bioinformatics/btt656)
 
 ## RSeQC
 
@@ -47,8 +53,8 @@ and fragment size.
 > Wang L, Wang S, Li W. RSeQC: quality control of RNA-seq experiments.
 > *Bioinformatics*. 2012;28(16):2184-2185.
 
-- Website: <https://rseqc.sourceforge.net/>
-- Publication: <https://doi.org/10.1093/bioinformatics/bts356>
+- Website: [rseqc.sourceforge.net](https://rseqc.sourceforge.net/)
+- Publication: [doi.org/10.1093/bioinformatics/bts356](https://doi.org/10.1093/bioinformatics/bts356)
 
 ## preseq
 
@@ -60,8 +66,8 @@ estimates the expected number of distinct molecules at increasing sequencing dep
 > Daley T, Smith AD. Predicting the molecular complexity of sequencing libraries.
 > *Nature Methods*. 2013;10(4):325-327.
 
-- GitHub: <https://github.com/smithlabcode/preseq>
-- Publication: <https://doi.org/10.1038/nmeth.2375>
+- GitHub: [github.com/smithlabcode/preseq](https://github.com/smithlabcode/preseq)
+- Publication: [doi.org/10.1038/nmeth.2375](https://doi.org/10.1038/nmeth.2375)
 
 ## samtools
 
@@ -73,8 +79,8 @@ downstream QC tools including MultiQC.
 > Danecek P, Bonfield JK, Liddle J, et al. Twelve years of SAMtools and BCFtools.
 > *GigaScience*. 2021;10(2):giab008.
 
-- Website: <http://www.htslib.org/>
-- Publication: <https://doi.org/10.1093/gigascience/giab008>
+- Website: [htslib.org](http://www.htslib.org/)
+- Publication: [doi.org/10.1093/gigascience/giab008](https://doi.org/10.1093/gigascience/giab008)
 
 ## Qualimap
 
@@ -86,8 +92,8 @@ Qualimap rnaseq report.
 > Garcia-Alcalde F, Okonechnikov K, Carbonell J, et al. Qualimap: evaluating
 > next-generation sequencing alignment data. *Bioinformatics*. 2012;28(20):2678-2679.
 
-- Website: <http://qualimap.conesalab.org/>
-- Publication: <https://doi.org/10.1093/bioinformatics/bts503>
+- Website: [qualimap.conesalab.org](http://qualimap.conesalab.org/)
+- Publication: [doi.org/10.1093/bioinformatics/bts503](https://doi.org/10.1093/bioinformatics/bts503)
 
 ## Key dependencies
 
@@ -109,6 +115,13 @@ RustQC is built with the following open-source Rust libraries:
 
 ## RustQC
 
-RustQC is created by [Phil Ewels](https://github.com/ewels).
+RustQC is developed for the community by [Seqera](https://seqera.io).
 
-- Repository: <https://github.com/seqeralabs/RustQC>
+<div style={{textAlign: "center", margin: "2rem 0 3rem"}}>
+  <a href="https://seqera.io" target="_blank" style={{display: "inline-block"}} rel="noopener noreferrer">
+    <img className="only-light" src="/seqera-logo.svg" alt="Seqera" style={{height: "8rem", width: "auto"}} data-zoom-off />
+    <img className="only-dark" src="/seqera-logo-dark.svg" alt="Seqera" style={{height: "8rem", width: "auto"}} data-zoom-off />
+  </a>
+</div>
+
+Repository: [github.com/seqeralabs/RustQC](https://github.com/seqeralabs/RustQC)
