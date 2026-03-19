@@ -57,7 +57,8 @@ headings and number formatting. Key metrics include:
 
 All values are identical between RSeQC and RustQC on both datasets.
 
-#### Small dataset
+<details>
+<summary>Small dataset</summary>
 
 | Metric              |           RSeQC |          RustQC |
 | ------------------- | --------------: | --------------: |
@@ -73,7 +74,10 @@ All values are identical between RSeQC and RustQC on both datasets.
 | Non-splice / Splice | 22,214 / 19,520 | 22,214 / 19,520 |
 | Properly paired     |          41,722 |          41,722 |
 
-#### Large dataset
+</details>
+
+<details>
+<summary>Large dataset</summary>
 
 | Metric              |                   RSeQC |                  RustQC |
 | ------------------- | ----------------------: | ----------------------: |
@@ -88,6 +92,8 @@ All values are identical between RSeQC and RustQC on both datasets.
 | Sense / Antisense   | 19,529,185 / 19,528,785 | 19,529,185 / 19,528,785 |
 | Non-splice / Splice | 27,689,719 / 11,368,251 | 27,689,719 / 11,368,251 |
 | Properly paired     |              39,030,552 |              39,030,552 |
+
+</details>
 
 ## infer_experiment
 
@@ -112,7 +118,8 @@ For paired-end data, the labels are `PairEnd` with `1++,1--,2+-,2-+` and
 - First fraction near 100% = forward stranded (e.g., Ligation protocol)
 - Second fraction near 100% = reverse stranded (e.g., dUTP protocol, most common)
 
-#### Small dataset - Identical
+<details>
+<summary>Small dataset - Identical</summary>
 
 | Metric                               |  RSeQC | RustQC |
 | ------------------------------------ | -----: | -----: |
@@ -120,13 +127,18 @@ For paired-end data, the labels are `PairEnd` with `1++,1--,2+-,2-+` and
 | Fraction sense (1++,1--,2+-,2-+)     | 0.0051 | 0.0051 |
 | Fraction antisense (1+-,1-+,2++,2--) | 0.9174 | 0.9174 |
 
-#### Large dataset - Minor difference (sampling)
+</details>
+
+<details>
+<summary>Large dataset - Minor difference (sampling)</summary>
 
 | Metric                               |  RSeQC | RustQC |
 | ------------------------------------ | -----: | -----: |
 | Failed to determine                  | 0.0670 | 0.1052 |
 | Fraction sense (1++,1--,2+-,2-+)     | 0.0117 | 0.0185 |
 | Fraction antisense (1+-,1-+,2++,2--) | 0.9213 | 0.8763 |
+
+</details>
 
 The difference is caused by a read-sampling mismatch: the upstream
 `infer_experiment.py` defaults to sampling only 200,000 reads. On a 186M-read BAM,
@@ -189,7 +201,8 @@ RustQC corrects this, using accurate labels: **Mapping-based** (blue) and
 
 All values are identical on both datasets.
 
-#### Small dataset (first few duplication levels)
+<details>
+<summary>Small dataset (first few duplication levels)</summary>
 
 | Level | Seq-based (unique reads) | Pos-based (unique reads) |
 | ----: | -----------------------: | -----------------------: |
@@ -198,13 +211,18 @@ All values are identical on both datasets.
 |    3x |                      492 |                      693 |
 |    4x |                      200 |                      289 |
 
-#### Large dataset (first few duplication levels)
+</details>
+
+<details>
+<summary>Large dataset (first few duplication levels)</summary>
 
 | Level | Seq-based (unique reads) | Pos-based (unique reads) |
 | ----: | -----------------------: | -----------------------: |
 |    1x |               24,661,232 |               15,958,022 |
 |    2x |                5,199,146 |                4,781,421 |
 |    3x |                3,211,713 |                2,988,951 |
+
+</details>
 
 ## read_distribution
 
@@ -223,7 +241,8 @@ The output includes:
 
 All values are identical on both datasets.
 
-#### Small dataset
+<details>
+<summary>Small dataset</summary>
 
 | Feature          | Total tags | Tags/Kb |
 | ---------------- | ---------: | ------: |
@@ -235,7 +254,10 @@ All values are identical on both datasets.
 
 Total reads: 43,476 | Total tags: 68,660 | Total assigned: 68,134
 
-#### Large dataset
+</details>
+
+<details>
+<summary>Large dataset</summary>
 
 | Feature      | Total tags | Tags/Kb |
 | ------------ | ---------: | ------: |
@@ -245,6 +267,8 @@ Total reads: 43,476 | Total tags: 68,660 | Total assigned: 68,134
 | Introns      |  7,332,516 |    4.87 |
 
 Total reads: 41,094,945 | Total tags: 55,001,331 | Total assigned: 54,113,746
+
+</details>
 
 ## junction_annotation
 
@@ -300,7 +324,8 @@ known (blue), partial novel (red), and complete novel (green) splicing.
 
 All values are identical on both datasets.
 
-#### Small dataset
+<details>
+<summary>Small dataset</summary>
 
 | Metric               |           RSeQC |          RustQC |
 | -------------------- | --------------: | --------------: |
@@ -315,7 +340,10 @@ All values are identical on both datasets.
 | Partial novel        |      88 (2.70%) |      88 (2.70%) |
 | Novel                |     191 (5.86%) |     191 (5.86%) |
 
-#### Large dataset
+</details>
+
+<details>
+<summary>Large dataset</summary>
 
 | Metric               |      RSeQC |     RustQC |
 | -------------------- | ---------: | ---------: |
@@ -329,6 +357,8 @@ All values are identical on both datasets.
 | Known                |    175,159 |    175,159 |
 | Partial novel        |     45,554 |     45,554 |
 | Novel                |     19,079 |     19,079 |
+
+</details>
 
 The data files and R plotting scripts match upstream RSeQC output.
 
@@ -369,7 +399,8 @@ Results are identical between RSeQC and RustQC at full sampling depth on both da
 
 At 100% sampling depth:
 
-#### Small dataset
+<details>
+<summary>Small dataset</summary>
 
 | Metric          | RSeQC | RustQC |
 | --------------- | ----: | -----: |
@@ -377,13 +408,18 @@ At 100% sampling depth:
 | Known junctions | 2,944 |  2,944 |
 | Novel junctions |   317 |    317 |
 
-#### Large dataset
+</details>
+
+<details>
+<summary>Large dataset</summary>
 
 | Metric          |   RSeQC |  RustQC |
 | --------------- | ------: | ------: |
 | All junctions   | 239,792 | 239,792 |
 | Known junctions | 160,896 | 160,896 |
 | Novel junctions |  78,896 |  78,896 |
+
+</details>
 
 Intermediate sampling percentages show minor stochastic variation from random
 subsampling, as expected.
@@ -533,7 +569,8 @@ RustQC's TIN output uses the same file format and column names as RSeQC's
   investigation.
 </Aside>
 
-#### Small dataset - Identical
+<details>
+<summary>Small dataset - Identical</summary>
 
 | Metric      |   RSeQC |  RustQC |
 | ----------- | ------: | ------: |
@@ -541,7 +578,10 @@ RustQC's TIN output uses the same file format and column names as RSeQC's
 | TIN median  | 55.5830 | 55.5830 |
 | TIN std dev | 22.5333 | 22.5333 |
 
-#### Large dataset - Both tools completed
+</details>
+
+<details>
+<summary>Large dataset - Both tools completed</summary>
 
 The upstream `tin.py` took **9h 45m** to complete on the large dataset.
 RustQC completes TIN analysis as part of its single-pass BAM processing
@@ -552,6 +592,8 @@ in under 15 minutes total (inclusive of all other analyses).
 | TIN mean    | 70.193 |  70.208 |
 | TIN median  | 77.980 |  78.007 |
 | TIN std dev | 23.588 |  23.597 |
+
+</details>
 
 Summary-level TIN statistics are near-identical. Per-transcript TIN values
 show larger differences due to the coverage counting approach described above.

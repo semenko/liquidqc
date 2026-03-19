@@ -187,7 +187,8 @@ validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-
 
 Individual Samtools tool times are shown for reference.
 
-#### Small dataset (~52K reads, chr6 subset)
+<details>
+<summary>Small dataset (~52K reads, chr6 subset)</summary>
 
 | Tool                        |   Runtime |        RSS |
 | --------------------------- | --------: | ---------: |
@@ -196,7 +197,10 @@ Individual Samtools tool times are shown for reference.
 | samtools stats              |      &lt;1s |     3.2 MB |
 | **RUSTQC_RNA (all-in-one)** | **25.9s** | **182 MB** |
 
-#### Large dataset (~186M reads, GM12878)
+</details>
+
+<details>
+<summary>Large dataset (~186M reads, GM12878)</summary>
 
 | Tool                        |     Runtime |         RSS |
 | --------------------------- | ----------: | ----------: |
@@ -205,6 +209,8 @@ Individual Samtools tool times are shown for reference.
 | samtools stats              |      9m 48s |      8.2 MB |
 | **RUSTQC_RNA (all-in-one)** | **14m 54s** | **11.4 GB** |
 
+</details>
+
 ### flagstat comparison
 
 **Result: Identical**
@@ -212,7 +218,8 @@ Individual Samtools tool times are shown for reference.
 All flagstat metrics match exactly between `samtools flagstat` and RustQC on both
 the small and large datasets.
 
-#### Large dataset (GM12878, ~186M reads)
+<details>
+<summary>Large dataset (GM12878, ~186M reads)</summary>
 
 | Metric          |             samtools |               RustQC |
 | --------------- | -------------------: | -------------------: |
@@ -225,7 +232,10 @@ the small and large datasets.
 | Properly paired | 173,557,764 (93.17%) | 173,557,764 (93.17%) |
 | Singletons      |              240,545 |              240,545 |
 
-#### Small dataset (test, ~52K reads, chr6 subset)
+</details>
+
+<details>
+<summary>Small dataset (test, ~52K reads, chr6 subset)</summary>
 
 | Metric          |         Samtools |           RustQC |
 | --------------- | ---------------: | ---------------: |
@@ -237,6 +247,8 @@ the small and large datasets.
 | Primary mapped  | 49,573 (100.00%) | 49,573 (100.00%) |
 | Properly paired |  49,546 (99.95%) |  49,546 (99.95%) |
 | Singletons      |               27 |               27 |
+
+</details>
 
 The output format is fully compatible with MultiQC and other tools that parse
 Samtools flagstat output.
@@ -258,7 +270,8 @@ between `samtools stats` and RustQC on both datasets. The GCD (GC depth) section
 shows minor differences (max absolute difference of 0.018) due to sampling
 variation in the GC depth calculation.
 
-#### Large dataset (GM12878)
+<details>
+<summary>Large dataset (GM12878)</summary>
 
 | Metric                |     Samtools |       RustQC |
 | --------------------- | -----------: | -----------: |
@@ -273,7 +286,10 @@ variation in the GC depth calculation.
 | insert size average   |      1,536.7 |      1,536.7 |
 | insert size std dev   |      2,263.8 |      2,263.8 |
 
-#### Small dataset (test, chr6 subset)
+</details>
+
+<details>
+<summary>Small dataset (test, chr6 subset)</summary>
 
 | Metric                |     Samtools |       RustQC |
 | --------------------- | -----------: | -----------: |
@@ -287,6 +303,8 @@ variation in the GC depth calculation.
 | average quality       |         38.6 |         38.6 |
 | insert size average   |      1,625.9 |      1,625.9 |
 | insert size std dev   |      2,305.4 |      2,305.4 |
+
+</details>
 
 RustQC produces the full `samtools stats` output, including the SN section and all
 histogram sections (FFQ, LFQ, GCF, GCL, GCC, GCT, FBC, LBC, FTC, LTC, IS, RL,

@@ -117,19 +117,25 @@ compatible with the Subread featureCounts format. Benchmarks were run on AWS clo
 
 ### Performance
 
-#### Large dataset (GM12878 REP1, ~186M reads)
+<details>
+<summary>Large dataset (GM12878 REP1, ~186M reads)</summary>
 
 | Tool                            | Wall time | CPU time | Peak RSS |
 | ------------------------------- | --------: | -------: | -------: |
 | Rsubread featureCounts          |     3m 3s |    3m 3s |   210 MB |
 | RustQC (all tools, single pass) |   14m 54s |  14m 54s |  11.4 GB |
 
-#### Small dataset (~52K reads, chr6)
+</details>
+
+<details>
+<summary>Small dataset (~52K reads, chr6)</summary>
 
 | Tool                            | Wall time | CPU time | Peak RSS |
 | ------------------------------- | --------: | -------: | -------: |
 | Rsubread featureCounts          |     3m 9s |       1s |   3.1 MB |
 | RustQC (all tools, single pass) |    3m 31s |    25.9s | 182.1 MB |
+
+</details>
 
 > **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Benchmark Details](/rna/benchmark-details/) for a full breakdown.
 
@@ -144,7 +150,8 @@ RustQC's read counting uses the same algorithm as Subread featureCounts:
 - **Strand awareness:** configurable via the `-s` / `--stranded` flag
 - **Multi-mapping:** tracked separately for unique and multi-mapper columns
 
-#### Assignment statistics - small dataset (test, ~52K reads)
+<details>
+<summary>Assignment statistics - small dataset (test, ~52K reads)</summary>
 
 | Category                | Rsubread featureCounts | RustQC | Match |
 | ----------------------- | ---------------------: | -----: | :---: |
@@ -154,7 +161,10 @@ RustQC's read counting uses the same algorithm as Subread featureCounts:
 | Unassigned_Ambiguity    |                  2,525 |  2,525 |   ✓   |
 | All others              |                      0 |      0 |   ✓   |
 
-#### Assignment statistics - large dataset (GM12878 REP1, ~186M reads)
+</details>
+
+<details>
+<summary>Assignment statistics - large dataset (GM12878 REP1, ~186M reads)</summary>
 
 | Category                | Rsubread featureCounts |      RustQC | Match |
 | ----------------------- | ---------------------: | ----------: | :---: |
@@ -164,6 +174,8 @@ RustQC's read counting uses the same algorithm as Subread featureCounts:
 | Unassigned_NoFeatures   |             29,885,481 |  29,885,481 |   ✓   |
 | Unassigned_Ambiguity    |              4,958,548 |   4,958,548 |   ✓   |
 | All others              |                      0 |           0 |   ✓   |
+
+</details>
 
 All assignment statistics are identical across both datasets. Gene-level read counts match exactly for every gene. The output format is directly compatible with downstream tools such as DESeq2 and MultiQC.
 

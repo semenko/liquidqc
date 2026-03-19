@@ -311,7 +311,8 @@ eliminating the separate name-sort and Qualimap run required by the original Jav
 
 ### Performance
 
-#### Large dataset (~186M reads, GM12878)
+<details>
+<summary>Large dataset (~186M reads, GM12878)</summary>
 
 | Tool                        | Runtime        | Peak RSS | Notes                                                          |
 | --------------------------- | -------------- | -------- | -------------------------------------------------------------- |
@@ -320,12 +321,17 @@ eliminating the separate name-sort and Qualimap run required by the original Jav
 | **Total upstream pipeline** | **~1h 2m 14s** |          | Name-sort + Qualimap combined                                  |
 | RustQC (all tools)          | 14m 54s        | 11.4 GB  | Single pass, all analyses combined, coordinate-sorted input    |
 
-#### Small dataset (~52K reads, chr6)
+</details>
+
+<details>
+<summary>Small dataset (~52K reads, chr6)</summary>
 
 | Tool                   | Runtime | Peak RSS | Notes                                         |
 | ---------------------- | ------- | -------- | --------------------------------------------- |
 | Qualimap rnaseq (Java) | 5.0s    | 704.6 MB | Separate BAM pass, requires name-sorted input |
 | RustQC (all tools)     | 25.9s   | 182.1 MB | Single pass, all analyses combined            |
+
+</details>
 
 > **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Benchmark Details](/rna/benchmark-details/) for a full breakdown.
 
@@ -338,7 +344,8 @@ Both tools were run on the same BAM file with matching parameters
 (`--stranded 2` / `strand-specific-reverse`, same GENCODE GTF). Results below
 are from the AWS benchmark run (2026-03-09).
 
-#### Small dataset (~52K reads, chr6)
+<details>
+<summary>Small dataset (~52K reads, chr6)</summary>
 
 ##### Reads alignment
 
@@ -374,7 +381,10 @@ are from the AWS benchmark run (2026-03-09).
 The 5'-3' bias shows a minor difference (1.30 vs 1.19) on this small dataset.
 All other values are identical.
 
-#### Large dataset (~186M reads, GM12878)
+</details>
+
+<details>
+<summary>Large dataset (~186M reads, GM12878)</summary>
 
 ##### Reads alignment
 
@@ -416,6 +426,8 @@ All other values are identical.
 
 Junction motif type percentages match with rounding differences less than 0.05
 percentage points. The underlying read counts are identical.
+
+</details>
 
 ### HTML reports
 

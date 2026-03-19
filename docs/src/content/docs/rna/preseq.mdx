@@ -120,23 +120,30 @@ run on AWS cloud infrastructure on 2026-03-09.
 
 The extrapolation computation itself is fast (under 1 second) -- it is purely a function of the histogram data.
 
-#### Small dataset (~52K reads, chr6)
+<details>
+<summary>Small dataset (~52K reads, chr6)</summary>
 
 | Tool                            |   Runtime |      RSS |
 | ------------------------------- | --------: | -------: |
 | preseq lc_extrap (standalone)   |      1.0s |  24.9 MB |
 | RustQC (all tools, single pass) | **25.9s** | 182.1 MB |
 
-#### Large dataset (GM12878 REP1, ~186M reads)
+</details>
+
+<details>
+<summary>Large dataset (GM12878 REP1, ~186M reads)</summary>
 
 | Tool                            |     Runtime |     RSS |    CPU |
 | ------------------------------- | ----------: | ------: | -----: |
 | preseq lc_extrap (standalone)   |      39m 9s |  2.0 GB | 102.2% |
 | RustQC (all tools, single pass) | **14m 54s** | 11.4 GB | 174.2% |
 
+</details>
+
 ### Output comparison
 
-#### Small dataset (test, ~52K reads, chr6)
+<details>
+<summary>Small dataset (test, ~52K reads, chr6)</summary>
 
 The small dataset produces byte-identical output between Preseq v3.2.0 and
 RustQC. All values in all columns match exactly across all sampled read depths.
@@ -152,13 +159,16 @@ Sample output (first few rows):
 |   4,000,000 |   1,176,137.1 | 1,176,137.1 |      0.00% |
 |   5,000,000 |   1,252,577.7 | 1,252,577.7 |      0.00% |
 
+</details>
+
 <img
   src={`${base}benchmarks/small/multiqc/preseq_complexity_plot_molecules.png`}
   alt="Preseq complexity plot - small dataset"
   style="max-width: 100%"
 />
 
-#### Large dataset (GM12878 REP1, ~186M reads, 10 GB BAM)
+<details>
+<summary>Large dataset (GM12878 REP1, ~186M reads, 10 GB BAM)</summary>
 
 On Linux, RustQC produces byte-identical output to Preseq v3.2.0 - every
 value in every column matches exactly. This is achieved by using the same C++
@@ -178,13 +188,16 @@ noise with no practical significance.
 |   500,000,000 |  30,374,922.2 | 30,374,922.2 |      0.00% |
 | 1,000,000,000 |  33,285,514.7 | 33,285,514.7 |      0.00% |
 
+</details>
+
 <img
   src={`${base}benchmarks/large/multiqc/preseq_complexity_plot_molecules.png`}
   alt="Preseq complexity plot - large dataset"
   style="max-width: 100%"
 />
 
-### Fragment counting
+<details>
+<summary>Fragment counting</summary>
 
 The fragment histogram (frequency-of-frequencies table) is the input to the
 extrapolation algorithm. RustQC's parallel hash-based counting matches Preseq's
@@ -196,6 +209,8 @@ most sensitive histogram bin).
 | Total fragments    |            93,003,768 |            93,003,768 |
 | Distinct fragments |                ~52.4M |                ~52.4M |
 | Singleton count    | Matches within 0.001% | Matches within 0.001% |
+
+</details>
 
 ### Confidence intervals
 
