@@ -1609,7 +1609,8 @@ fn write_rseqc_outputs(
         let r_path = rseqc_junc_annot_dir.join(format!("{}.junction_plot.r", bam_stem));
         rna::rseqc::junction_annotation::write_junction_plot_r(&results, &prefix, &r_path)?;
 
-        rna::rseqc::plots::junction_annotation_plot(&results, &prefix)?;
+        let sample_name = clean_sample_name(bam_stem);
+        rna::rseqc::plots::junction_annotation_plot(&results, &prefix, &sample_name)?;
 
         let summary_path =
             rseqc_junc_annot_dir.join(format!("{}.junction_annotation.txt", bam_stem));
@@ -1686,11 +1687,13 @@ fn write_rseqc_outputs(
         )?;
 
         let plot_path = rseqc_inner_dist_dir.join(format!("{}.inner_distance_plot.png", bam_stem));
+        let sample_name = clean_sample_name(bam_stem);
         rna::rseqc::plots::inner_distance_plot(
             &results,
             params.inner_distance_step,
             params.inner_distance_lower_bound,
             params.inner_distance_upper_bound,
+            &sample_name,
             &plot_path,
         )?;
 

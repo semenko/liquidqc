@@ -49,18 +49,28 @@ const HEIGHT: u32 = 480;
 /// * `step` — bin width used for histogram construction
 /// * `lower_bound` — inner distance lower bound (x-axis minimum)
 /// * `upper_bound` — inner distance upper bound (x-axis maximum)
+/// * `sample_name` — sample identifier shown as subtitle below the main title
 /// * `output_path` — path for the PNG output; SVG is written alongside
 pub fn inner_distance_plot(
     result: &InnerDistanceResult,
     step: i64,
     lower_bound: i64,
     upper_bound: i64,
+    sample_name: &str,
     output_path: &Path,
 ) -> Result<()> {
     // PNG (high-res)
     {
         let root = BitMapBackend::new(output_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
-        render_inner_distance(&root, result, step, lower_bound, upper_bound, SCALE as f64)?;
+        render_inner_distance(
+            &root,
+            result,
+            step,
+            lower_bound,
+            upper_bound,
+            sample_name,
+            SCALE as f64,
+        )?;
         root.present()
             .context("Failed to write inner distance PNG")?;
     }
@@ -69,7 +79,15 @@ pub fn inner_distance_plot(
     let svg_path = output_path.with_extension("svg");
     {
         let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
-        render_inner_distance(&root, result, step, lower_bound, upper_bound, 1.0)?;
+        render_inner_distance(
+            &root,
+            result,
+            step,
+            lower_bound,
+            upper_bound,
+            sample_name,
+            1.0,
+        )?;
         root.present()
             .context("Failed to write inner distance SVG")?;
     }
@@ -92,17 +110,21 @@ pub fn inner_distance_plot(
 /// R's default `hist()` draws no gridlines and `plot()` draws a black box
 /// around the plot area. The x-axis range spans the configured lower/upper
 /// bounds (which define the histogram bins).
+#[allow(clippy::too_many_arguments)]
 fn render_inner_distance<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     result: &InnerDistanceResult,
     step: i64,
     lower_bound: i64,
     upper_bound: i64,
+    sample_name: &str,
     pxs: f64,
 ) -> Result<()>
 where
     DB::ErrorType: 'static,
 {
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+
     let ps = |v: f64| (v * pxs) as u32;
 
     root.fill(&WHITE)?;
@@ -143,20 +165,40 @@ where
         .fold(0.0_f64, f64::max);
     let y_max = y_max.max(density_y_max * 1.1);
 
-    // --- Compute mean and SD for subtitle ---
+    // --- Compute mean and SD for title ---
     let (mean, sd) = compute_weighted_mean_sd(bins, step);
 
-    // --- Build chart ---
-    // Caption is "Mean=...;SD=..." matching upstream R's
-    //   main=paste(c("Mean=", frag_mean, ";", "SD=", frag_sd), collapse="")
-    // No secondary x-axis at the top (upstream R only has a bottom x-axis).
-    let caption = format!("Mean={:.4};SD={:.4}", mean, sd);
+    // --- Title + subtitle ---
+    // Bold descriptive title, then sample name in smaller font underneath.
+    // Upstream R uses: main=paste(c("Mean=",frag_mean,";","SD=",frag_sd),collapse="")
+    let title_height = ps(50.0);
+    let (top_area, plot_area) = root.split_vertically(title_height);
+    let cx = (top_area.dim_in_pixel().0 as i32) / 2;
+    let title_text = format!("Mean={:.4};SD={:.4}", mean, sd);
+    top_area.draw(&Text::new(
+        title_text,
+        (cx, (pxs * 4.0) as i32),
+        ("sans-serif", ps(14.0))
+            .into_font()
+            .style(FontStyle::Bold)
+            .color(&BLACK)
+            .pos(Pos::new(HPos::Center, VPos::Top)),
+    ))?;
+    top_area.draw(&Text::new(
+        sample_name.to_string(),
+        (cx, (pxs * 22.0) as i32),
+        ("sans-serif", ps(11.0))
+            .into_font()
+            .color(&BLACK)
+            .pos(Pos::new(HPos::Center, VPos::Top)),
+    ))?;
 
-    let mut chart = ChartBuilder::on(root)
+    // --- Build chart ---
+    // No secondary x-axis at the top (upstream R only has a bottom x-axis).
+    let mut chart = ChartBuilder::on(&plot_area)
         .margin(ps(10.0))
         .x_label_area_size(ps(35.0))
         .y_label_area_size(ps(50.0))
-        .caption(&caption, ("sans-serif", ps(14.0)))
         .build_cartesian_2d(x_min..x_max, 0.0..y_max)?;
 
     // Configure mesh: no gridlines, integer axis labels (matching upstream R defaults)
@@ -298,7 +340,12 @@ fn compute_weighted_mean_sd(bins: &[(i64, i64, u64)], step: i64) -> (f64, f64) {
 /// # Arguments
 /// * `results` — junction annotation analysis results
 /// * `prefix` — output path prefix (e.g. `outdir/sample`)
-pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Result<()> {
+/// * `sample_name` — sample identifier shown as subtitle below each pie chart title
+pub fn junction_annotation_plot(
+    results: &JunctionResults,
+    prefix: &str,
+    sample_name: &str,
+) -> Result<()> {
     // R default palette colours:  palette()[2] = #DF536B, [3] = #61D04F, [4] = #2297E6
     let col_partial_novel = RGBColor(223, 83, 107); // R palette()[2] — red / pink
     let col_complete_novel = RGBColor(97, 208, 79); // R palette()[3] — green
@@ -331,7 +378,13 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
         // PNG
         {
             let root = BitMapBackend::new(events_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
-            render_pie_chart(&root, "Splicing Events", &events_slices, SCALE as f64)?;
+            render_pie_chart(
+                &root,
+                "Splicing Events",
+                sample_name,
+                &events_slices,
+                SCALE as f64,
+            )?;
             root.present()
                 .context("Failed to write splice events PNG")?;
         }
@@ -339,7 +392,7 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
         {
             let svg_path = events_path.with_extension("svg");
             let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
-            render_pie_chart(&root, "Splicing Events", &events_slices, 1.0)?;
+            render_pie_chart(&root, "Splicing Events", sample_name, &events_slices, 1.0)?;
             root.present()
                 .context("Failed to write splice events SVG")?;
         }
@@ -374,7 +427,13 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
         {
             let root =
                 BitMapBackend::new(junctions_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
-            render_pie_chart(&root, "Splicing Junctions", &junctions_slices, SCALE as f64)?;
+            render_pie_chart(
+                &root,
+                "Splicing Junctions",
+                sample_name,
+                &junctions_slices,
+                SCALE as f64,
+            )?;
             root.present()
                 .context("Failed to write splice junctions PNG")?;
         }
@@ -382,7 +441,13 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
         {
             let svg_path = junctions_path.with_extension("svg");
             let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
-            render_pie_chart(&root, "Splicing Junctions", &junctions_slices, 1.0)?;
+            render_pie_chart(
+                &root,
+                "Splicing Junctions",
+                sample_name,
+                &junctions_slices,
+                1.0,
+            )?;
             root.present()
                 .context("Failed to write splice junctions SVG")?;
         }
@@ -406,6 +471,7 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
 fn render_pie_chart<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     title: &str,
+    subtitle: &str,
     slices: &[(&str, f64, RGBColor)],
     pxs: f64,
 ) -> Result<()>
@@ -422,14 +488,20 @@ where
     let w = w as i32;
     let h = h as i32;
 
-    // Title — centred horizontally
+    // Title — bold, centred horizontally
     let title_style = TextStyle::from(("sans-serif", ps(16.0) as f64).into_font())
         .color(&BLACK)
         .pos(Pos::new(HPos::Center, VPos::Top));
-    root.draw_text(title, &title_style, (w / 2, ps(10.0)))?;
+    root.draw_text(title, &title_style, (w / 2, ps(6.0)))?;
+
+    // Subtitle — sample name, smaller font, centred below title
+    let subtitle_style = TextStyle::from(("sans-serif", ps(12.0) as f64).into_font())
+        .color(&BLACK)
+        .pos(Pos::new(HPos::Center, VPos::Top));
+    root.draw_text(subtitle, &subtitle_style, (w / 2, ps(24.0)))?;
 
     let cx = w / 2;
-    let cy = h / 2 + ps(10.0);
+    let cy = h / 2 + ps(14.0);
     let radius = (w.min(h) as f64 * 0.32) as i32;
 
     // Filter out zero slices
