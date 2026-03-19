@@ -145,7 +145,7 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     )];
     parts.push(format!("--gtf {}", shell_escape(&args.gtf)));
     if let Some(s) = args.stranded {
-        parts.push(format!("-s {s}"));
+        parts.push(format!("-s {}", s));
     }
     if args.paired {
         parts.push("-p".to_string());
@@ -301,18 +301,11 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         env!("BUILD_TIMESTAMP"),
     );
 
-    // Validate config stranded value if present
-    if let Some(s) = config.stranded {
-        ensure!(
-            s <= 2,
-            "Invalid stranded value in config file: {} (must be 0, 1, or 2)",
-            s
-        );
-    }
     // Resolve effective stranded/paired early for display (config loaded above)
-    let effective_stranded =
-        cli::Strandedness::from_u8(args.stranded.or(config.stranded).unwrap_or(0))
-            .expect("stranded value already validated");
+    let effective_stranded = args
+        .stranded
+        .or(config.stranded)
+        .unwrap_or(cli::Strandedness::Unstranded);
     let effective_paired = args.paired || config.paired.unwrap_or(false);
 
     if n_bams == 1 {

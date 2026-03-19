@@ -399,13 +399,13 @@ strandedness and GTF as the Java reference:
 # Small (coord-sorted BAM, same GTF and strandedness as Java run)
 cargo run --release -- rna benchmark/input/small/test.bam \
   --gtf benchmark/input/small/chr6.gtf \
-  --paired --stranded 2 --skip-dup-check \
+  --paired --stranded reverse --skip-dup-check \
   --outdir benchmark/RustQC/small
 
 # Large (coord-sorted BAM, filtered GTF, same strandedness)
 cargo run --release -- rna benchmark/input/large/GM12878_REP1.markdup.sorted.bam \
   --gtf benchmark/input/large/genes.filtered.gtf \
-  --paired --stranded 2 --biotype-attribute gene_biotype --threads 10 \
+  --paired --stranded reverse --biotype-attribute gene_biotype --threads 10 \
   --outdir benchmark/RustQC/large
 ```
 

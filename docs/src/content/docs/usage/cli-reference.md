@@ -63,17 +63,17 @@ Output directory for all result files. Created if it does not exist.
 
 **Default:** `.` (current working directory)
 
-#### `-s, --stranded <0|1|2>`
+#### `-s, --stranded <unstranded|forward|reverse>`
 
 Library strandedness for strand-aware read counting:
 
-| Value | Meaning                                                 |
-| ----- | ------------------------------------------------------- |
-| `0`   | Unstranded (count reads on either strand)               |
-| `1`   | Forward stranded (read 1 maps to the transcript strand) |
-| `2`   | Reverse stranded (read 2 maps to the transcript strand) |
+| Value        | Meaning                                                 |
+| ------------ | ------------------------------------------------------- |
+| `unstranded` | Count reads on either strand                            |
+| `forward`    | Forward stranded (read 1 maps to the transcript strand) |
+| `reverse`    | Reverse stranded (read 2 maps to the transcript strand) |
 
-**Default:** `0` (unstranded)
+**Default:** `unstranded`
 
 #### `-p, --paired`
 

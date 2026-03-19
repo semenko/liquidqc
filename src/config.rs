@@ -4,6 +4,7 @@
 //! like chromosome name mappings between alignment file and GTF references,
 //! per-tool output configuration, and tool enable/disable toggles.
 
+use crate::cli::Strandedness;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -69,14 +70,14 @@ pub struct RnaConfig {
 
     /// Library strandedness for strand-aware read counting.
     ///
-    /// - `0` = unstranded (count reads on either strand)
-    /// - `1` = forward stranded (read 1 maps to the transcript strand)
-    /// - `2` = reverse stranded (read 2 maps to the transcript strand)
+    /// - `unstranded` = count reads on either strand
+    /// - `forward` = forward stranded (read 1 maps to the transcript strand)
+    /// - `reverse` = reverse stranded (read 2 maps to the transcript strand)
     ///
     /// The CLI `-s` / `--stranded` flag takes precedence over this setting.
-    /// **Default:** `0` (unstranded).
+    /// **Default:** `unstranded`.
     #[serde(default)]
-    pub stranded: Option<u8>,
+    pub stranded: Option<Strandedness>,
 
     /// Enable paired-end mode.
     ///
@@ -767,14 +768,14 @@ mod tests {
         let yaml = r#"
 rna:
   chromosome_prefix: "chr"
-  stranded: 2
+  stranded: reverse
   paired: true
   bam_stat:
     enabled: false
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.rna.chromosome_prefix, Some("chr".to_string()));
-        assert_eq!(config.rna.stranded, Some(2));
+        assert_eq!(config.rna.stranded, Some(Strandedness::Reverse));
         assert_eq!(config.rna.paired, Some(true));
         assert!(!config.rna.bam_stat.enabled);
     }
@@ -847,16 +848,21 @@ future_subcommand:
         assert_eq!(config.paired, None);
 
         // Explicit values
-        let yaml = "stranded: 2\npaired: true\n";
+        let yaml = "stranded: reverse\npaired: true\n";
         let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
-        assert_eq!(config.stranded, Some(2));
+        assert_eq!(config.stranded, Some(Strandedness::Reverse));
         assert_eq!(config.paired, Some(true));
 
-        // Zero is a valid explicit value
-        let yaml = "stranded: 0\npaired: false\n";
+        // Unstranded is a valid explicit value
+        let yaml = "stranded: unstranded\npaired: false\n";
         let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
-        assert_eq!(config.stranded, Some(0));
+        assert_eq!(config.stranded, Some(Strandedness::Unstranded));
         assert_eq!(config.paired, Some(false));
+
+        // Forward stranded
+        let yaml = "stranded: forward\n";
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.stranded, Some(Strandedness::Forward));
     }
 
     #[test]

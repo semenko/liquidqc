@@ -191,7 +191,7 @@ Localized `use` inside function bodies is acceptable for narrow imports
 - `#[derive(Debug)]` on all structs.
 - Add `Clone`, `Default`, `Deserialize` as needed — keep derives minimal.
 - Public structs expose `pub` fields. Private helper structs keep fields private.
-- Numeric conventions: `u64` for counts/positions, `f64` for metrics, `u8` for flags/strandedness.
+- Numeric conventions: `u64` for counts/positions, `f64` for metrics, `u8` for flags.
 - `IndexMap` when insertion order matters (gene ordering); `HashMap` for unordered lookups.
 
 ### Clippy

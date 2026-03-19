@@ -10,13 +10,15 @@
 //!
 //! A GTF gene annotation file is required for all analyses.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use serde::Deserialize;
 
 /// Library strandedness protocol.
 ///
 /// Determines how read strand is interpreted relative to the gene annotation
-/// strand during counting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// strand during counting. Accepted CLI values: `unstranded`, `forward`, `reverse`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Strandedness {
     /// Count reads on either strand (library is not strand-specific).
     #[default]
@@ -25,20 +27,6 @@ pub enum Strandedness {
     Forward,
     /// Reverse stranded: read 2 maps to the transcript strand (e.g. dUTP).
     Reverse,
-}
-
-impl Strandedness {
-    /// Convert from the integer convention used by featureCounts / HTSeq.
-    ///
-    /// Returns `None` for values outside 0..=2.
-    pub fn from_u8(v: u8) -> Option<Self> {
-        match v {
-            0 => Some(Strandedness::Unstranded),
-            1 => Some(Strandedness::Forward),
-            2 => Some(Strandedness::Reverse),
-            _ => None,
-        }
-    }
 }
 
 impl std::fmt::Display for Strandedness {
@@ -118,9 +106,9 @@ pub struct RnaArgs {
     pub json_summary: Option<String>,
 
     // ── Library ─────────────────────────────────────────────────────────
-    /// Strandedness: 0=unstranded, 1=forward, 2=reverse
-    #[arg(short, long, value_parser = clap::value_parser!(u8).range(0..=2), help_heading = "Library")]
-    pub stranded: Option<u8>,
+    /// Strandedness: unstranded, forward, reverse
+    #[arg(short, long, value_enum, help_heading = "Library")]
+    pub stranded: Option<Strandedness>,
 
     /// Paired-end reads
     #[arg(short, long, help_heading = "Library")]
@@ -352,7 +340,7 @@ mod tests {
             "--gtf",
             "genes.gtf",
             "--stranded",
-            "2",
+            "reverse",
             "--paired",
             "--threads",
             "4",
@@ -366,7 +354,7 @@ mod tests {
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.gtf, "genes.gtf");
-                assert_eq!(args.stranded, Some(2)); // CLI still parses u8
+                assert_eq!(args.stranded, Some(Strandedness::Reverse));
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");
