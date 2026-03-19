@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Capture RustQC CLI output as an SVG using Rich.
+"""Capture RustQC CLI output as SVG files using Rich.
 
-Runs RustQC with a deliberate strandedness mismatch to trigger the warning,
-then renders the terminal output as an SVG file for documentation.
+Generates two SVGs for documentation:
+1. Full CLI output from a normal run (no warnings)
+2. Strandedness mismatch warning (trimmed to just the warning box)
 
 Usage:
     uv run --with rich docs/scripts/capture_cli_svg.py
@@ -19,18 +20,17 @@ RUSTQC = "./target/release/rustqc"
 GTF = "../RustQC-benchmarks/test-data/rna/small/chr6.gtf.gz"
 BAM = "../RustQC-benchmarks/test-data/rna/small/test.bam"
 OUTDIR = "/tmp/rustqc_svg_capture"
-SVG_PATH = "docs/public/examples/cli-strandedness-warning.svg"
 
 TITLE = "rustqc rna"
 
 
-def main():
-    # Run RustQC with wrong strandedness to trigger the warning
+def run_rustqc(stranded: str) -> str:
+    """Run RustQC and return combined stdout+stderr as a string."""
     cmd = [
         RUSTQC,
         "rna",
         "--stranded",
-        "forward",
+        stranded,
         "-p",
         "--gtf",
         GTF,
@@ -48,33 +48,46 @@ def main():
         env=env,
         timeout=120,
     )
+    return (result.stdout + result.stderr).decode("utf-8", errors="replace")
 
-    # Combine stdout + stderr (RustQC writes UI to stderr)
-    output = (result.stdout + result.stderr).decode("utf-8", errors="replace")
 
-    # Trim to only show the warning box and lines after it.
-    # The warning box starts with a line containing "╭─ Warning".
-    lines = output.splitlines(keepends=True)
+def write_svg(output: str, path: str, title: str = TITLE):
+    """Render ANSI output as SVG via Rich and write to file."""
+    console = Console(record=True, width=100)
+    text = Text.from_ansi(output)
+    console.print(text)
+    svg = console.export_svg(title=title)
+    with open(path, "w") as f:
+        f.write(svg)
+    print(f"SVG written to {path}")
+
+
+def main():
+    # 1. Normal run — full output, correct strandedness (reverse for this data)
+    print("Capturing normal run...")
+    output_normal = run_rustqc("reverse")
+    write_svg(
+        output_normal,
+        "docs/public/examples/cli-output.svg",
+    )
+
+    # 2. Mismatch run — wrong strandedness to trigger warning
+    print("Capturing strandedness mismatch warning...")
+    output_mismatch = run_rustqc("forward")
+
+    # Trim to only show the warning box and lines after it
+    lines = output_mismatch.splitlines(keepends=True)
     start = 0
     for i, line in enumerate(lines):
-        if "Warning" in line and "╭" in line:
+        if "Warning" in line and "\u256d" in line:
             # Include one blank line before the box for spacing
             start = max(0, i - 1)
             break
-    output = "".join(lines[start:]).rstrip() + "\n"
-
-    # Create a Rich console that records output
-    console = Console(record=True, width=100)
-
-    # Feed the ANSI output through Rich so it interprets the escape codes
-    text = Text.from_ansi(output)
-    console.print(text)
-
-    # Export as SVG
-    svg = console.export_svg(title=TITLE)
-    with open(SVG_PATH, "w") as f:
-        f.write(svg)
-    print(f"SVG written to {SVG_PATH}")
+    output_mismatch = "".join(lines[start:]).rstrip() + "\n"
+    write_svg(
+        output_mismatch,
+        "docs/public/examples/cli-strandedness-warning.svg",
+    )
 
 
 if __name__ == "__main__":
