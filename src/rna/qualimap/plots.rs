@@ -122,39 +122,31 @@ where
 
     // Draw title and subtitle — sizes scaled up to match Qualimap visual appearance.
     // Plotters' sans-serif renders smaller than Java's SansSerif at the same pt size.
-    let title_font = ("sans-serif", ps(24.0) as f64)
+    // Use HPos::Center anchor so titles are truly centered across the full image width.
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+
+    let title_style = ("sans-serif", ps(24.0) as f64)
         .into_font()
         .style(FontStyle::Bold)
-        .color(&TITLE_COLOR);
-    let subtitle_font = ("sans-serif", ps(16.0) as f64)
+        .color(&TITLE_COLOR)
+        .pos(Pos::new(HPos::Center, VPos::Top));
+    let subtitle_style = ("sans-serif", ps(16.0) as f64)
         .into_font()
-        .color(&TITLE_COLOR);
+        .color(&TITLE_COLOR)
+        .pos(Pos::new(HPos::Center, VPos::Top));
 
+    let (w, _h) = root.dim_in_pixel();
+    let center_x = w as i32 / 2;
     let title_y = ps(10.0) as i32;
     let subtitle_y = title_y + ps(28.0) as i32;
 
-    // Center title
-    let (w, _h) = root.dim_in_pixel();
-    root.draw_text(
-        title,
-        &title_font.into_text_style(root),
-        (
-            (w as i32 - estimate_text_width(title, ps(24.0) as f64) as i32) / 2,
-            title_y,
-        ),
-    )
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    // Center title across full image width
+    root.draw_text(title, &title_style, (center_x, title_y))
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    // Center subtitle
-    root.draw_text(
-        sample_name,
-        &subtitle_font.into_text_style(root),
-        (
-            (w as i32 - estimate_text_width(sample_name, ps(16.0) as f64) as i32) / 2,
-            subtitle_y,
-        ),
-    )
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    // Center subtitle across full image width
+    root.draw_text(sample_name, &subtitle_style, (center_x, subtitle_y))
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Create chart area below title region
     let chart_top = ps(55.0);
@@ -260,37 +252,28 @@ where
     let y_ceil = nice_ceil(y_max);
 
     let title = "Coverage Histogram (0-50X)";
-    let title_font = ("sans-serif", ps(24.0) as f64)
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+
+    let title_style = ("sans-serif", ps(24.0) as f64)
         .into_font()
         .style(FontStyle::Bold)
-        .color(&TITLE_COLOR);
-    let subtitle_font = ("sans-serif", ps(16.0) as f64)
+        .color(&TITLE_COLOR)
+        .pos(Pos::new(HPos::Center, VPos::Top));
+    let subtitle_style = ("sans-serif", ps(16.0) as f64)
         .into_font()
-        .color(&TITLE_COLOR);
+        .color(&TITLE_COLOR)
+        .pos(Pos::new(HPos::Center, VPos::Top));
 
     let (w, _h) = root.dim_in_pixel();
+    let center_x = w as i32 / 2;
     let title_y = ps(10.0) as i32;
     let subtitle_y = title_y + ps(28.0) as i32;
 
-    root.draw_text(
-        title,
-        &title_font.into_text_style(root),
-        (
-            (w as i32 - estimate_text_width(title, ps(24.0) as f64) as i32) / 2,
-            title_y,
-        ),
-    )
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    root.draw_text(title, &title_style, (center_x, title_y))
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    root.draw_text(
-        sample_name,
-        &subtitle_font.into_text_style(root),
-        (
-            (w as i32 - estimate_text_width(sample_name, ps(16.0) as f64) as i32) / 2,
-            subtitle_y,
-        ),
-    )
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    root.draw_text(sample_name, &subtitle_style, (center_x, subtitle_y))
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let chart_area = root.clone().margin(ps(55.0), ps(20.0), ps(20.0), ps(20.0));
 
@@ -510,37 +493,29 @@ where
     let w = w as i32;
     let h = h as i32;
 
-    // Draw title and subtitle — font sizes matched to Qualimap reference
-    let title_font = ("sans-serif", ps(24.0) as f64)
+    // Draw title and subtitle — font sizes matched to Qualimap reference.
+    // Use HPos::Center anchor so titles are truly centered across the full image width.
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+
+    let title_style = ("sans-serif", ps(24.0) as f64)
         .into_font()
         .style(FontStyle::Bold)
-        .color(&TITLE_COLOR);
-    let subtitle_font = ("sans-serif", ps(16.0) as f64)
+        .color(&TITLE_COLOR)
+        .pos(Pos::new(HPos::Center, VPos::Top));
+    let subtitle_style = ("sans-serif", ps(16.0) as f64)
         .into_font()
-        .color(&TITLE_COLOR);
+        .color(&TITLE_COLOR)
+        .pos(Pos::new(HPos::Center, VPos::Top));
 
+    let center_x = w / 2;
     let title_y = ps(12.0);
     let subtitle_y = title_y + ps(28.0);
 
-    root.draw_text(
-        title,
-        &title_font.into_text_style(root),
-        (
-            (w - estimate_text_width(title, ps(24.0) as f64) as i32) / 2,
-            title_y,
-        ),
-    )
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    root.draw_text(title, &title_style, (center_x, title_y))
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    root.draw_text(
-        sample_name,
-        &subtitle_font.into_text_style(root),
-        (
-            (w - estimate_text_width(sample_name, ps(16.0) as f64) as i32) / 2,
-            subtitle_y,
-        ),
-    )
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    root.draw_text(sample_name, &subtitle_style, (center_x, subtitle_y))
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Qualimap draws a plot frame: E6E6E6 filled rectangle with 1px black inner border,
     // then the white pie area sits inside it.
