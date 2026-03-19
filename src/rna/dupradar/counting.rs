@@ -1165,7 +1165,7 @@ fn partition_chromosomes(lengths: &[u64], num_workers: usize) -> Vec<Vec<u32>> {
 
 ///   an index for `threads > 1`; SAM files always use single-threaded mode)
 /// * `genes` - Gene annotation map from GTF parsing
-/// * `stranded` - Library strandedness (0, 1, or 2)
+/// * `stranded` - Library strandedness (unstranded, forward, or reverse)
 /// * `paired` - Whether the library is paired-end
 /// * `threads` - Number of threads for alignment processing
 /// * `reference` - Optional path to reference FASTA (required for CRAM files)

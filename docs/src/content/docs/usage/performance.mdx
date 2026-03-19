@@ -46,7 +46,7 @@ The per-tool benchmarks were measured with the following setup:
 | **Hardware**     | Apple M1 Pro, 10 cores, 16 GB RAM                             |
 | **Threads**      | 8 (`-t 8`)                                                    |
 | **Build**        | `cargo build --release` (LTO, codegen-units=1, opt-level=3)   |
-| **Strandedness** | Reverse (`-s 2`)                                              |
+| **Strandedness** | Reverse (`-s reverse`)                                        |
 | **Mode**         | Paired-end (`-p`), all tools enabled by default               |
 
 The **baseline** is a run with every tool disabled (BAM decode + dispatch

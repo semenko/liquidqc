@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # CPU scaling benchmark for RustQC on local hardware (Apple M1 Pro, 10 cores)
-# Matches the per-tool benchmark setup: -p -s 2 --biotype-attribute gene_type
+# Matches the per-tool benchmark setup: -p -s reverse --biotype-attribute gene_type
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -49,7 +49,7 @@ for t in $(seq 1 "$MAX_THREADS"); do
 
     "$RUSTQC" rna "$BAM" \
         --gtf "$GTF" \
-        -p -s 2 \
+        -p -s reverse \
         -t "$t" \
         -o "$DIR" \
         -c "$CFG" \

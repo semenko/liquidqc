@@ -677,6 +677,39 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         }
     }
 
+    // Check for strandedness mismatch between user-specified and inferred values
+    for (bam_path, result) in &bam_results {
+        if let Ok(bam_result) = result {
+            if let Some(ref ie_result) = bam_result.infer_experiment {
+                if let Some((inferred, suggestion)) =
+                    rna::rseqc::infer_experiment::check_strandedness_mismatch(
+                        ie_result,
+                        effective_stranded,
+                    )
+                {
+                    let bam_name = Path::new(bam_path)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(bam_path);
+                    ui.blank();
+                    ui.warn("Strandedness mismatch detected!");
+                    ui.warn(&format!(
+                        "  {} — you specified '--stranded {}' but infer_experiment suggests '{}'",
+                        bam_name, effective_stranded, inferred,
+                    ));
+                    ui.warn(&format!(
+                        "  (forward fraction: {:.4}, reverse fraction: {:.4})",
+                        ie_result.frac_protocol1, ie_result.frac_protocol2,
+                    ));
+                    ui.warn(&format!(
+                        "  Consider re-running with '--stranded {}'",
+                        suggestion,
+                    ));
+                }
+            }
+        }
+    }
+
     ui.finish("RustQC run finished", elapsed);
 
     if n_err > 0 {
@@ -804,6 +837,8 @@ struct BamResult {
     dupradar_genes_with_dups: u64,
     /// Output files written (tool, path).
     outputs: Vec<(String, String)>,
+    /// infer_experiment result (if the tool was enabled).
+    infer_experiment: Option<rna::rseqc::infer_experiment::InferExperimentResult>,
 }
 
 impl BamResult {
@@ -1367,7 +1402,7 @@ fn process_single_bam(
     };
     let rseqc_outputs =
         write_rseqc_outputs(bam_path, bam_stem, params, rseqc_accums, &bam_header_refs)?;
-    written_outputs.extend(rseqc_outputs);
+    written_outputs.extend(rseqc_outputs.written);
 
     let bam_duration = bam_start.elapsed();
     ui.finish(bam_stem, bam_duration);
@@ -1388,6 +1423,7 @@ fn process_single_bam(
         dupradar_genes_with_reads,
         dupradar_genes_with_dups,
         outputs: written_outputs,
+        infer_experiment: rseqc_outputs.infer_experiment,
     })
 }
 
@@ -1395,20 +1431,32 @@ fn process_single_bam(
 // RSeQC output writing (post-processing of single-pass accumulators)
 // ============================================================================
 
+/// Results returned from `write_rseqc_outputs`, bundling output file paths
+/// with the optional infer_experiment result for downstream strandedness checks.
+struct RseqcOutputs {
+    /// Output files written (tool, path).
+    written: Vec<(String, String)>,
+    /// infer_experiment result, if the tool was enabled and produced data.
+    infer_experiment: Option<rna::rseqc::infer_experiment::InferExperimentResult>,
+}
+
 /// Write all RSeQC outputs from the single-pass accumulators.
 ///
 /// Converts accumulated data to tool-specific result types and writes all
-/// output files, plots, and summaries.
+/// output files, plots, and summaries. Returns the written output paths and
+/// the infer_experiment result (if available) for strandedness mismatch checking.
 fn write_rseqc_outputs(
     bam_path: &str,
     bam_stem: &str,
     params: &SharedParams,
     accums: RseqcAccumulators,
     bam_header_refs: &[(String, u64)],
-) -> Result<Vec<(String, String)>> {
+) -> Result<RseqcOutputs> {
     let ui = params.ui;
     let outdir = params.outdir;
     let mut written: Vec<(String, String)> = Vec::new();
+    let mut infer_experiment_result: Option<rna::rseqc::infer_experiment::InferExperimentResult> =
+        None;
 
     // Build tool-specific output directories: nested subdirectories by default, flat if requested
     let flat = params.flat_output;
@@ -1554,6 +1602,7 @@ fn write_rseqc_outputs(
             format_count(result.total_sampled),
         ));
         written.push(("infer_experiment".into(), p));
+        infer_experiment_result = Some(result);
     }
 
     // --- read_distribution ---
@@ -1777,7 +1826,10 @@ fn write_rseqc_outputs(
         }
     }
 
-    Ok(written)
+    Ok(RseqcOutputs {
+        written,
+        infer_experiment: infer_experiment_result,
+    })
 }
 
 #[cfg(test)]

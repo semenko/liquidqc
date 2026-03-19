@@ -4,6 +4,7 @@
 //! gene models (from GTF annotation) and determines the fraction consistent with
 //! each strand protocol.
 
+use crate::cli::Strandedness;
 use crate::gtf::Gene;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
@@ -210,6 +211,102 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
 }
 
 // ============================================================================
+// Strandedness mismatch check
+// ============================================================================
+
+/// Threshold above which a strand fraction is considered dominant.
+const STRAND_DOMINANT_THRESHOLD: f64 = 0.75;
+
+/// Threshold below which both fractions indicate unstranded data.
+///
+/// If both `frac_protocol1` and `frac_protocol2` are between
+/// `1.0 - STRAND_DOMINANT_THRESHOLD` and `STRAND_DOMINANT_THRESHOLD`,
+/// the library is considered unstranded.
+const STRAND_UNSTRANDED_UPPER: f64 = 0.75;
+
+/// Strandedness inferred from `infer_experiment` fractions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InferredStrandedness {
+    /// Protocol 1 dominant (PE: 1++,1--,2+-,2-+ / SE: ++,--) — forward stranded.
+    Forward,
+    /// Protocol 2 dominant (PE: 1+-,1-+,2++,2-- / SE: +-,-+) — reverse stranded.
+    Reverse,
+    /// Neither protocol dominant — unstranded.
+    Unstranded,
+    /// Not enough data to determine strandedness.
+    Undetermined,
+}
+
+impl std::fmt::Display for InferredStrandedness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InferredStrandedness::Forward => write!(f, "forward"),
+            InferredStrandedness::Reverse => write!(f, "reverse"),
+            InferredStrandedness::Unstranded => write!(f, "unstranded"),
+            InferredStrandedness::Undetermined => write!(f, "undetermined"),
+        }
+    }
+}
+
+/// Infer the dominant strandedness from `infer_experiment` fractions.
+///
+/// # Returns
+///
+/// The inferred strandedness based on protocol fraction thresholds.
+pub fn infer_strandedness(result: &InferExperimentResult) -> InferredStrandedness {
+    if result.total_sampled == 0 {
+        return InferredStrandedness::Undetermined;
+    }
+    if result.frac_protocol1 > STRAND_DOMINANT_THRESHOLD {
+        InferredStrandedness::Forward
+    } else if result.frac_protocol2 > STRAND_DOMINANT_THRESHOLD {
+        InferredStrandedness::Reverse
+    } else if result.frac_protocol1 < STRAND_UNSTRANDED_UPPER
+        && result.frac_protocol2 < STRAND_UNSTRANDED_UPPER
+    {
+        InferredStrandedness::Unstranded
+    } else {
+        InferredStrandedness::Undetermined
+    }
+}
+
+/// Check whether the user-specified strandedness matches the inferred strandedness.
+///
+/// Returns `Some((inferred, suggestion))` when a mismatch is detected, where
+/// `inferred` is the strandedness determined from `infer_experiment` fractions and
+/// `suggestion` is the `--stranded` value the user should consider. Returns `None`
+/// if the strandedness matches or if inference is undetermined.
+pub fn check_strandedness_mismatch(
+    result: &InferExperimentResult,
+    specified: Strandedness,
+) -> Option<(InferredStrandedness, Strandedness)> {
+    let inferred = infer_strandedness(result);
+
+    if inferred == InferredStrandedness::Undetermined {
+        return None;
+    }
+
+    if matches!(
+        (specified, inferred),
+        (Strandedness::Forward, InferredStrandedness::Forward)
+            | (Strandedness::Reverse, InferredStrandedness::Reverse)
+            | (Strandedness::Unstranded, InferredStrandedness::Unstranded)
+    ) {
+        return None;
+    }
+
+    // Map inferred strandedness to the suggested CLI value
+    let suggestion = match inferred {
+        InferredStrandedness::Forward => Strandedness::Forward,
+        InferredStrandedness::Reverse => Strandedness::Reverse,
+        InferredStrandedness::Unstranded => Strandedness::Unstranded,
+        InferredStrandedness::Undetermined => unreachable!(),
+    };
+
+    Some((inferred, suggestion))
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -356,5 +453,96 @@ mod tests {
         assert_eq!(strands.len(), 2);
         assert!(strands.contains(&b'+'));
         assert!(strands.contains(&b'-'));
+    }
+
+    // === Strandedness inference tests ===
+
+    /// Helper to build an InferExperimentResult with given fractions.
+    fn make_result(total: u64, frac_p1: f64, frac_p2: f64) -> InferExperimentResult {
+        InferExperimentResult {
+            total_sampled: total,
+            library_type: "PairEnd".to_string(),
+            frac_failed: 1.0 - frac_p1 - frac_p2,
+            frac_protocol1: frac_p1,
+            frac_protocol2: frac_p2,
+        }
+    }
+
+    #[test]
+    fn test_infer_strandedness_forward() {
+        let result = make_result(10000, 0.95, 0.03);
+        assert_eq!(infer_strandedness(&result), InferredStrandedness::Forward);
+    }
+
+    #[test]
+    fn test_infer_strandedness_reverse() {
+        let result = make_result(10000, 0.03, 0.95);
+        assert_eq!(infer_strandedness(&result), InferredStrandedness::Reverse);
+    }
+
+    #[test]
+    fn test_infer_strandedness_unstranded() {
+        let result = make_result(10000, 0.48, 0.48);
+        assert_eq!(
+            infer_strandedness(&result),
+            InferredStrandedness::Unstranded
+        );
+    }
+
+    #[test]
+    fn test_infer_strandedness_undetermined_no_reads() {
+        let result = make_result(0, 0.0, 0.0);
+        assert_eq!(
+            infer_strandedness(&result),
+            InferredStrandedness::Undetermined
+        );
+    }
+
+    #[test]
+    fn test_check_mismatch_forward_vs_reverse() {
+        let result = make_result(10000, 0.95, 0.03);
+        let mismatch = check_strandedness_mismatch(&result, Strandedness::Reverse);
+        assert!(mismatch.is_some());
+        let (inferred, suggestion) = mismatch.unwrap();
+        assert_eq!(inferred, InferredStrandedness::Forward);
+        assert_eq!(suggestion, Strandedness::Forward);
+    }
+
+    #[test]
+    fn test_check_mismatch_reverse_vs_forward() {
+        let result = make_result(10000, 0.03, 0.95);
+        let mismatch = check_strandedness_mismatch(&result, Strandedness::Forward);
+        assert!(mismatch.is_some());
+        let (inferred, suggestion) = mismatch.unwrap();
+        assert_eq!(inferred, InferredStrandedness::Reverse);
+        assert_eq!(suggestion, Strandedness::Reverse);
+    }
+
+    #[test]
+    fn test_check_mismatch_unstranded_vs_stranded() {
+        let result = make_result(10000, 0.48, 0.48);
+        let mismatch = check_strandedness_mismatch(&result, Strandedness::Reverse);
+        assert!(mismatch.is_some());
+        let (inferred, suggestion) = mismatch.unwrap();
+        assert_eq!(inferred, InferredStrandedness::Unstranded);
+        assert_eq!(suggestion, Strandedness::Unstranded);
+    }
+
+    #[test]
+    fn test_check_no_mismatch_when_matching() {
+        let result = make_result(10000, 0.95, 0.03);
+        assert!(check_strandedness_mismatch(&result, Strandedness::Forward).is_none());
+
+        let result = make_result(10000, 0.03, 0.95);
+        assert!(check_strandedness_mismatch(&result, Strandedness::Reverse).is_none());
+
+        let result = make_result(10000, 0.48, 0.48);
+        assert!(check_strandedness_mismatch(&result, Strandedness::Unstranded).is_none());
+    }
+
+    #[test]
+    fn test_check_no_mismatch_when_undetermined() {
+        let result = make_result(0, 0.0, 0.0);
+        assert!(check_strandedness_mismatch(&result, Strandedness::Forward).is_none());
     }
 }
