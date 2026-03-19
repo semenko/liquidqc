@@ -769,23 +769,8 @@ fn nice_ceil(val: f64) -> f64 {
         return 1.0;
     }
 
-    // For very small values (< 1), use decimal rounding
-    if val < 1.0 {
-        let magnitude = 10.0f64.powf(val.log10().floor());
-        let normalized = val / magnitude;
-        let nice = if normalized <= 1.0 {
-            1.0
-        } else if normalized <= 2.0 {
-            2.0
-        } else if normalized <= 5.0 {
-            5.0
-        } else {
-            10.0
-        };
-        return nice * magnitude * 1.05;
-    }
-
-    // For larger values, find a nice round number
+    // Find a nice round number for the Y-axis ceiling.
+    // Use the same fine steps for both small (< 1) and large values.
     let magnitude = 10.0f64.powf(val.log10().floor());
     let normalized = val / magnitude;
 
@@ -853,7 +838,9 @@ mod tests {
         assert_eq!(nice_ceil(675000.0), 750000.0);
         assert_eq!(nice_ceil(87500.0), 100000.0);
         assert_eq!(nice_ceil(210000.0), 250000.0);
-        assert_eq!(nice_ceil(0.2), 0.21000000000000002); // small value
+        assert_eq!(nice_ceil(0.2), 0.2); // small value — rounds to nice step
+        assert_eq!(nice_ceil(0.25), 0.25); // small value — exact match on nice step
+        assert!((nice_ceil(0.26) - 0.3).abs() < 1e-15); // small value — rounds up to next step
     }
 
     #[test]
