@@ -44,6 +44,7 @@ pub struct DupMatrixRow {
 /// The complete duplication matrix.
 #[derive(Debug)]
 pub struct DupMatrix {
+    /// All rows of the duplication matrix, one per gene.
     pub rows: Vec<DupMatrixRow>,
 }
 
@@ -278,12 +279,14 @@ fn format_float(v: f64) -> String {
         // Rust's {:.14e} produces e.g. "9.31000000000000e-5" — trim zeros and
         // normalise the exponent to R's 2-digit-minimum format (e-05, e+02).
         let sci = {
+            // safe: {:.14e} always produces an 'e' separator
             let (mantissa, exp) = sci_raw.split_once('e').unwrap();
             let mantissa = if mantissa.contains('.') {
                 mantissa.trim_end_matches('0').trim_end_matches('.')
             } else {
                 mantissa
             };
+            // safe: exponent from {:.14e} is always a valid integer
             let exp_val: i32 = exp.parse().unwrap();
             format!("{}e{:+03}", mantissa, exp_val)
         };

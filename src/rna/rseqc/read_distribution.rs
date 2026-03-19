@@ -123,15 +123,25 @@ impl ChromIntervals {
 /// from GTF gene annotations.
 #[derive(Debug, Default)]
 pub struct RegionSets {
+    /// CDS exon intervals per chromosome.
     pub cds_exon: HashMap<String, ChromIntervals>,
+    /// 5' UTR intervals per chromosome.
     pub utr_5: HashMap<String, ChromIntervals>,
+    /// 3' UTR intervals per chromosome.
     pub utr_3: HashMap<String, ChromIntervals>,
+    /// Intron intervals per chromosome.
     pub intron: HashMap<String, ChromIntervals>,
+    /// 1 kb upstream of TSS intervals per chromosome.
     pub tss_up_1kb: HashMap<String, ChromIntervals>,
+    /// 5 kb upstream of TSS intervals per chromosome.
     pub tss_up_5kb: HashMap<String, ChromIntervals>,
+    /// 10 kb upstream of TSS intervals per chromosome.
     pub tss_up_10kb: HashMap<String, ChromIntervals>,
+    /// 1 kb downstream of TES intervals per chromosome.
     pub tes_down_1kb: HashMap<String, ChromIntervals>,
+    /// 5 kb downstream of TES intervals per chromosome.
     pub tes_down_5kb: HashMap<String, ChromIntervals>,
+    /// 10 kb downstream of TES intervals per chromosome.
     pub tes_down_10kb: HashMap<String, ChromIntervals>,
 }
 

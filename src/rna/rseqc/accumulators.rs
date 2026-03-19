@@ -81,13 +81,19 @@ pub struct RseqcConfig {
     pub inner_distance_upper_bound: i64,
     /// Bin width for inner distance histogram.
     pub inner_distance_step: i64,
-    /// Which tools are enabled.
+    /// Whether bam_stat analysis is enabled.
     pub bam_stat_enabled: bool,
+    /// Whether infer_experiment analysis is enabled.
     pub infer_experiment_enabled: bool,
+    /// Whether read_duplication analysis is enabled.
     pub read_duplication_enabled: bool,
+    /// Whether read_distribution analysis is enabled.
     pub read_distribution_enabled: bool,
+    /// Whether junction_annotation analysis is enabled.
     pub junction_annotation_enabled: bool,
+    /// Whether junction_saturation analysis is enabled.
     pub junction_saturation_enabled: bool,
+    /// Whether inner_distance analysis is enabled.
     pub inner_distance_enabled: bool,
     /// Whether TIN analysis is enabled.
     pub tin_enabled: bool,
@@ -1540,18 +1546,31 @@ fn hash_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView
 /// read_distribution accumulator — region classification counters.
 #[derive(Debug, Default)]
 pub struct ReadDistAccum {
+    /// Total reads processed.
     pub total_reads: u64,
+    /// Total assigned tags (read fragments).
     pub total_tags: u64,
+    /// Tags overlapping CDS exons.
     pub cds_tags: u64,
+    /// Tags overlapping 5' UTR regions.
     pub utr5_tags: u64,
+    /// Tags overlapping 3' UTR regions.
     pub utr3_tags: u64,
+    /// Tags overlapping intron regions.
     pub intron_tags: u64,
+    /// Tags within 1 kb upstream of TSS.
     pub tss_1k_tags: u64,
+    /// Tags within 5 kb upstream of TSS.
     pub tss_5k_tags: u64,
+    /// Tags within 10 kb upstream of TSS.
     pub tss_10k_tags: u64,
+    /// Tags within 1 kb downstream of TES.
     pub tes_1k_tags: u64,
+    /// Tags within 5 kb downstream of TES.
     pub tes_5k_tags: u64,
+    /// Tags within 10 kb downstream of TES.
     pub tes_10k_tags: u64,
+    /// Tags not overlapping any annotated region.
     pub unassigned: u64,
 }
 
@@ -1653,10 +1672,15 @@ impl ReadDistAccum {
 pub struct JuncAnnotAccum {
     /// Per-junction read counts and classification.
     pub junction_counts: IndexMap<Junction, (u64, JunctionClass)>,
+    /// Total splicing events observed.
     pub total_events: u64,
+    /// Events matching known (annotated) junctions.
     pub known_events: u64,
+    /// Events with one known and one novel splice site.
     pub partial_novel_events: u64,
+    /// Events with both splice sites novel.
     pub complete_novel_events: u64,
+    /// Events filtered out (below minimum intron length).
     pub filtered_events: u64,
 }
 
@@ -2087,15 +2111,23 @@ fn fetch_exon_blocks_rseqc(record: &bam::Record) -> Vec<(u64, u64)> {
 /// that tool is disabled.
 #[derive(Debug, Default)]
 pub struct RseqcAccumulators {
+    /// bam_stat accumulator (`None` when disabled).
     pub bam_stat: Option<BamStatAccum>,
+    /// infer_experiment accumulator (`None` when disabled).
     pub infer_exp: Option<InferExpAccum>,
+    /// read_duplication accumulator (`None` when disabled).
     pub read_dup: Option<ReadDupAccum>,
+    /// read_distribution accumulator (`None` when disabled).
     pub read_dist: Option<ReadDistAccum>,
+    /// junction_annotation accumulator (`None` when disabled).
     pub junc_annot: Option<JuncAnnotAccum>,
+    /// junction_saturation accumulator (`None` when disabled).
     pub junc_sat: Option<JuncSatAccum>,
+    /// inner_distance accumulator (`None` when disabled).
     pub inner_dist: Option<InnerDistAccum>,
+    /// TIN accumulator (`None` when disabled).
     pub tin: Option<TinAccum>,
-    /// preseq library complexity accumulator.
+    /// preseq library complexity accumulator (`None` when disabled).
     pub preseq: Option<PreseqAccum>,
 }
 

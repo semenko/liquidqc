@@ -43,6 +43,7 @@ impl std::fmt::Display for Strandedness {
 #[derive(Parser, Debug)]
 #[command(name = "rustqc", version, about, long_about = None)]
 pub struct Cli {
+    /// The analysis subcommand to run.
     #[command(subcommand)]
     pub command: Commands,
 }

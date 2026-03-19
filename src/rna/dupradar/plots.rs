@@ -234,6 +234,7 @@ fn quantile(sorted: &[f64], p: f64) -> f64 {
         return sorted[0];
     }
     if p >= 1.0 {
+        // safe: is_empty() guard above ensures the slice is non-empty
         return *sorted.last().unwrap();
     }
     let n = sorted.len();
@@ -1168,6 +1169,7 @@ where
     let x_min = breaks[0];
     let bw = breaks[1] - breaks[0]; // uniform step size from pretty()
                                     // Extend past last tick so its label isn't clipped
+                                    // safe: r_pretty_breaks() always returns at least 2 elements
     let x_max = *breaks.last().unwrap() + 0.3;
 
     let mut hist = vec![0u32; n_bins];
