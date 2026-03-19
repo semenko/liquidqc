@@ -118,6 +118,13 @@ For paired-end data, the labels are `PairEnd` with `1++,1--,2+-,2-+` and
 - First fraction near 100% = forward stranded (e.g., Ligation protocol)
 - Second fraction near 100% = reverse stranded (e.g., dUTP protocol, most common)
 
+**Strandedness mismatch warning:**
+RustQC automatically compares the infer_experiment results against the
+`--stranded` flag you specified. If they disagree, a warning is printed
+at the end of the run suggesting the correct value:
+
+<img src={`${base}examples/cli-strandedness-warning.svg`} alt="RustQC strandedness mismatch warning" />
+
 <details>
 <summary>Small dataset - Identical</summary>
 

@@ -691,20 +691,18 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
                         .file_name()
                         .and_then(|s| s.to_str())
                         .unwrap_or(bam_path);
-                    ui.blank();
-                    ui.warn("Strandedness mismatch detected!");
-                    ui.warn(&format!(
-                        "  {} — you specified '--stranded {}' but infer_experiment suggests '{}'",
+                    let line1 = "Strandedness mismatch detected!".to_string();
+                    let line2 = format!(
+                        "{} - you specified '--stranded {}' but infer_experiment suggests '{}'",
                         bam_name, effective_stranded, inferred,
-                    ));
-                    ui.warn(&format!(
-                        "  (forward fraction: {:.4}, reverse fraction: {:.4})",
+                    );
+                    let line3 = format!(
+                        "(forward fraction: {:.4}, reverse fraction: {:.4})",
                         ie_result.frac_protocol1, ie_result.frac_protocol2,
-                    ));
-                    ui.warn(&format!(
-                        "  Consider re-running with '--stranded {}'",
-                        suggestion,
-                    ));
+                    );
+                    let line4 = format!("Consider re-running with '--stranded {}'", suggestion,);
+                    ui.blank();
+                    ui.warn_box(&[&line1, &line2, &line3, &line4]);
                 }
             }
         }

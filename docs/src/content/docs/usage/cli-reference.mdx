@@ -3,6 +3,8 @@ title: CLI Reference
 description: Complete command-line interface reference for RustQC, including all options, flags, and usage examples.
 ---
 
+import { Aside } from "@astrojs/starlight/components";
+
 RustQC provides a single `rna` subcommand that runs all RNA-Seq QC analyses in
 one pass over the BAM file.
 
@@ -74,6 +76,13 @@ Library strandedness for strand-aware read counting:
 | `reverse`    | Reverse stranded (read 2 maps to the transcript strand) |
 
 **Default:** `unstranded`
+
+<Aside type="tip">
+  RustQC automatically checks this value against the
+  [infer_experiment](/rna/rseqc/#infer_experiment) results. If there is a
+  mismatch, a warning is printed at the end of the run suggesting the
+  correct value.
+</Aside>
 
 #### `-p, --paired`
 

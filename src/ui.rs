@@ -354,6 +354,51 @@ impl Ui {
         );
     }
 
+    /// Print a multi-line warning inside a yellow box with Unicode border.
+    ///
+    /// The box is drawn with rounded corners and a "Warning" label in the top
+    /// border. The first line is rendered **bold** as a heading. Remaining lines
+    /// are padded to the box width. Always visible, even in quiet mode.
+    pub fn warn_box(&self, lines: &[&str]) {
+        // Find the widest line to size the box (minimum 40 chars)
+        let content_width = lines.iter().map(|l| l.len()).max().unwrap_or(0).max(40);
+        let y = &self.style_yellow;
+        let yb = Style::new().yellow().bold();
+
+        // Top border:  ╭─ Warning ─────╮
+        let top_label = " Warning ";
+        let remaining = content_width + 1 - top_label.len(); // +1 for inner padding
+        eprintln!(
+            "  {}{}{}",
+            y.apply_to("╭─"),
+            y.apply_to(top_label),
+            y.apply_to(format!("{}╮", "─".repeat(remaining))),
+        );
+        // Content lines: │ text │
+        // First line is bold, rest are normal yellow
+        for (i, line) in lines.iter().enumerate() {
+            let styled = if i == 0 {
+                format!("{}", yb.apply_to(line))
+            } else {
+                format!("{}", y.apply_to(line))
+            };
+            // Pad with spaces to fill the box width (use raw len for padding calc)
+            let pad = content_width.saturating_sub(line.len());
+            eprintln!(
+                "  {} {}{} {}",
+                y.apply_to("│"),
+                styled,
+                " ".repeat(pad),
+                y.apply_to("│"),
+            );
+        }
+        // Bottom border: ╰──────────╯
+        eprintln!(
+            "  {}",
+            y.apply_to(format!("╰{}╯", "─".repeat(content_width + 2))),
+        );
+    }
+
     /// Print a styled error (always visible, even in quiet mode).
     pub fn error(&self, msg: &str) {
         eprintln!(
