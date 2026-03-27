@@ -1,5 +1,6 @@
 ---
 import Default from '@astrojs/starlight/components/Footer.astro';
+const base = import.meta.env.BASE_URL;
 ---
 
 <Default><slot /></Default>
@@ -8,8 +9,8 @@ import Default from '@astrojs/starlight/components/Footer.astro';
   <div class="seqera-footer-content">
     <span>Developed for the community by <a href="https://seqera.io" target="_blank" rel="noopener noreferrer">Seqera</a> &bull; <a href="https://github.com/seqeralabs/RustQC">GitHub</a></span>
     <a href="https://seqera.io" target="_blank" rel="noopener noreferrer" class="seqera-logo">
-      <img class="only-light" src="/seqera-logo.svg" alt="Seqera" />
-      <img class="only-dark" src="/seqera-logo-dark.svg" alt="Seqera" />
+      <img class="only-light" src={`${base}seqera-logo.svg`} alt="Seqera" />
+      <img class="only-dark" src={`${base}seqera-logo-dark.svg`} alt="Seqera" />
     </a>
   </div>
 </footer>
