@@ -6,7 +6,7 @@ import starlightImageZoom from "starlight-image-zoom";
 
 // https://astro.build/config
 export default defineConfig({
-  site: process.env.SITE_URL || "https://rustqc.netlify.app",
+  site: process.env.SITE_URL || "https://seqeralabs.github.io/RustQC",
   integrations: [
     starlight({
       expressiveCode: {

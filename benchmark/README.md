@@ -11,11 +11,11 @@ Benchmark data and scripts for comparing RustQC against
 For detailed results, tables, and side-by-side plot comparisons, see the
 documentation:
 
-- [Benchmark details](https://rustqc.netlify.app/rna/benchmark-details/)
-- [dupRadar benchmarks](https://rustqc.netlify.app/benchmarks/dupradar/)
-- [featureCounts benchmarks](https://rustqc.netlify.app/benchmarks/featurecounts/)
-- [Preseq benchmarks](https://rustqc.netlify.app/benchmarks/preseq/)
-- [Samtools benchmarks](https://rustqc.netlify.app/benchmarks/samtools/)
+- [Benchmark details](https://seqeralabs.github.io/RustQC/rna/benchmark-details/)
+- [dupRadar benchmarks](https://seqeralabs.github.io/RustQC/benchmarks/dupradar/)
+- [featureCounts benchmarks](https://seqeralabs.github.io/RustQC/benchmarks/featurecounts/)
+- [Preseq benchmarks](https://seqeralabs.github.io/RustQC/benchmarks/preseq/)
+- [Samtools benchmarks](https://seqeralabs.github.io/RustQC/benchmarks/samtools/)
 
 ## Latest results (large dataset)
 

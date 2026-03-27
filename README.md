@@ -14,9 +14,9 @@
 </p>
 
 <p align="center">
-  <a href="https://rustqc.netlify.app/">Documentation</a> &bull;
-  <a href="https://rustqc.netlify.app/getting-started/quickstart/">Quickstart</a> &bull;
-  <a href="https://rustqc.netlify.app/rna/benchmark-details/">Benchmarks</a> &bull;
+  <a href="https://seqeralabs.github.io/RustQC/">Documentation</a> &bull;
+  <a href="https://seqeralabs.github.io/RustQC/getting-started/quickstart/">Quickstart</a> &bull;
+  <a href="https://seqeralabs.github.io/RustQC/rna/benchmark-details/">Benchmarks</a> &bull;
   <a href="https://github.com/seqeralabs/RustQC/releases">Releases</a>
 </p>
 
@@ -74,7 +74,7 @@ docker run --rm -v "$PWD":/data ghcr.io/seqeralabs/rustqc:latest \
   rustqc rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
 ```
 
-See the [documentation](https://rustqc.netlify.app/) for full usage details, configuration options, output file descriptions, and benchmark results.
+See the [documentation](https://seqeralabs.github.io/RustQC/) for full usage details, configuration options, output file descriptions, and benchmark results.
 
 ## License
 
