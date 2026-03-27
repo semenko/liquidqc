@@ -16,7 +16,7 @@
 <p align="center">
   <a href="https://rustqc.netlify.app/">Documentation</a> &bull;
   <a href="https://rustqc.netlify.app/getting-started/quickstart/">Quickstart</a> &bull;
-  <a href="https://rustqc.netlify.app/benchmarks/combined/">Benchmarks</a> &bull;
+  <a href="https://rustqc.netlify.app/rna/benchmark-details/">Benchmarks</a> &bull;
   <a href="https://github.com/seqeralabs/RustQC/releases">Releases</a>
 </p>
 

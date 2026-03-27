@@ -11,7 +11,7 @@ Benchmark data and scripts for comparing RustQC against
 For detailed results, tables, and side-by-side plot comparisons, see the
 documentation:
 
-- [Combined benchmarks](https://rustqc.netlify.app/benchmarks/combined/)
+- [Benchmark details](https://rustqc.netlify.app/rna/benchmark-details/)
 - [dupRadar benchmarks](https://rustqc.netlify.app/benchmarks/dupradar/)
 - [featureCounts benchmarks](https://rustqc.netlify.app/benchmarks/featurecounts/)
 - [Preseq benchmarks](https://rustqc.netlify.app/benchmarks/preseq/)
