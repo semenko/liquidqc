@@ -13,7 +13,7 @@
 
 ### Enhancements
 
-- Add per-tool seed flags (`--dupradar-seed`, `--qualimap-seed`, `--tin-seed`) for reproducible results (#53)
+- Add per-tool seed flags (`--tin-seed`, `--junction-saturation-seed`, `--preseq-seed`) for reproducible results (#53)
 
 ## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1)
 

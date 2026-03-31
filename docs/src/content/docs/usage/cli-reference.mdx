@@ -101,7 +101,7 @@ of chromosomes with mapped reads.
 
 **Default:** `1`
 
-#### `-q, --mapq <N>`
+#### `-Q, --mapq <N>`
 
 Minimum mapping quality (MAPQ) threshold used by all RSeQC tools. Reads below
 this threshold are excluded from the "uniquely mapped" counts.
@@ -148,11 +148,24 @@ the `rna:` section as `flat_output: true`.
 
 **Default:** `false` (nested subdirectories)
 
+#### `-j, --json-summary [<PATH>]`
+
+Write a JSON summary of all QC results to the specified path. If no path is
+given, the summary is written to stdout. Use `"-"` explicitly for stdout.
+
 #### `-c, --config <PATH>`
 
 Path to a YAML configuration file for advanced settings such as chromosome name
 mapping, per-output-file toggles, and enabling/disabling individual tools. See
 the [Configuration](/usage/configuration/) page for the full reference.
+
+#### `-q, --quiet`
+
+Suppress all output except warnings and errors.
+
+#### `-v, --verbose`
+
+Show additional detail during processing.
 
 ### RSeQC tool options
 
