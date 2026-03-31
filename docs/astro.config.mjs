@@ -5,9 +5,12 @@ import catppuccin from "@catppuccin/starlight";
 import starlightImageZoom from "starlight-image-zoom";
 
 // https://astro.build/config
+const site = process.env.SITE_URL || "https://seqeralabs.github.io/RustQC";
+const base = process.env.BASE_PATH || "/RustQC/";
+
 export default defineConfig({
-  site: process.env.SITE_URL || "https://seqeralabs.github.io/RustQC",
-  base: process.env.BASE_PATH || "/RustQC/",
+  site,
+  base,
   integrations: [
     starlight({
       expressiveCode: {
@@ -16,6 +19,15 @@ export default defineConfig({
         },
       },
       title: "RustQC",
+      head: [
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image",
+            content: `${site}${base}og-image.png`,
+          },
+        },
+      ],
       logo: {
         src: "./src/assets/RustQC-icon.svg",
       },
