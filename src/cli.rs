@@ -174,6 +174,14 @@ pub struct RnaArgs {
     )]
     pub min_intron: Option<u64>,
 
+    /// junction_saturation: random seed for reproducible results
+    #[arg(
+        long = "junction-saturation-seed",
+        value_name = "N",
+        help_heading = "Tool parameters"
+    )]
+    pub junction_saturation_seed: Option<u64>,
+
     /// junction_saturation: min coverage [default: 1]
     #[arg(
         long = "junction-saturation-min-coverage",
@@ -241,6 +249,10 @@ pub struct RnaArgs {
     )]
     pub inner_distance_step: Option<i64>,
 
+    /// TIN: random seed for reproducible results
+    #[arg(long = "tin-seed", value_name = "N", help_heading = "Tool parameters")]
+    pub tin_seed: Option<u64>,
+
     /// Skip TIN analysis
     #[arg(long, default_value_t = false, help_heading = "Tool parameters")]
     pub skip_tin: bool,
@@ -252,6 +264,14 @@ pub struct RnaArgs {
     /// Skip preseq library complexity analysis
     #[arg(long, default_value_t = false, help_heading = "Tool parameters")]
     pub skip_preseq: bool,
+
+    /// preseq: random seed for bootstrap CIs
+    #[arg(
+        long = "preseq-seed",
+        value_name = "N",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_seed: Option<u64>,
 
     /// preseq: max extrapolation depth
     #[arg(
@@ -276,14 +296,6 @@ pub struct RnaArgs {
         help_heading = "Tool parameters"
     )]
     pub preseq_n_bootstraps: Option<u32>,
-
-    /// preseq: random seed for bootstrap CIs
-    #[arg(
-        long = "preseq-seed",
-        value_name = "N",
-        help_heading = "Tool parameters"
-    )]
-    pub preseq_seed: Option<u64>,
 
     /// preseq: max segment length for PE merging
     #[arg(
@@ -439,8 +451,6 @@ mod tests {
             "500000",
             "--preseq-n-bootstraps",
             "200",
-            "--preseq-seed",
-            "1",
             "--preseq-seg-len",
             "100000000",
         ]);
@@ -450,8 +460,33 @@ mod tests {
                 assert_eq!(args.preseq_max_extrap, Some(5_000_000_000.0));
                 assert_eq!(args.preseq_step_size, Some(500_000.0));
                 assert_eq!(args.preseq_n_bootstraps, Some(200));
-                assert_eq!(args.preseq_seed, Some(1));
                 assert_eq!(args.preseq_seg_len, Some(100_000_000));
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_rna_tool_seeds() {
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--preseq-seed",
+            "1",
+            "--tin-seed",
+            "2",
+            "--junction-saturation-seed",
+            "3",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.preseq_seed, Some(1));
+                assert_eq!(args.tin_seed, Some(2));
+                assert_eq!(args.junction_saturation_seed, Some(3));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
