@@ -4,10 +4,11 @@ description: How AI coding assistants were used in the development of RustQC and
 ---
 
 Nearly all of the code in RustQC was written by AI coding agents, primarily
-[Claude](https://claude.ai/) (Anthropic). The AI also drove most architectural
-decisions, wrote tests, drafted documentation, and iterated on output-matching bugs.
-Humans guided the AI, defined the validation strategy, and reviewed the results,
-outputs, and documentation.
+[Claude](https://claude.ai/) (Anthropic) and [Seqera AI](https://seqera.io/ai/).
+Claude drove most architectural decisions, wrote tests, drafted documentation, and
+iterated on output-matching bugs. Seqera AI was used for writing the benchmarking pipeline and nf-test
+configs, running benchmarks, analysing logs, traces, and metrics, and coding. Humans guided the AI, defined the
+validation strategy, and reviewed the results, outputs, and documentation.
 
 RustQC is not a clean-room reimplementation. The source code of every upstream tool
 was used as reference during development, both by humans reading it and by providing
