@@ -3,23 +3,11 @@ title: Benchmark Details
 description: Overall performance comparison between the traditional workflow and RustQC's single-pass approach.
 ---
 
-The traditional RNA-seq QC workflow requires multiple separate tools:
-**featureCounts** for gene-level read counting and biotype quantification,
-**dupRadar** for duplication rate analysis,
-**RSeQC** for a suite of quality control metrics (including TIN for transcript integrity),
-**samtools** for alignment statistics,
-**preseq** for library complexity estimation, and
-**Qualimap** for gene body coverage.
-RustQC replaces all of these in a single pass, producing every output together.
+## Large dataset: GM12878 REP1 (~186M reads)
 
-## Traditional workflow vs. RustQC
-
-Benchmarks were run on AWS (2026-03-09) using the nf-core/rnaseq pipeline for the
-traditional tools and `rustqc rna --gtf` for RustQC.
-
-### Large dataset: GM12878 REP1 (~186M reads)
-
-A real-world large paired-end RNA-seq BAM aligned to GRCh38 (63,677 genes).
+A paired-end RNA-seq BAM aligned to GRCh38 (63,677 genes), benchmarked on AWS
+(2026-03-09) using the [nf-core/rnaseq](https://nf-co.re/rnaseq/) pipeline for
+the traditional tools and `rustqc rna` for RustQC.
 
 | Step                         | Traditional workflow |      RustQC |
 | ---------------------------- | -------------------: | ----------: |
@@ -44,94 +32,40 @@ A real-world large paired-end RNA-seq BAM aligned to GRCh38 (63,677 genes).
 | **All outputs, single pass** |                   -- | **14m 54s** |
 | **Sequential total**         |         **~15h 34m** | **14m 54s** |
 
-RustQC ran with 174.2% average CPU utilisation (multi-threaded), processing the
-entire BAM in 14m 54s while the sum of all individual tool runtimes
-exceeds 15 hours and 34 minutes.
+RustQC ran with 174.2% average CPU utilisation (multi-threaded). In a real
+pipeline some traditional tools run in parallel, but TIN alone (9h 45m) sets a
+hard lower bound on wall-clock time. Peak memory: 11.4 GB for RustQC vs. up to
+10.2 GB for read_duplication alone.
 
-> **Note:** In a real pipeline, some tools can run in parallel after the BAM is
-> ready, so wall-clock time for the traditional workflow will be less than the
-> sequential sum. However, TIN alone (9h 45m) sets a hard lower bound on
-> wall-clock time for any parallelised run, and dupRadar (2h 14m) dominates
-> everything else.
+The speedup comes from three things: a single BAM pass instead of one per tool,
+compiled Rust instead of interpreted R/Python, and multi-threaded parallelism
+across chromosomes.
 
-Standout comparisons from the large dataset:
+## Output correctness
 
-- TIN takes 9h 45m - more than 39x RustQC's total runtime for everything
-- dupRadar alone takes 2h 14m 24s - more than 9x RustQC's total runtime
-- Qualimap pipeline (sort + rnaseq) takes 1h 2m 14s - longer than RustQC
-- read_duplication (RSeQC) takes 33m 1s - more than twice RustQC's total runtime
-- Peak memory: RustQC uses 11.4 GB in a single process vs. up to 10.2 GB
-  for read_duplication alone, with many other tools also requiring several GB
-  each (Qualimap: 4.9 GB, samtools sort: 5.2 GB, GTF2BED: 2.7 GB, preseq: 2.0 GB, etc.)
-
-### Small dataset: `test` sample (~52K reads, chr6)
-
-A small test BAM (chromosome 6 only) used to verify correctness.
-
-| Step                         | Traditional workflow |    RustQC |
-| ---------------------------- | -------------------: | --------: |
-| GTF decompression            |                479ms |        -- |
-| samtools flagstat            |                  &lt;1s |        -- |
-| samtools idxstats            |                  &lt;1s |        -- |
-| samtools stats               |                  &lt;1s |        -- |
-| samtools sort (for Qualimap) |                  &lt;1s |        -- |
-| featureCounts                |                 1.0s |        -- |
-| bam_stat (RSeQC)             |                 0.6s |        -- |
-| infer_experiment (RSeQC)     |                 0.8s |        -- |
-| read_distribution (RSeQC)    |                 1.9s |        -- |
-| inner_distance (RSeQC)       |                 1.9s |        -- |
-| junction_annotation (RSeQC)  |                 1.4s |        -- |
-| junction_saturation (RSeQC)  |                 1.1s |        -- |
-| read_duplication (RSeQC)     |                 1.3s |        -- |
-| TIN (RSeQC tin.py)           |               1m 35s |        -- |
-| Qualimap rnaseq              |                 5.0s |        -- |
-| dupRadar                     |                 7.2s |        -- |
-| preseq lc_extrap             |                 1.0s |        -- |
-| **All outputs, single pass** |                   -- | **25.9s** |
-
-On this tiny dataset the per-tool runtimes are dominated by startup overhead;
-TIN is still the slowest individual tool at 1m 35s. RustQC completes all
-analyses in 25.9s.
-
-## RustQC outputs match the original tools
-
-Every output file produced by RustQC matches or closely matches the original tools:
-
-- dupRadar duplication matrix: all 14 columns match across 63,677 genes
-- Gene-level read counts: identical across all 63,677 genes
-- Model fit parameters: intercept and slope match to 10+ significant digits
-- Assignment statistics: Assigned, NoFeatures, Ambiguous match exactly
-- flagstat: all 16 metrics identical to samtools flagstat
-- idxstats: all per-chromosome counts identical to samtools idxstats
-- stats: full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, GCD, etc.) near-identical to samtools stats
-- preseq: extrapolation curve within &lt;0.1% of preseq v3.2.0 across entire range
-- RSeQC tools: all data values and R plotting scripts match Python RSeQC.
-  Junction saturation intermediate sampling points show expected stochastic
-  variation from random subsampling. Per-transcript TIN scores differ due to
-  coverage counting approach (see [RSeQC](/rna/rseqc/))
-- Qualimap: all read counts, genomic origin percentages, and coverage bias metrics
-  match Qualimap Java 2.3 exactly (see [Qualimap](/rna/qualimap/))
-
-See the individual tool pages for detailed per-tool comparisons:
+Per-tool comparison tables and known differences are on the individual tool pages:
 [dupRadar](/rna/dupradar/), [featureCounts](/rna/featurecounts/), [RSeQC](/rna/rseqc/),
 [preseq](/rna/preseq/), [Samtools](/rna/samtools/), [Qualimap](/rna/qualimap/).
 
-## Where the speedup comes from
+## Upstream tool versions
 
-1. Single-pass architecture: The traditional workflow reads the BAM file
-   many times, once per tool. RustQC reads it once and produces everything
-   in that single pass.
-2. Compiled Rust vs. interpreted R/Python: Compiled code with zero-cost
-   abstractions and efficient memory management.
-3. Multi-threaded parallelism: RustQC parallelizes across chromosomes.
-   Scaling depends on the number of chromosomes with mapped reads and the
-   evenness of their read distribution.
+RustQC output was validated against these specific versions:
+
+| Tool | Version |
+| ---- | ------- |
+| dupRadar | 1.38.0 |
+| featureCounts (Subread) | 2.0.6 |
+| RSeQC | 5.0.4 |
+| preseq | 3.2.0 |
+| samtools | 1.22.1 |
+| Qualimap | 2.3 |
+
+Exact container tags and commands are in the
+[RustQC-benchmarks](https://github.com/seqeralabs/RustQC-benchmarks) Nextflow pipeline.
 
 ## Benchmark conditions
 
-- Hardware: AWS cloud (2026-03-09), run via nf-core/rnaseq pipeline.
-- RustQC: `--gtf` mode (all tools enabled), multi-threaded (174.2% CPU on large dataset).
-- Traditional tools: each tool run in its own container as part of the nf-core/rnaseq pipeline.
-  Timings are wall-clock realtime from the Nextflow execution trace.
-- Reproducibility: benchmark scripts and data are in the
-  [benchmark directory](https://github.com/seqeralabs/RustQC/tree/main/benchmark).
+- AWS cloud (2026-03-09), run via nf-core/rnaseq pipeline
+- RustQC: all tools enabled, multi-threaded
+- Traditional tools: each in its own container; timings are wall-clock from the Nextflow execution trace
+- Reproducibility: the [RustQC-benchmarks](https://github.com/seqeralabs/RustQC-benchmarks) pipeline reproduces the full comparison

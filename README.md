@@ -82,6 +82,10 @@ cargo install rustqc
 
 See the [documentation](https://seqeralabs.github.io/RustQC/) for full usage details, configuration options, output file descriptions, and benchmark results.
 
+## AI & Provenance
+
+RustQC was developed with substantial assistance from AI coding agents (primarily [Claude](https://claude.ai/)), using the upstream tool source code as reference. Correctness is validated by comparing output against the original tools on real sequencing data, not by manual code review alone. See the [AI & Provenance](https://seqeralabs.github.io/RustQC/about/ai-statement/) documentation for full details, including known validation gaps.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.

@@ -265,9 +265,9 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
 - Float output formatting must match R's behavior (15 significant digits, "NA" for NaN, trailing-zero trimming).
 - The pipeline processes BAM files which can be very large — performance matters.
 - System dependencies needed for building: cmake, zlib, bz2, lzma, curl, ssl, clang (for `rust-htslib`).
-- **IMPORTANT:** When benchmarks are re-run, verify that all results referenced in both `benchmark/README.md`
-  and the top-level `README.md` are updated to reflect the new numbers (timings, percentages, etc.).
-  These documents must always accurately reflect the latest benchmark data.
+- Benchmark results are produced by the [RustQC-benchmarks](https://github.com/seqeralabs/RustQC-benchmarks)
+  Nextflow pipeline. When benchmarks are re-run, verify that all results referenced in the docs
+  and the top-level `README.md` are updated to reflect the new numbers.
 - The YAML config mirrors the CLI subcommand hierarchy: all RNA-Seq settings live
   under a top-level `rna:` key. Within `rna:`, output toggles are nested under
   `dupradar:` and `featurecounts:` keys. Each output file can be individually

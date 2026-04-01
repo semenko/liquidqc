@@ -24,7 +24,7 @@ export default defineConfig({
           tag: "meta",
           attrs: {
             property: "og:image",
-            content: `${site}${base}og-image.png`,
+            content: `${site}/og-image.png`,
           },
         },
       ],
@@ -77,6 +77,10 @@ export default defineConfig({
             {
               label: "Credits & Citation",
               slug: "about/credits",
+            },
+            {
+              label: "AI & Provenance",
+              slug: "about/ai-statement",
             },
             {
               label: "Contributing",
