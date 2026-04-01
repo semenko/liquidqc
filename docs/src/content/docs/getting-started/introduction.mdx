@@ -25,7 +25,7 @@ Key advantages:
 - Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS, including TIN which takes 9h 45m alone in the traditional workflow
 - No runtime dependencies: no R, Python, or Bioconductor installation required
 - The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
-- Produces identical or near-identical results to the original tools (see [benchmark details](/rna/benchmark-details/))
+- Produces identical or near-identical results to the original tools (see [benchmark details](../rna/benchmark-details/))
 - Process several BAM files in a single command with automatic parallelisation
 - Accepts SAM, BAM, and CRAM input files; GTF annotation files can be plain or gzip-compressed
 
@@ -50,7 +50,7 @@ A GTF file is required (`--gtf`) and all tools run automatically. Transcript-lev
 
 ### RSeQC tools -- RNA-seq quality control
 
-Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (including TIN), all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis. See [RSeQC](/rna/rseqc/) for full details.
+Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (including TIN), all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis. See [RSeQC](../rna/rseqc/) for full details.
 
 | Tool                | Description                              |
 | ------------------- | ---------------------------------------- |
@@ -66,4 +66,4 @@ Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (includ
 
 ## Credits
 
-RustQC builds on several established bioinformatics tools. If you use RustQC, please cite the original tools. See the [Credits](/about/credits/) page for the full list and citations.
+RustQC builds on several established bioinformatics tools. If you use RustQC, please cite the original tools. See the [Credits](../about/credits/) page for the full list and citations.

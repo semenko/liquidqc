@@ -23,7 +23,7 @@ request. Outputs were also validated end-to-end using the
 [nf-core/rnaseq](https://nf-co.re/rnaseq/) pipeline test profiles.
 
 Per-tool comparison tables and methodology are in the
-[benchmark documentation](/rna/benchmark-details/).
+[benchmark documentation](../rna/benchmark-details/).
 
 ## Known validation gaps
 
@@ -33,7 +33,7 @@ Per-tool comparison tables and methodology are in the
   [nf-core/rnaseq](https://nf-co.re/rnaseq/) pipeline. Unsupported features (e.g.,
   samtools `mpileup`, the full featureCounts option set) should produce an error.
 - Validation is pinned to specific upstream versions (see
-  [benchmark details](/rna/benchmark-details/)). If upstream tools change their
+  [benchmark details](../rna/benchmark-details/)). If upstream tools change their
   output in a new release, RustQC may diverge until re-validated.
 
 ## Reporting discrepancies

@@ -59,7 +59,7 @@ Qualimap, preseq, and samtools.
 Gzip compression is detected automatically by inspecting the file header (magic
 bytes), so the `.gz` extension is not required.
 
-Individual tools can be disabled via the [configuration file](/usage/configuration/).
+Individual tools can be disabled via the [configuration file](../usage/configuration/).
 
 #### `-o, --outdir <DIR>`
 
@@ -81,7 +81,7 @@ Library strandedness for strand-aware read counting:
 
 <Aside type="tip">
   RustQC automatically checks this value against the
-  [infer_experiment](/rna/rseqc/#infer_experiment) results. If there is a
+  [infer_experiment](../rna/rseqc/#infer_experiment) results. If there is a
   mismatch, a warning is printed at the end of the run suggesting the
   correct value.
 </Aside>
@@ -164,7 +164,7 @@ them into subdirectories. By default, RustQC creates `dupradar/`,
 subdirectories under the output directory. With `--flat-output`, all files are
 written to the top-level output directory.
 
-This can also be set in the [configuration file](/usage/configuration/) under
+This can also be set in the [configuration file](../usage/configuration/) under
 the `rna:` section as `flat_output: true`.
 
 **Default:** `false` (nested subdirectories)
@@ -178,7 +178,7 @@ given, the summary is written to stdout. Use `"-"` explicitly for stdout.
 
 Path to a YAML configuration file for advanced settings such as chromosome name
 mapping, per-output-file toggles, and enabling/disabling individual tools. See
-the [Configuration](/usage/configuration/) page for the full reference.
+the [Configuration](../usage/configuration/) page for the full reference.
 
 #### `-q, --quiet`
 
@@ -192,7 +192,7 @@ Show additional detail during processing.
 
 These flags control parameters for specific RSeQC-equivalent analyses. Each
 tool runs by default as part of `rustqc rna` and can be disabled via the
-[configuration file](/usage/configuration/).
+[configuration file](../usage/configuration/).
 
 | Option                    | Default | Description                                         |
 | ------------------------- | ------- | --------------------------------------------------- |
