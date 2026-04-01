@@ -1,6 +1,6 @@
 # RustQC Changelog
 
-## [Version 0.1.3](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.3)
+## [Version 0.1.3](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.3) - 2026-04-01
 
 ### Bug fixes
 
@@ -20,7 +20,7 @@
 
 - Add og:image social card for docs
 
-## [Version 0.1.2](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.2)
+## [Version 0.1.2](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.2) - 2026-04-01
 
 ### Bug fixes
 
@@ -35,7 +35,7 @@
 
 - Add per-tool seed flags (`--tin-seed`, `--junction-saturation-seed`, `--preseq-seed`) for reproducible results (#53)
 
-## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1)
+## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1) - 2026-03-30
 
 ### Bug fixes
 
@@ -58,7 +58,7 @@
 - Update dtolnay/rust-toolchain requirement (#34)
 - Update numerous docs npm dependencies
 
-## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0)
+## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0) - 2026-03-19
 
 Initial release of RustQC — fast quality control tools for sequencing data, written in Rust.
 
