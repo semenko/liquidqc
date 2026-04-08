@@ -10,22 +10,6 @@ import { Tabs, TabItem } from "@astrojs/starlight/components";
 Pre-built binaries are available from the [GitHub Releases page](https://github.com/seqeralabs/RustQC/releases) for Linux and macOS.
 
 <Tabs>
-  <TabItem label="macOS Apple Silicon" icon="apple">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz --strip-components=1
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
-    ```
-  </TabItem>
-  <TabItem label="macOS Intel" icon="apple">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz --strip-components=1
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
-    ```
-  </TabItem>
   <TabItem label="Linux x86_64" icon="linux">
     ```bash
     curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz --strip-components=1
@@ -33,10 +17,45 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
     ```
+
+    SIMD-optimized builds are also available for faster performance on modern CPUs. Replace the download URL above with one of:
+
+    - **AVX2 (x86-64-v3)** — recommended for most modern servers (Haswell/Zen 1+, 2013+):
+      `rustqc-linux-x86_64-v3.tar.gz`
+    - **AVX-512 (x86-64-v4)** — fastest, requires Skylake-X/Zen 4+ (2017+):
+      `rustqc-linux-x86_64-v4.tar.gz`
+
+    Run `rustqc --version` to see which features your CPU supports and whether a faster build is available.
   </TabItem>
   <TabItem label="Linux aarch64" icon="linux">
     ```bash
     curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz --strip-components=1
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
+    ```
+
+    An SVE-optimized build is also available for AWS Graviton 3+, Google Axion, and NVIDIA Grace instances. Replace the download URL above with:
+
+    - **SVE (neoverse-v1)** — 256-bit vectors vs NEON's 128-bit baseline:
+      `rustqc-linux-aarch64-neoverse-v1.tar.gz`
+  </TabItem>
+  <TabItem label="macOS Apple Silicon" icon="apple">
+    ```bash
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz --strip-components=1
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
+    ```
+
+    An M1-optimized build with better scheduling for Apple Silicon is also available. Replace the download URL above with:
+
+    - **Apple M1** — optimized for M-series chips (M1/M2/M3/M4, backward compatible):
+      `rustqc-macos-aarch64-apple-m1.tar.gz`
+  </TabItem>
+  <TabItem label="macOS Intel" icon="apple">
+    ```bash
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz --strip-components=1
     chmod +x ./rustqc
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
@@ -51,6 +70,22 @@ Run RustQC without any local installation using Docker:
 ```bash
 # Run all RNA-seq QC analyses in a single pass
 docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest \
+  rustqc rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
+```
+
+SIMD-optimized Docker images are also available for better performance on capable hardware:
+
+```bash
+# x86_64 with AVX2 (recommended for most modern x86 servers)
+docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest-avx2 \
+  rustqc rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
+
+# x86_64 with AVX-512 (Skylake-X, Zen 4+)
+docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest-avx512 \
+  rustqc rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
+
+# aarch64 with SVE (Graviton 3+, Axion, Grace)
+docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest-sve \
   rustqc rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
 ```
 
@@ -131,7 +166,7 @@ The system dependencies are: cmake, zlib, bz2, lzma, curl, ssl, and a C++ compil
 
 ### Extra performance
 
-When building from source you can squeeze out additional performance by targeting your specific CPU architecture. This enables use of SIMD instructions (AVX2, etc.) that the pre-built binaries cannot use because they target a generic baseline:
+Pre-built SIMD-optimized binaries are available (see tabs above) that already leverage AVX2, AVX-512, or SVE. If you're building from source and want to target your exact CPU, you can squeeze out additional performance:
 
 ```bash
 RUSTFLAGS="-C target-cpu=native" cargo build --release
