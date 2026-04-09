@@ -221,6 +221,24 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push to `main` and all PRs:
 
 All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cache@v2`.
 
+## Release Process
+
+Releases are triggered via **workflow dispatch** (GitHub Actions UI or `gh workflow run release`).
+The workflow (`.github/workflows/release.yml`) does the following:
+
+1. Reads the version from `Cargo.toml` and validates it matches `Cargo.lock`.
+2. Builds all binary variants (8 targets) and Docker images (baseline + 3 SIMD).
+3. Only after all builds pass: creates a git tag, GitHub release (with changelog from `CHANGELOG.md`), and uploads binary artifacts.
+4. Publishes to crates.io as the final step.
+
+To prepare a release:
+
+1. Update `version` in `Cargo.toml`.
+2. Run `cargo update --package rustqc` to sync `Cargo.lock`.
+3. Add a new section to `CHANGELOG.md` following the existing format.
+4. Commit and push to `main`.
+5. Trigger the Release workflow via GitHub Actions.
+
 ## Key Dependencies
 
 | Crate                  | Purpose                               |

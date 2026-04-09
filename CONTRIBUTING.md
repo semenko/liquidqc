@@ -172,6 +172,20 @@ All pull requests must pass three checks:
 2. `cargo fmt --check`
 3. `cargo clippy -- -D warnings`
 
+## Releasing
+
+Releases are triggered via **workflow dispatch** (GitHub Actions UI or `gh workflow run release`).
+The workflow builds all binary variants and Docker images, and only creates the tag, GitHub release,
+and crates.io publish after all builds pass.
+
+To prepare a release:
+
+1. Update `version` in `Cargo.toml`.
+2. Run `cargo update --package rustqc` to sync `Cargo.lock`.
+3. Add a new section to `CHANGELOG.md` following the existing format.
+4. Commit and push to `main`.
+5. Trigger the **Release** workflow via GitHub Actions.
+
 ## Reporting issues
 
 Please open a [GitHub issue](https://github.com/seqeralabs/RustQC/issues) with:
