@@ -52,14 +52,14 @@ jobs:
       - name: Build
         run: >
           cargo build --release
-          ${TARGET_CPU:+--config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
+          ${TARGET_CPU:+--target "$HOST_TRIPLE" --config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
         env:
           TARGET_CPU: ${{ matrix.target_cpu || '' }}
 
       - name: Test
         run: >
           cargo test --release
-          ${TARGET_CPU:+--config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
+          ${TARGET_CPU:+--target "$HOST_TRIPLE" --config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
         env:
           TARGET_CPU: ${{ matrix.target_cpu || '' }}
 

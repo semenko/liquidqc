@@ -23,9 +23,10 @@ COPY src/ src/
 
 RUN HOST_TRIPLE=$(rustc -vV | awk '/^host:/ {print $2}') && \
     GIT_SHORT_HASH="${GIT_SHORT_HASH}" \
-    cargo build --release \
+    cargo build --release --target "$HOST_TRIPLE" \
         ${CPU_TARGET:+--config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$CPU_TARGET']"} \
-    && strip target/release/rustqc
+    && strip "target/$HOST_TRIPLE/release/rustqc" \
+    && cp "target/$HOST_TRIPLE/release/rustqc" /rustqc
 
 # ---- Runtime stage ----
 FROM debian:bookworm-slim
@@ -36,6 +37,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/rustqc /usr/local/bin/rustqc
+COPY --from=builder /rustqc /usr/local/bin/rustqc
 
 CMD ["rustqc"]
