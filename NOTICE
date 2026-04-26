@@ -1,0 +1,36 @@
+liquidqc
+========
+
+Copyright (c) 2026 Nick Semenkovich and contributors.
+
+liquidqc is licensed under the GNU General Public License version 3 or
+later (GPL-3.0-or-later). See the LICENSE file for the full license text.
+
+Forked from RustQC
+------------------
+
+liquidqc is a hard fork of RustQC, originally developed by Seqera Labs:
+
+  https://github.com/seqeralabs/RustQC
+
+RustQC is copyright (c) Seqera Labs and contributors, licensed under
+GPL-3.0-or-later. The full upstream history is preserved in this
+repository's git log; the `upstream` git remote points at the original
+project so improvements can be cherry-picked in either direction.
+
+Inherited from RustQC, liquidqc reimplements (and continues to credit)
+the following upstream tools, each with its own license and citation:
+
+  - dupRadar (Sayols et al., 2016) — BMC Bioinformatics 17:428
+  - featureCounts (Liao et al., 2014) — Bioinformatics 30(7):923-930
+  - RSeQC (Wang et al., 2012) — Bioinformatics 28(16):2184-2185
+  - preseq (Daley & Smith, 2013) — Nature Methods 10(4):325-327
+  - samtools (Li et al., 2009) — Bioinformatics 25(16):2078-2079
+  - Qualimap (Okonechnikov et al., 2016) — Bioinformatics 32(2):292-294
+
+When liquidqc emits results, the included `CITATIONS.md` file lists
+the specific tools used in that run with full bibliographic citations.
+
+Liquidqc-specific additions (Phase 1+) extend the inherited base with
+cfRNA-focused fragmentomics features. These additions remain
+GPL-3.0-or-later as required by the upstream license.

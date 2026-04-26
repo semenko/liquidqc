@@ -1,12 +1,17 @@
-//! RustQC - Fast quality control tools for sequencing data
+//! liquidqc — single-pass cfRNA QC + fragmentomics
 //!
-//! A collection of Rust-based QC tools for bioinformatics.
-//! The `rna` subcommand runs all RNA-Seq QC analyses in a single pass:
+//! Forked from seqeralabs/RustQC (GPLv3+). The inherited `rna` subcommand
+//! still runs the full RNA-Seq QC analysis suite in a single BAM pass:
 //! dupRadar duplication rate analysis, featureCounts-compatible gene counting,
 //! 8 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
 //! read_distribution, junction_annotation, junction_saturation, inner_distance, TIN),
 //! preseq library complexity extrapolation, samtools-compatible outputs
 //! (flagstat, idxstats, stats), and Qualimap gene body coverage profiling.
+//!
+//! liquidqc extends this base with cfRNA-specific fragmentomics features
+//! (end-motif k-mers, soft-clip k-mers, fragment-length periodicity, per-gene
+//! Tier-2 features, panels, sex inference, SNP fingerprinting, saturation
+//! curves) and a versioned JSON+Parquet output schema (`schema/v1/`).
 //! Individual tools can be disabled via the YAML config file.
 
 mod citations;
@@ -75,6 +80,30 @@ fn main() -> Result<()> {
 
     let cli = cli::parse_args();
 
+    // Subcommands that don't run the full RNA pipeline are handled before
+    // env_logger init so they have minimal output.
+    match &cli.command {
+        cli::Commands::Schema => {
+            const SCHEMA: &str = include_str!("../schema/v1/liquidqc.schema.json");
+            print!("{SCHEMA}");
+            return Ok(());
+        }
+        cli::Commands::Version => {
+            println!(
+                "liquidqc {} ({}, built {})",
+                env!("CARGO_PKG_VERSION"),
+                env!("GIT_SHORT_HASH"),
+                env!("BUILD_TIMESTAMP"),
+            );
+            return Ok(());
+        }
+        cli::Commands::Dna(_) => {
+            eprintln!("liquidqc dna: not implemented in v1; planned");
+            std::process::exit(1);
+        }
+        cli::Commands::Rna(_) => {}
+    }
+
     // Determine verbosity from CLI flags
     let verbosity = match &cli.command {
         cli::Commands::Rna(args) if args.quiet => Verbosity::Quiet,
@@ -97,13 +126,18 @@ fn main() -> Result<()> {
 
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args, &ui),
+        // Schema/Version/Dna are handled before env_logger init above and
+        // early-return out of main(); reaching them here would be a bug.
+        cli::Commands::Schema | cli::Commands::Version | cli::Commands::Dna(_) => {
+            unreachable!("non-rna subcommands handled before this match")
+        }
     }
 }
 
 /// Reconstruct the command line for the featureCounts-compatible header comment.
 fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     let mut parts = vec![format!(
-        "rustqc rna {}",
+        "liquidqc rna {}",
         args.input
             .iter()
             .map(|s| shell_escape(s))
@@ -676,7 +710,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
             ui.detail("JSON summary written to stdout");
         } else {
             let path = if json_path.is_empty() {
-                outdir.join("rustqc_summary.json")
+                outdir.join("liquidqc_summary.json")
             } else {
                 Path::new(json_path).to_path_buf()
             };
@@ -727,7 +761,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         }
     }
 
-    ui.finish("RustQC run finished", elapsed);
+    ui.finish("liquidqc run finished", elapsed);
 
     if n_err > 0 {
         anyhow::bail!("{} file(s) failed to process", n_err);

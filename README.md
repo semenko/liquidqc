@@ -1,42 +1,59 @@
-<h1 align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/RustQC-logo-darkbg.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/RustQC-logo.svg">
-  <img width="500" src="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/RustQC-logo.svg" alt="RustQC">
-</picture>
-</h1>
+# liquidqc
 
-<h4 align="center">Fast genomics quality control tools for sequencing data, written in Rust.</h4>
+**Single-pass cfRNA QC + fragmentomics in Rust.**
 
-<p align="center">
-  <a href="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml"><img src="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/seqeralabs/RustQC/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPLv3+-blue" alt="License"></a>
-  <a href="https://rewrites.bio"><img src="https://rewrites.bio/badges/rewrites-bio.svg" alt="rewrites.bio - Follows best practice principles for rewriting bioinformatics tools with AI"></a>
-</p>
+liquidqc is a hard fork of [seqeralabs/RustQC](https://github.com/seqeralabs/RustQC)
+extended with cfRNA-specific fragmentomics features. It ingests a sorted/indexed
+genome BAM, a GTF annotation, and a reference FASTA, and emits one canonical
+versioned JSON per sample plus a sparse per-gene Parquet — covering both
+classical RNA-seq QC (RSeQC + samtools stats + Picard CollectRnaSeqMetrics
+equivalents) and fragmentomics (end-motif k-mers, soft-clip k-mers,
+fragment-length periodicity, per-gene Tier-2 features) in one BAM iteration.
 
-<p align="center">
-  <a href="https://seqeralabs.github.io/RustQC/">Documentation</a> &bull;
-  <a href="https://seqeralabs.github.io/RustQC/getting-started/quickstart/">Quickstart</a> &bull;
-  <a href="https://seqeralabs.github.io/RustQC/rna/benchmark-details/">Benchmarks</a> &bull;
-  <a href="https://github.com/seqeralabs/RustQC/releases">Releases</a>
-</p>
+## Status
 
----
+**Phase 0 (bootstrap, 2026-04-26):** repo forked, renamed, schema v1 stub
+committed, CLI scaffolds the new fragmentomics flags but does not yet compute
+fragmentomics features. The inherited RustQC `rna` subcommand still runs end-
+to-end and produces all classical QC outputs.
 
-**RustQC** is a suite of fast QC tools for sequencing data, compiled to a single static binary with no runtime dependencies.
+Subsequent phases (Phase 1 → 6, ~4–6 weeks total) wire RustQC accumulators
+into a unified per-sample JSON writer, add Tier-1 fragmentomics (end-motif
+k-mers, soft-clip k-mers, fragment-length periodicity FFT, fragment-fraction
+bins), Tier-2 per-gene Parquet, Tier-3 cohort QC + sample-identity add-ons,
+and a static-binary release.
 
-<p align="center">
-<picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/benchmarks/benchmark_dark.png">
-   <img src="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~14m 54s vs traditional tools ~15h 34m sequential (dupRadar + featureCounts + 8 RSeQC tools incl. TIN + preseq + samtools + Qualimap)" width="600">
-</picture>
-</p>
+## Usage
 
-<p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS.</em></p>
+```bash
+# Classical RNA-seq QC (inherited from RustQC, fully functional today)
+liquidqc rna sample.markdup.bam \
+  --gtf genes.gtf \
+  --paired \
+  --outdir results/
 
-It currently includes:
+# Same, with the new --library-prep flag required by the v1 fragmentomics
+# contract. In Phase 0 the flag is parsed but not yet acted on; from Phase 1
+# onward it gates the fragmentomics output schema.
+liquidqc rna sample.markdup.bam \
+  --gtf genes.gtf \
+  --library-prep neb_next_ultra_ii_directional \
+  --paired \
+  --outdir results/
 
-- `rustqc rna` is a single-command RNA-Seq QC tool that runs all QC analyses in one pass. Designed to slot into the [nf-core/rnaseq pipeline](https://nf-co.re/rnaseq/), but works anywhere:
+# Print the schema
+liquidqc schema
+
+# Print the version (with git short hash and build timestamp)
+liquidqc --version
+```
+
+`liquidqc dna` is reserved for a future cfDNA subcommand and currently exits 1.
+
+## Inherited RustQC tooling
+
+The classical `rna` pipeline reimplements (and is numerically validated against)
+the following upstream tools, in a single BAM pass:
 
 | Tool                | Reimplements                                                                            | Description                                                           |
 | ------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
@@ -56,36 +73,47 @@ It currently includes:
 | idxstats            | [samtools](http://www.htslib.org/) `idxstats`                                           | Per-chromosome read counts                                            |
 | stats               | [samtools](http://www.htslib.org/) `stats`                                              | Full samtools stats output including all histogram sections           |
 
-All outputs are format- and numerically identical to the upstream tools, and compatible with [MultiQC](https://multiqc.info/) for reporting.
+These outputs are format- and numerically identical to the upstream tools and
+compatible with [MultiQC](https://multiqc.info/). RustQC (and therefore
+liquidqc) was developed with substantial AI assistance and validated by
+output comparison against the upstream tools on real sequencing data — see
+the upstream
+[AI & Provenance](https://seqeralabs.github.io/RustQC/about/ai-statement/)
+notes.
 
-## Quick start
+## liquidqc additions (planned)
+
+Per the phased roadmap:
+
+- **Tier 1 (sample-level fragmentomics):** end-motif 4-mers (5' and 3'),
+  soft-clip k-mers, fragment-length periodicity FFT, short/long fragment
+  fractions and binned histogram.
+- **Tier 2 (per-gene sparse Parquet):** length histogram, end motifs, mean/
+  median fragment length, 5'-3' coverage bias, soft-clip rates, intron-exon
+  ratio, all restricted to genes with ≥ N reads.
+- **Tier 3 (cohort QC + sample identity):** per-chromosome fractions
+  (chrY, chrM), hemoglobin and ribosomal-protein gene fractions, marker-
+  panel reads (LM22, Tabula Sapiens, Vorperian), per-cycle quality, sex
+  inference, ~17.5k-site SNP fingerprint, rRNA fraction estimate, adapter
+  readthrough, per-chromosome insert-size mean, splice-site dinucleotide
+  composition, gene-detection saturation curves, automatic `qc_flags`.
+
+## Build
 
 ```bash
-# Install (Linux x86_64 example -- see docs for all platforms)
-curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz --strip-components=1
-sudo mv ./rustqc /usr/local/bin/
-
-# Run RNA-Seq QC
-rustqc rna sample.markdup.bam --gtf genes.gtf --paired --outdir results/
+git clone https://github.com/semenko/liquidqc
+cd liquidqc
+cargo build --release
 ```
 
-```bash
-# Or use Docker
-docker run --rm -v "$PWD":/data ghcr.io/seqeralabs/rustqc:latest \
-  rustqc rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
-```
-
-```bash
-# Or install from crates.io
-cargo install rustqc
-```
-
-See the [documentation](https://seqeralabs.github.io/RustQC/) for full usage details, configuration options, output file descriptions, and benchmark results.
-
-## AI & Provenance
-
-RustQC was developed with substantial assistance from AI coding agents (primarily [Claude](https://claude.ai/)), using the upstream tool source code as reference. Correctness is validated by comparing output against the original tools on real sequencing data, not by manual code review alone. See the [AI & Provenance](https://seqeralabs.github.io/RustQC/about/ai-statement/) documentation for full details, including known validation gaps.
+Requires Rust 1.87+. macOS (`brew install bzip2 xz`) and Linux
+(`cmake zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev
+libfontconfig1-dev pkg-config clang`) build dependencies are inherited from
+RustQC.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for details.
+GPL-3.0-or-later (inherited from RustQC). See [LICENSE](LICENSE) and
+[NOTICE](NOTICE) for the upstream attribution. Improvements that make sense
+upstream are routed back to RustQC via cherry-picks; the `upstream` git
+remote points there.

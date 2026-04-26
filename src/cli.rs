@@ -1,4 +1,8 @@
-//! Command-line interface definition for RustQC.
+//! Command-line interface definition for liquidqc.
+//!
+//! Forked from seqeralabs/RustQC; the doc-comment summary below describes
+//! the inherited `rna` subcommand. Future fragmentomics flags will be
+//! added in subsequent phases.
 //!
 //! Provides a subcommand-based CLI. The `rna` subcommand runs all RNA-Seq QC
 //! analyses in a single pass: dupRadar duplication rate analysis, featureCounts-
@@ -41,7 +45,7 @@ impl std::fmt::Display for Strandedness {
 
 /// Fast quality control tools for sequencing data, written in Rust.
 #[derive(Parser, Debug)]
-#[command(name = "rustqc", version, about, long_about = None)]
+#[command(name = "liquidqc", version, about, long_about = None)]
 pub struct Cli {
     /// The analysis subcommand to run.
     #[command(subcommand)]
@@ -49,6 +53,10 @@ pub struct Cli {
 }
 
 /// Available analysis subcommands.
+//
+// `RnaArgs` is large; the other variants are unit structs. The size delta
+// is fine here — this enum only exists once per process at startup.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// RNA-Seq QC — single-pass analysis of BAM/SAM/CRAM files.
@@ -57,6 +65,26 @@ pub enum Commands {
     /// analyses in one pass. Requires a GTF annotation and duplicate-marked
     /// (not removed) alignments.
     Rna(RnaArgs),
+
+    /// cfDNA QC — placeholder; not implemented in v1.
+    ///
+    /// Reserved for a future single-pass cfDNA fragmentomics path. v1 of
+    /// liquidqc is cfRNA-only; invoking this subcommand exits 1.
+    Dna(DnaArgs),
+
+    /// Print the v1 JSON schema (`schema/v1/liquidqc.schema.json`) to stdout.
+    Schema,
+
+    /// Print the version (with git short hash and build timestamp).
+    Version,
+}
+
+/// Arguments for the `dna` subcommand. Reserved; not implemented in v1.
+#[derive(Parser, Debug)]
+pub struct DnaArgs {
+    /// Input BAM (parsed but ignored — `dna` exits 1 in v1).
+    #[arg(long, value_name = "BAM")]
+    pub bam: Option<String>,
 }
 
 /// Arguments for the `rna` subcommand.
@@ -392,12 +420,67 @@ pub struct RnaArgs {
         help_heading = "Tool parameters"
     )]
     pub preseq_seg_len: Option<i64>,
+
+    // ── Fragmentomics (liquidqc v1) ─────────────────────────────────────
+    //
+    // Phase 0: parsed but not yet acted on. `--library-prep` is required
+    // and never silently defaulted (per the v1 contract). Other flags
+    // here become load-bearing in Phases 1–4.
+    /// Library prep label (e.g. neb_next_ultra_ii_directional). Required.
+    /// Never silently defaulted — pass `unknown` if truly unknown.
+    #[arg(
+        long = "library-prep",
+        value_name = "STRING",
+        env = "LIQUIDQC_LIBRARY_PREP",
+        help_heading = "Fragmentomics (liquidqc v1)"
+    )]
+    pub library_prep: String,
+
+    /// Marker panels to load (CSV: lm22,tabula_sapiens,vorperian).
+    /// Phase 4. Empty in Phase 0.
+    #[arg(
+        long = "panels",
+        value_name = "CSV",
+        env = "LIQUIDQC_PANELS",
+        help_heading = "Fragmentomics (liquidqc v1)"
+    )]
+    pub panels: Option<String>,
+
+    /// Common-SNP fingerprint VCF (default: bundled somalier sites).
+    /// Phase 4.
+    #[arg(
+        long = "snp-panel",
+        value_name = "VCF",
+        env = "LIQUIDQC_SNP_PANEL",
+        help_heading = "Fragmentomics (liquidqc v1)"
+    )]
+    pub snp_panel: Option<String>,
+
+    /// Per-gene Tier-2 minimum read count (default 20). Phase 3.
+    #[arg(
+        long = "min-gene-reads",
+        value_name = "N",
+        default_value_t = 20,
+        env = "LIQUIDQC_MIN_GENE_READS",
+        help_heading = "Fragmentomics (liquidqc v1)"
+    )]
+    pub min_gene_reads: u32,
+
+    /// Sample identifier for output filenames and JSON envelope.
+    /// Defaults to BAM basename (without extension).
+    #[arg(
+        long = "sample-id",
+        value_name = "ID",
+        env = "LIQUIDQC_SAMPLE_ID",
+        help_heading = "Fragmentomics (liquidqc v1)"
+    )]
+    pub sample_id: Option<String>,
 }
 
 /// Parse command-line arguments and return the Cli struct.
 ///
 /// Sets a `long_version` that includes the git commit, build timestamp,
-/// and CPU info line, shown when the user runs `rustqc --version`.
+/// and CPU info line, shown when the user runs `liquidqc --version`.
 pub fn parse_args() -> Cli {
     use clap::FromArgMatches;
 
@@ -423,7 +506,15 @@ mod tests {
     #[test]
     fn test_rna_default_args_gtf() {
         // Test that defaults are sensible with a GTF annotation
-        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
+        let cli = Cli::parse_from([
+            "liquidqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--library-prep",
+            "unknown",
+        ]);
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.input, vec!["test.bam"]);
@@ -447,13 +538,15 @@ mod tests {
     fn test_rna_multiple_bams() {
         // Test that multiple BAM files are accepted
         let cli = Cli::parse_from([
-            "rustqc",
+            "liquidqc",
             "rna",
             "a.bam",
             "b.bam",
             "c.bam",
             "--gtf",
             "genes.gtf",
+            "--library-prep",
+            "unknown",
         ]);
         match cli.command {
             Commands::Rna(args) => {
@@ -468,11 +561,13 @@ mod tests {
     #[test]
     fn test_rna_gtf_all_args() {
         let cli = Cli::parse_from([
-            "rustqc",
+            "liquidqc",
             "rna",
             "test.bam",
             "--gtf",
             "genes.gtf",
+            "--library-prep",
+            "unknown",
             "--stranded",
             "reverse",
             "--paired",
@@ -503,18 +598,31 @@ mod tests {
     #[test]
     fn test_rna_missing_gtf() {
         // --gtf is required, so omitting it should fail
-        let result = Cli::try_parse_from(["rustqc", "rna", "test.bam"]);
+        let result =
+            Cli::try_parse_from(["liquidqc", "rna", "test.bam", "--library-prep", "unknown"]);
         assert!(result.is_err(), "Expected error when --gtf is not provided");
+    }
+
+    #[test]
+    fn test_rna_missing_library_prep() {
+        // --library-prep is required by the v1 contract; never silently defaulted
+        let result = Cli::try_parse_from(["liquidqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
+        assert!(
+            result.is_err(),
+            "Expected error when --library-prep is not provided"
+        );
     }
 
     #[test]
     fn test_rna_rseqc_params() {
         let cli = Cli::parse_from([
-            "rustqc",
+            "liquidqc",
             "rna",
             "test.bam",
             "--gtf",
             "genes.gtf",
+            "--library-prep",
+            "unknown",
             "--infer-experiment-sample-size",
             "500000",
             "--min-intron",
@@ -545,11 +653,13 @@ mod tests {
     #[test]
     fn test_rna_preseq_params() {
         let cli = Cli::parse_from([
-            "rustqc",
+            "liquidqc",
             "rna",
             "test.bam",
             "--gtf",
             "genes.gtf",
+            "--library-prep",
+            "unknown",
             "--preseq-max-extrap",
             "5000000000",
             "--preseq-step-size",
@@ -575,11 +685,13 @@ mod tests {
     #[test]
     fn test_rna_tool_seeds() {
         let cli = Cli::parse_from([
-            "rustqc",
+            "liquidqc",
             "rna",
             "test.bam",
             "--gtf",
             "genes.gtf",
+            "--library-prep",
+            "unknown",
             "--preseq-seed",
             "1",
             "--tin-seed",
@@ -601,11 +713,13 @@ mod tests {
     #[test]
     fn test_rna_skip_preseq() {
         let cli = Cli::parse_from([
-            "rustqc",
+            "liquidqc",
             "rna",
             "test.bam",
             "--gtf",
             "genes.gtf",
+            "--library-prep",
+            "unknown",
             "--skip-preseq",
         ]);
         match cli.command {

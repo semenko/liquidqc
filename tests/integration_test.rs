@@ -1,7 +1,7 @@
-//! Integration tests comparing RustQC output against R dupRadar reference output.
+//! Integration tests comparing liquidqc output against R dupRadar reference output.
 //!
-//! These tests run RustQC on the same test BAM/GTF data used to generate
-//! the R reference outputs in tests/expected/.
+//! Inherited from RustQC. These tests run liquidqc on the same test BAM/GTF
+//! data used to generate the R reference outputs in tests/expected/.
 
 use std::fs;
 use std::path::Path;
@@ -12,13 +12,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rust_htslib::bam;
 use rust_htslib::bam::header::HeaderRecord;
 
-/// Helper: get the path to the rustqc binary.
+/// Helper: get the path to the liquidqc binary.
 ///
-/// Uses the `CARGO_BIN_EXE_rustqc` env var when available (set by cargo test),
-/// otherwise falls back to building and using `target/debug/rustqc`.
-fn rustqc_binary() -> String {
+/// Uses the `CARGO_BIN_EXE_liquidqc` env var when available (set by cargo test),
+/// otherwise falls back to building and using `target/debug/liquidqc`.
+fn liquidqc_binary() -> String {
     // cargo test sets this for integration tests automatically
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_rustqc") {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_liquidqc") {
         return path;
     }
 
@@ -29,21 +29,21 @@ fn rustqc_binary() -> String {
         .expect("Failed to run cargo build");
     assert!(status.success(), "cargo build failed");
 
-    let path = Path::new("target/debug/rustqc");
+    let path = Path::new("target/debug/liquidqc");
     assert!(path.exists(), "Binary not found at {:?}", path);
     path.to_str().unwrap().to_string()
 }
 
-/// Helper: run rustqc rna on test data and return the output directory
-fn run_rustqc(outdir: &str) -> std::process::Output {
-    run_rustqc_with_input(outdir, "tests/data/test.bam")
+/// Helper: run liquidqc rna on test data and return the output directory
+fn run_liquidqc(outdir: &str) -> std::process::Output {
+    run_liquidqc_with_input(outdir, "tests/data/test.bam")
 }
 
-/// Helper: run rustqc rna with a specified input file and return the output.
+/// Helper: run liquidqc rna with a specified input file and return the output.
 /// When `skip_dup_check` is true (the default for most tests), passes
 /// `--skip-dup-check` so the test doesn't depend on duplicate flags.
-fn run_rustqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::process::Output {
-    let binary = rustqc_binary();
+fn run_liquidqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::process::Output {
+    let binary = liquidqc_binary();
     let mut args = vec![
         "rna",
         input,
@@ -51,6 +51,9 @@ fn run_rustqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::proc
         "tests/data/test.gtf",
         "--outdir",
         outdir,
+        // liquidqc v1: required, never silently defaulted (Phase 0 contract)
+        "--library-prep",
+        "unknown",
     ];
     if skip_dup_check {
         args.push("--skip-dup-check");
@@ -58,11 +61,11 @@ fn run_rustqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::proc
     Command::new(&binary)
         .args(&args)
         .output()
-        .expect("Failed to execute rustqc")
+        .expect("Failed to execute liquidqc")
 }
 
-/// Helper: run rustqc rna with custom arguments and environment.
-fn run_rustqc_custom(
+/// Helper: run liquidqc rna with custom arguments and environment.
+fn run_liquidqc_custom(
     outdir: &Path,
     input: &Path,
     gtf: &Path,
@@ -70,7 +73,7 @@ fn run_rustqc_custom(
     skip_dup_check: bool,
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
-    let binary = rustqc_binary();
+    let binary = liquidqc_binary();
     let mut args = vec![
         "rna".to_string(),
         input.display().to_string(),
@@ -80,6 +83,8 @@ fn run_rustqc_custom(
         outdir.display().to_string(),
         "--threads".to_string(),
         threads.to_string(),
+        "--library-prep".to_string(),
+        "unknown".to_string(),
     ];
     if skip_dup_check {
         args.push("--skip-dup-check".to_string());
@@ -90,7 +95,7 @@ fn run_rustqc_custom(
     for (key, value) in extra_env {
         cmd.env(key, value);
     }
-    cmd.output().expect("Failed to execute rustqc")
+    cmd.output().expect("Failed to execute liquidqc")
 }
 
 fn unique_test_dir(label: &str) -> PathBuf {
@@ -98,8 +103,12 @@ fn unique_test_dir(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir =
-        std::env::temp_dir().join(format!("rustqc-{}-{}-{}", label, std::process::id(), nonce));
+    let dir = std::env::temp_dir().join(format!(
+        "liquidqc-{}-{}-{}",
+        label,
+        std::process::id(),
+        nonce
+    ));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -186,13 +195,13 @@ fn build_parallel_duplicate_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) 
 }
 
 /// Convenience: run with a custom input and --skip-dup-check.
-fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
-    run_rustqc_impl(outdir, input, true)
+fn run_liquidqc_with_input(outdir: &str, input: &str) -> std::process::Output {
+    run_liquidqc_impl(outdir, input, true)
 }
 
-/// Helper: run rustqc rna with --flat-output flag (all files in outdir, no subdirectories)
-fn run_rustqc_flat(outdir: &str) -> std::process::Output {
-    let binary = rustqc_binary();
+/// Helper: run liquidqc rna with --flat-output flag (all files in outdir, no subdirectories)
+fn run_liquidqc_flat(outdir: &str) -> std::process::Output {
+    let binary = liquidqc_binary();
     Command::new(&binary)
         .args([
             "rna",
@@ -201,11 +210,13 @@ fn run_rustqc_flat(outdir: &str) -> std::process::Output {
             "tests/data/test.gtf",
             "--outdir",
             outdir,
+            "--library-prep",
+            "unknown",
             "--skip-dup-check",
             "--flat-output",
         ])
         .output()
-        .expect("Failed to execute rustqc")
+        .expect("Failed to execute liquidqc")
 }
 
 /// Parse a dupMatrix TSV file into a Vec of (gene_id, HashMap<col_name, value_string>)
@@ -251,9 +262,9 @@ fn parse_intercept_slope(path: &str) -> (f64, f64) {
     (intercept, slope)
 }
 
-/// Helper: run rustqc rna on test data with multiple BAM files
-fn run_rustqc_multi(outdir: &str) -> std::process::Output {
-    let binary = rustqc_binary();
+/// Helper: run liquidqc rna on test data with multiple BAM files
+fn run_liquidqc_multi(outdir: &str) -> std::process::Output {
+    let binary = liquidqc_binary();
 
     // Ensure output directory exists before copying files into it
     fs::create_dir_all(outdir).expect("Failed to create output directory");
@@ -273,10 +284,12 @@ fn run_rustqc_multi(outdir: &str) -> std::process::Output {
             "tests/data/test.gtf",
             "--outdir",
             outdir,
+            "--library-prep",
+            "unknown",
             "--skip-dup-check",
         ])
         .output()
-        .expect("Failed to execute rustqc")
+        .expect("Failed to execute liquidqc")
 }
 
 /// Compare two floating-point values with a relative tolerance
@@ -300,10 +313,10 @@ fn test_dup_matrix_exact_match() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(
         output.status.success(),
-        "rustqc failed: {}",
+        "liquidqc failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -389,10 +402,10 @@ fn test_intercept_slope_match() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(
         output.status.success(),
-        "rustqc failed: {}",
+        "liquidqc failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -426,10 +439,10 @@ fn test_all_output_files_generated() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(
         output.status.success(),
-        "rustqc failed: {}",
+        "liquidqc failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -482,7 +495,7 @@ fn test_dup_matrix_header() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(output.status.success());
 
     let content = fs::read_to_string(format!("{}/dupradar/test_dupMatrix.txt", outdir)).unwrap();
@@ -531,7 +544,7 @@ fn test_mqc_intercept_format() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(output.status.success());
 
     // Check MultiQC intercept file format
@@ -569,7 +582,7 @@ fn test_mqc_curve_format() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(output.status.success());
 
     // Check MultiQC curve file format
@@ -612,7 +625,7 @@ fn test_gene_order_preserved() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(output.status.success());
 
     // Both R and Rust should output genes in the same order (GTF order)
@@ -638,7 +651,7 @@ fn test_count_values_exact() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc(outdir);
+    let output = run_liquidqc(outdir);
     assert!(output.status.success());
 
     let r_matrix = parse_dup_matrix("tests/expected/dupMatrix.txt");
@@ -671,12 +684,12 @@ fn test_count_values_exact() {
 #[test]
 fn test_multiple_bam_files() {
     let outdir = "tests/output_multi_bam";
-    let output = run_rustqc_multi(outdir);
+    let output = run_liquidqc_multi(outdir);
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "rustqc failed with multiple BAMs:\n{}",
+        "liquidqc failed with multiple BAMs:\n{}",
         stderr
     );
 
@@ -720,7 +733,7 @@ fn test_multiple_bam_files() {
 /// Passing the same BAM file twice should fail with a duplicate-stem error.
 #[test]
 fn test_duplicate_bam_stems_rejected() {
-    let bin = rustqc_binary();
+    let bin = liquidqc_binary();
     let output = Command::new(&bin)
         .args([
             "rna",
@@ -730,13 +743,15 @@ fn test_duplicate_bam_stems_rejected() {
             "tests/data/test.gtf",
             "--outdir",
             "tests/output_dup_stems",
+            "--library-prep",
+            "unknown",
         ])
         .output()
-        .expect("Failed to execute rustqc");
+        .expect("Failed to execute liquidqc");
 
     assert!(
         !output.status.success(),
-        "rustqc should fail with duplicate BAM stems"
+        "liquidqc should fail with duplicate BAM stems"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -761,17 +776,17 @@ fn test_sam_input_matches_bam() {
     fs::create_dir_all(outdir_bam).unwrap();
     fs::create_dir_all(outdir_sam).unwrap();
 
-    let output_bam = run_rustqc_with_input(outdir_bam, "tests/data/test.bam");
+    let output_bam = run_liquidqc_with_input(outdir_bam, "tests/data/test.bam");
     assert!(
         output_bam.status.success(),
-        "rustqc with BAM input failed: {}",
+        "liquidqc with BAM input failed: {}",
         String::from_utf8_lossy(&output_bam.stderr)
     );
 
-    let output_sam = run_rustqc_with_input(outdir_sam, "tests/data/test.sam");
+    let output_sam = run_liquidqc_with_input(outdir_sam, "tests/data/test.sam");
     assert!(
         output_sam.status.success(),
-        "rustqc with SAM input failed: {}",
+        "liquidqc with SAM input failed: {}",
         String::from_utf8_lossy(&output_sam.stderr)
     );
 
@@ -820,10 +835,10 @@ fn test_flat_output_no_subdirectories() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc_flat(outdir);
+    let output = run_liquidqc_flat(outdir);
     assert!(
         output.status.success(),
-        "rustqc --flat-output failed: {}",
+        "liquidqc --flat-output failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -876,8 +891,8 @@ fn test_flat_output_no_subdirectories() {
 // ===================================================================
 
 /// Convenience: run WITHOUT --skip-dup-check (the default user experience).
-fn run_rustqc_dup_check(outdir: &str, input: &str) -> std::process::Output {
-    run_rustqc_impl(outdir, input, false)
+fn run_liquidqc_dup_check(outdir: &str, input: &str) -> std::process::Output {
+    run_liquidqc_impl(outdir, input, false)
 }
 
 /// A BAM with duplicates marked (0x400) should succeed without --skip-dup-check.
@@ -890,10 +905,10 @@ fn test_dup_check_passes_with_marked_duplicates() {
     fs::create_dir_all(outdir).unwrap();
 
     // test.bam has 137/488 reads with 0x400 set
-    let output = run_rustqc_dup_check(outdir, "tests/data/test.bam");
+    let output = run_liquidqc_dup_check(outdir, "tests/data/test.bam");
     assert!(
         output.status.success(),
-        "rustqc should succeed when BAM has duplicate-flagged reads:\n{}",
+        "liquidqc should succeed when BAM has duplicate-flagged reads:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -909,10 +924,10 @@ fn test_dup_check_fails_without_marked_duplicates() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc_dup_check(outdir, "tests/data/test_nodup.bam");
+    let output = run_liquidqc_dup_check(outdir, "tests/data/test_nodup.bam");
     assert!(
         !output.status.success(),
-        "rustqc should fail when BAM has no duplicate-flagged reads"
+        "liquidqc should fail when BAM has no duplicate-flagged reads"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -939,10 +954,10 @@ fn test_skip_dup_check_bypasses_failure() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc_with_input(outdir, "tests/data/test_nodup.bam");
+    let output = run_liquidqc_with_input(outdir, "tests/data/test_nodup.bam");
     assert!(
         output.status.success(),
-        "rustqc --skip-dup-check should succeed even without duplicate flags:\n{}",
+        "liquidqc --skip-dup-check should succeed even without duplicate flags:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -958,10 +973,10 @@ fn test_dup_check_fails_for_sam_without_duplicates() {
     let _ = fs::remove_dir_all(outdir);
     fs::create_dir_all(outdir).unwrap();
 
-    let output = run_rustqc_dup_check(outdir, "tests/data/test_nodup.sam");
+    let output = run_liquidqc_dup_check(outdir, "tests/data/test_nodup.sam");
     assert!(
         !output.status.success(),
-        "rustqc should fail for SAM input without duplicate flags"
+        "liquidqc should fail for SAM input without duplicate flags"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -983,7 +998,7 @@ fn test_dup_check_allows_late_duplicate_flags() {
     let root = unique_test_dir("late-dup");
     let (bam_path, gtf_path, outdir) = build_late_duplicate_fixture(&root);
 
-    let output = run_rustqc_custom(
+    let output = run_liquidqc_custom(
         &outdir,
         &bam_path,
         &gtf_path,
@@ -994,7 +1009,7 @@ fn test_dup_check_allows_late_duplicate_flags() {
 
     assert!(
         output.status.success(),
-        "rustqc should succeed when duplicate-flagged reads appear later in the file:\n{}",
+        "liquidqc should succeed when duplicate-flagged reads appear later in the file:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -1009,7 +1024,7 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
     let root = unique_test_dir("parallel-dup");
     let (bam_path, gtf_path, outdir) = build_parallel_duplicate_fixture(&root);
 
-    let output = run_rustqc_custom(
+    let output = run_liquidqc_custom(
         &outdir,
         &bam_path,
         &gtf_path,
@@ -1020,7 +1035,7 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     assert!(
         output.status.success(),
-        "rustqc should succeed in parallel mode when duplicates exist globally:\n{}",
+        "liquidqc should succeed in parallel mode when duplicates exist globally:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 

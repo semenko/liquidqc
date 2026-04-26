@@ -50,7 +50,7 @@ jobs:
               exit 1
             fi
 
-            LOCK_VERSION=$(awk '/^name = "rustqc"/{found=1} found && /^version =/{print; exit}' Cargo.lock | sed 's/.*"\(.*\)"/\1/')
+            LOCK_VERSION=$(awk '/^name = "liquidqc"/{found=1} found && /^version =/{print; exit}' Cargo.lock | sed 's/.*"\(.*\)"/\1/')
             if [ "$LOCK_VERSION" != "$RAW" ]; then
               echo "::error::Cargo.lock version ($LOCK_VERSION) does not match Cargo.toml version ($RAW)"
               exit 1
@@ -148,7 +148,7 @@ jobs:
       - name: Package
         id: package
         run: |
-          BIN="rustqc"
+          BIN="liquidqc"
           ARCHIVE="${BIN}-${{ matrix.name }}"
 
           mkdir -p "staging/${ARCHIVE}"
@@ -379,7 +379,7 @@ jobs:
         run: |
           gh release create "${{ needs.check-release.outputs.version }}" \
             --target "${{ github.sha }}" \
-            --title "RustQC ${{ needs.check-release.outputs.version }}" \
+            --title "liquidqc ${{ needs.check-release.outputs.version }}" \
             --notes-file /tmp/release-notes.md
 
   # ------------------------------------------------------------------

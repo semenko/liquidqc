@@ -2,8 +2,8 @@
 //! embeds git/build metadata as compile-time environment variables.
 //!
 //! The shim wraps `std::mt19937` and `std::binomial_distribution` so that
-//! RustQC's preseq bootstrap uses the exact same random number generation
-//! as upstream preseq compiled on the same platform.
+//! liquidqc's preseq bootstrap uses the exact same random number generation
+//! as upstream preseq compiled on the same platform. (Inherited from RustQC.)
 //!
 //! Embedded variables:
 //! - `GIT_SHORT_HASH` — short commit hash (e.g. `84ec57f`), or `unknown`

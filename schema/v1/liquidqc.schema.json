@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/semenko/liquidqc/schema/v1/liquidqc.schema.json",
+  "title": "liquidqc fragmentomics output (v1, Phase 0 stub)",
+  "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Phase 0 covers only the always-present envelope fields; per-metric blocks (fragment_length, end_motifs, soft_clips, periodicity, per_chromosome, panels, sex_inference, snp_fingerprint, saturation, cycle_quality) are added in their owning phases. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 + Tier-3 per-gene rows.",
+  "type": "object",
+  "required": [
+    "extractor_version",
+    "schema_version",
+    "git_commit",
+    "sample_id",
+    "bam_path",
+    "bam_md5",
+    "bam_size_bytes",
+    "gtf_path",
+    "gtf_md5",
+    "reference_fasta_md5",
+    "library_prep",
+    "paired_end",
+    "strandedness",
+    "read_length_max",
+    "read_length_mean",
+    "read_count_total",
+    "read_count_after_filters",
+    "filters",
+    "qc_flags",
+    "runtime_seconds",
+    "peak_rss_mb"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "extractor_version": {
+      "type": "string",
+      "description": "liquidqc package version (Cargo.toml).",
+      "examples": ["0.1.0"]
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Semver for this schema. `0.1.0-stub` until per-metric blocks land.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
+      "examples": ["0.1.0-stub", "1.0.0"]
+    },
+    "git_commit": {
+      "type": "string",
+      "description": "Short git hash of the liquidqc build (or `unknown` for non-git builds).",
+      "examples": ["fee1fce", "unknown"]
+    },
+    "sample_id": {
+      "type": "string",
+      "description": "Sample identifier. Defaults to BAM basename without extension; overridable via `--sample-id`.",
+      "minLength": 1
+    },
+    "bam_path": {
+      "type": "string",
+      "description": "Absolute path to the input BAM as supplied at run time."
+    },
+    "bam_md5": {
+      "type": "string",
+      "description": "MD5 of the BAM file bytes.",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "bam_size_bytes": {
+      "type": "integer",
+      "description": "Size of the BAM file in bytes.",
+      "minimum": 0
+    },
+    "gtf_path": {
+      "type": "string",
+      "description": "Absolute path to the GTF annotation as supplied at run time."
+    },
+    "gtf_md5": {
+      "type": "string",
+      "description": "MD5 of the (uncompressed) GTF bytes.",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "reference_fasta_md5": {
+      "type": ["string", "null"],
+      "description": "MD5 of the reference FASTA. Null if `--fasta` was not supplied (some QC features unavailable).",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "library_prep": {
+      "type": "string",
+      "description": "Free-text library prep label from `--library-prep`. Never silently defaulted; missing value is a hard error at the CLI layer. Used downstream to stratify cross-cohort analyses and to auto-flag tagmentation-driven end-motif bias.",
+      "minLength": 1,
+      "examples": [
+        "neb_next_ultra_ii_directional",
+        "smart_seq_v4",
+        "illumina_rna_prep_with_enrichment_tagmentation",
+        "unknown"
+      ]
+    },
+    "paired_end": {
+      "type": "boolean",
+      "description": "True if the BAM contains paired-end reads (auto-detected unless overridden via `--paired-end true|false`)."
+    },
+    "strandedness": {
+      "type": "string",
+      "enum": ["unstranded", "forward", "reverse", "unknown"],
+      "description": "Library strandedness (auto-inferred unless overridden via `--strandedness`)."
+    },
+    "read_length_max": {
+      "type": "integer",
+      "description": "Maximum observed read length in this BAM.",
+      "minimum": 0
+    },
+    "read_length_mean": {
+      "type": "number",
+      "description": "Mean observed read length in this BAM.",
+      "minimum": 0
+    },
+    "read_count_total": {
+      "type": "integer",
+      "description": "Total number of read records in the BAM (primary + secondary + supplementary + unmapped).",
+      "minimum": 0
+    },
+    "read_count_after_filters": {
+      "type": "integer",
+      "description": "Read count after `filters` (MAPQ, primary-only, proper-pair where requested) is applied.",
+      "minimum": 0
+    },
+    "filters": {
+      "type": "object",
+      "description": "Filter parameters actually applied to this run. Keys are stable across schema versions; new keys may be added.",
+      "additionalProperties": true,
+      "properties": {
+        "min_mapq": {
+          "type": "integer",
+          "description": "Minimum MAPQ. Default 30.",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "require_proper_pair": {
+          "type": "boolean",
+          "description": "If true, only proper-pair reads (SAM flag 0x2) are counted toward QC and fragmentomics."
+        },
+        "drop_secondary": {
+          "type": "boolean",
+          "description": "If true, secondary alignments (SAM flag 0x100) are excluded."
+        },
+        "drop_supplementary": {
+          "type": "boolean",
+          "description": "If true, supplementary alignments (SAM flag 0x800) are excluded."
+        },
+        "drop_duplicates": {
+          "type": "boolean",
+          "description": "If true, reads flagged as duplicate (SAM flag 0x400) are excluded. cfRNA defaults to false because biological duplication is ~80%."
+        }
+      }
+    },
+    "qc_flags": {
+      "type": "array",
+      "description": "Auto-generated QC flags. The flag set evolves with the schema; current names are documented inline. Unknown values may appear in future schema versions.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "single_end_no_tlen",
+          "low_paired_fraction",
+          "low_mapping_rate",
+          "cfdna_contamination_suspected",
+          "high_rrna_fraction",
+          "tagmentation_endmotif_bias",
+          "unstranded_endbias_unreliable",
+          "read_length_caps_long_fragments",
+          "sex_swap_warning",
+          "low_complexity_library",
+          "high_duplication_nonbiological"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "runtime_seconds": {
+      "type": "number",
+      "description": "Wall-clock seconds for the full liquidqc run on this BAM.",
+      "minimum": 0
+    },
+    "peak_rss_mb": {
+      "type": "number",
+      "description": "Peak resident set size in MiB observed during the run.",
+      "minimum": 0
+    }
+  }
+}

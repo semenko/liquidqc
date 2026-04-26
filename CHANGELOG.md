@@ -1,4 +1,44 @@
-# RustQC Changelog
+# liquidqc Changelog
+
+## [Unreleased] — 0.1.0-bootstrap (Phase 0) — 2026-04-26
+
+### Project
+
+- Hard-forked [seqeralabs/RustQC](https://github.com/seqeralabs/RustQC)
+  v0.2.1 → renamed to **liquidqc**, version reset to 0.1.0. RustQC's git
+  history is preserved; the `upstream` remote points at the original
+  project for cherry-picks. License remains GPL-3.0-or-later.
+- Updated `Cargo.toml` (crate name, binary name, description, repository,
+  authors), `cli.rs` clap command name, `main.rs` doc-comments and the
+  output JSON filename (`liquidqc_summary.json`), and `release.yml`
+  binary-name and lockfile-pattern references. Inherited per-source-file
+  attribution to RustQC remains in docstrings, build script, citations
+  module, and integration-test docstrings.
+- Added `NOTICE` with full RustQC attribution per GPLv3.
+- Rewrote `README.md` for liquidqc identity while preserving upstream
+  credit prominently.
+
+### Schema v1 stub
+
+- Added `schema/v1/liquidqc.schema.json` with the always-present envelope
+  fields (extractor/schema/git versions, BAM/GTF/FASTA hashes, library
+  prep, paired-end, strandedness, read-length and read-count summaries,
+  filter parameters, qc_flags, runtime/RSS). Per-metric blocks land in
+  Phase 1+. Schema marked `0.1.0-stub`.
+- Added `tests/snapshot/empty_envelope.json` reference fixture and a
+  parseability smoke test.
+
+### CLI scaffolding (parse-only)
+
+- Added top-level subcommands `dna`, `version`, `schema` alongside the
+  inherited `rna`. `dna` prints "not implemented" and exits 1 (the
+  v1-cfRNA-only contract). `schema` emits the v1 schema to stdout.
+- Added `rna` flag stubs for the new fragmentomics CLI surface
+  (`--library-prep`, `--paired-end auto|true|false`, `--panels`,
+  `--snp-panel`, `--min-gene-reads`, `--sample-id`, `--out-dir`).
+  `--library-prep` is required and never silently defaults — exits
+  non-zero if omitted, even though the underlying computation isn't yet
+  wired.
 
 ## [Version 0.2.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.1) - 2026-04-09
 

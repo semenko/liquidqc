@@ -1,20 +1,24 @@
 [package]
-name = "rustqc"
-version = "0.2.1"
+name = "liquidqc"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.87"
-authors = ["Phil Ewels <phil.ewels@seqera.io>", "Jon Manning <jonathan.manning@seqera.io>"]
-description = "Fast RNA-seq QC in a single pass: dupRadar, featureCounts, 8 RSeQC tools, preseq, samtools stats, and Qualimap — reimplemented in Rust"
+authors = [
+    "Nick Semenkovich <semenko@alum.mit.edu>",
+    "Phil Ewels <phil.ewels@seqera.io>",
+    "Jon Manning <jonathan.manning@seqera.io>",
+]
+description = "cfRNA QC + fragmentomics in a single BAM pass. Forked from seqeralabs/RustQC; extends with end-motif k-mers, soft-clip k-mers, fragment-length periodicity, per-gene Tier-2 features, panels, sex inference, SNP fingerprinting, saturation curves, and a versioned JSON+Parquet output schema."
 license = "GPL-3.0-or-later"
-repository = "https://github.com/seqeralabs/RustQC"
+repository = "https://github.com/semenko/liquidqc"
 readme = "README.md"
-keywords = ["bioinformatics", "rna-seq", "duplication", "qc", "rseqc"]
+keywords = ["bioinformatics", "cfrna", "rna-seq", "fragmentomics", "qc"]
 categories = ["command-line-utilities", "science"]
-homepage = "https://seqeralabs.github.io/RustQC/"
-exclude = ["benchmark/", "docs/", "paper/", "tests/", ".github/", "Dockerfile", ".dockerignore", ".pre-commit-config.yaml", "netlify.toml", "CONTRIBUTING.md", "AGENTS.md"]
+homepage = "https://github.com/semenko/liquidqc"
+exclude = ["benchmark/", "docs/", "paper/", "tests/", ".github/", "Dockerfile", ".dockerignore", ".pre-commit-config.yaml", "netlify.toml", "CONTRIBUTING.md", "AGENTS.md", "NOTICE"]
 
 [[bin]]
-name = "rustqc"
+name = "liquidqc"
 path = "src/main.rs"
 
 [dependencies]
@@ -68,3 +72,13 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+# Clippy lints inherited from upstream RustQC that fire under the newer
+# `stable` toolchain we build with (Rust 1.95+). Suppressed at the package
+# level rather than edited in the source files so cherry-picks from
+# upstream stay clean. Each entry should be revisited if/when upstream
+# changes the affected file.
+[lints.clippy]
+manual_checked_ops = "allow"       # rna/dupradar/counting.rs, rna/rseqc/accumulators.rs
+collapsible_match = "allow"        # rna/rseqc/read_distribution.rs (4 sites)
+unnecessary_sort_by = "allow"      # rna/qualimap/index.rs (sort_unstable_by_key suggestion)
