@@ -99,8 +99,14 @@ pub fn evaluate(ctx: &QcContext<'_>) -> Vec<String> {
     }
 
     if let Some(stat) = ctx.bam_stat {
-        if ctx.paired_end && stat.mapped > 0 {
-            let frac = stat.proper_pairs as f64 / stat.mapped as f64;
+        if ctx.paired_end && stat.paired_flagstat > 0 {
+            // Match samtools flagstat semantics: properly_paired / paired-in-sequencing
+            // (both counted on primary records, no MAPQ filter). Earlier code used
+            // `stat.proper_pairs / stat.mapped`, which mixed a post-MAPQ-filter
+            // primary-only numerator against a denominator that includes secondary
+            // alignments — clean BAMs with many multimappers fired the flag at ~0.66
+            // even when samtools reported 99.97% properly paired.
+            let frac = stat.properly_paired as f64 / stat.paired_flagstat as f64;
             if frac < LOW_PAIRED_FRACTION_THRESHOLD {
                 flags.push(QcFlag::LowPairedFraction);
             }
@@ -307,8 +313,9 @@ mod tests {
     #[test]
     fn low_paired_fraction_fires_below_threshold() {
         let stat = BamStatResult {
+            paired_flagstat: 1000,
+            properly_paired: 100, // 10% — well below threshold
             mapped: 1000,
-            proper_pairs: 100, // 10% — well below threshold
             total_records: 1100,
             ..Default::default()
         };
@@ -316,6 +323,24 @@ mod tests {
         ctx.bam_stat = Some(&stat);
         let flags = evaluate(&ctx);
         assert!(flags.contains(&"low_paired_fraction".to_string()));
+    }
+
+    #[test]
+    fn low_paired_fraction_does_not_fire_with_secondary_alignments() {
+        // Regression: clean paired BAM with many secondary alignments (e.g.
+        // STAR multimappers). flagstat reports 99.97% properly paired; the
+        // QC flag must not fire on the inflated `mapped` denominator.
+        let stat = BamStatResult {
+            paired_flagstat: 141_523_998,
+            properly_paired: 141_482_596, // 99.97%
+            mapped: 192_966_285,          // includes 51M secondary alignments
+            total_records: 192_966_285,
+            ..Default::default()
+        };
+        let mut ctx = base_ctx("neb_next");
+        ctx.bam_stat = Some(&stat);
+        let flags = evaluate(&ctx);
+        assert!(!flags.contains(&"low_paired_fraction".to_string()));
     }
 
     #[test]

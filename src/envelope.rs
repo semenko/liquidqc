@@ -48,7 +48,7 @@ use crate::rna::splice_dinuc::SpliceSiteDinucleotidesResult;
 ///
 /// Must equal the `schema_version` example string in
 /// `schema/v1/liquidqc.schema.json`. Bump together when the wire format changes.
-pub const SCHEMA_VERSION: &str = "0.4.0-stub";
+pub const SCHEMA_VERSION: &str = "0.5.0-stub";
 
 /// QC flag identifiers (must match the `qc_flags` enum in
 /// `schema/v1/liquidqc.schema.json`). Phase 2 sets the four below; later
@@ -717,7 +717,7 @@ impl FeatureCountsBlock {
 pub struct FragmentLengthBlock {
     pub bins: FragmentSizeBins,
     pub frac_lt_80: f64,
-    pub frac_gt_300: f64,
+    pub frac_ge_300: f64,
     pub mean: f64,
     pub median: u64,
     pub total_pairs_observed: u64,
@@ -737,7 +737,7 @@ impl FragmentLengthBlock {
                 gt_500: r.bins.gt_500,
             },
             frac_lt_80: r.frac_lt_80,
-            frac_gt_300: r.frac_gt_300,
+            frac_ge_300: r.frac_ge_300,
             mean: r.mean,
             median: r.median,
             total_pairs_observed: r.total_pairs_observed,

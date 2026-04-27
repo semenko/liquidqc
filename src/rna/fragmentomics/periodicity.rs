@@ -125,11 +125,17 @@ pub fn compute(tlen_hist: &[u64]) -> PeriodicityResult {
     let power_helical = band_power(HELICAL_PERIODS);
     let power_nucleosomal = band_power(NUCLEOSOMAL_PERIODS);
 
-    // Find dominant peak period. Iterate FFT bins from k=1 (skip DC).
+    // Find dominant peak period. Skip bin 0 (DC, already removed) and bin 1
+    // (period == PADDED_LEN, which is longer than the data window of length
+    // `win_len`; not an observable periodicity, just residual low-frequency
+    // content from any unimodal fragment-length hill). Cap from below so the
+    // search range corresponds to periods <= `win_len`, the longest cycle
+    // that can complete within the window.
+    let min_bin = PADDED_LEN.div_ceil(win_len).max(2);
     let (peak_bin, peak_power) = powers
         .iter()
         .enumerate()
-        .skip(1)
+        .skip(min_bin)
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(k, p)| (k, *p))
         .unwrap_or((0, 0.0));

@@ -25,13 +25,14 @@ pub struct FragmentSizeAccum {
     /// Pairs observed with `|TLEN|` >= HIST_LEN.
     pub overflow: u64,
     /// Phase 4: leftmost proper-pair mates whose `|TLEN|` is shorter than
-    /// `2 * record.seq_len()` — i.e. the two reads overlap, the classic
-    /// adapter-readthrough signature on Illumina libraries. Counted on the
+    /// `record.seq_len()` — i.e. the read literally extends past the
+    /// opposite end of the fragment into adapter sequence. Counted on the
     /// same dispatch filter as the histogram so the denominator equals the
-    /// histogram total + overflow. Approximates `|TLEN| < r1.qlen + r2.qlen`
-    /// using only the leftmost mate's qlen (the mate's qlen isn't available
-    /// in this single-pass loop); for libraries where reads are equal length
-    /// the two definitions agree. Documented in the schema.
+    /// histogram total + overflow. Earlier code used `|TLEN| < 2 * qlen`,
+    /// which fires whenever the two reads merely overlap (the norm for
+    /// short cfRNA fragments) and reported ~75% on clean libraries; the
+    /// `|TLEN| < qlen` definition matches the actual adapter-contamination
+    /// regime where each read's 3' end runs into adapter bases.
     pub adapter_readthrough_pairs: u64,
 }
 
@@ -54,11 +55,11 @@ impl FragmentSizeAccum {
         } else {
             self.overflow += 1;
         }
-        // Phase 4 adapter readthrough: pair where |TLEN| < 2 * leftmost_qlen.
-        // Uses the leftmost mate's seq_len() as a proxy for r1.qlen + r2.qlen
-        // (single-pass loop never sees both mates simultaneously).
+        // Phase 4 adapter readthrough: pair where |TLEN| < leftmost_qlen,
+        // i.e. the read length exceeds the fragment so each read's 3' end
+        // extends past the opposite end of the fragment into adapter.
         let qlen = record.seq_len() as u64;
-        if qlen > 0 && (isize_abs as u64) < qlen.saturating_mul(2) {
+        if qlen > 0 && (isize_abs as u64) < qlen {
             self.adapter_readthrough_pairs += 1;
         }
     }
@@ -89,7 +90,9 @@ impl FragmentSizeAccum {
         };
 
         let count_lt_80: u64 = self.hist.iter().take(80).sum();
-        let count_gt_300: u64 = self.hist.iter().skip(301).sum::<u64>() + self.overflow;
+        // Half-open `[300, ∞)` to match the bin convention (`b300_500` = [300, 500),
+        // `gt_500` = [500, ∞)); summing those two bins reproduces this count.
+        let count_ge_300: u64 = self.hist.iter().skip(300).sum::<u64>() + self.overflow;
 
         let (mean, median) = mean_and_median(&self.hist, self.overflow, total);
         let adapter_readthrough_rate = frac(self.adapter_readthrough_pairs);
@@ -97,7 +100,7 @@ impl FragmentSizeAccum {
         FragmentSizeResult {
             bins,
             frac_lt_80: frac(count_lt_80),
-            frac_gt_300: frac(count_gt_300),
+            frac_ge_300: frac(count_ge_300),
             mean,
             median,
             total_pairs_observed: total,
@@ -168,12 +171,12 @@ fn mean_and_median(hist: &[u64], overflow: u64, total: u64) -> (f64, u64) {
 pub struct FragmentSizeResult {
     pub bins: FragmentSizeBins,
     pub frac_lt_80: f64,
-    pub frac_gt_300: f64,
+    pub frac_ge_300: f64,
     pub mean: f64,
     pub median: u64,
     pub total_pairs_observed: u64,
     /// Phase 4: pair-level adapter-readthrough rate. Defined as the fraction
-    /// of leftmost proper-pair mates with `|TLEN| < 2 * record.seq_len()`.
+    /// of leftmost proper-pair mates with `|TLEN| < record.seq_len()`.
     /// Surfaced into the envelope as a top-level scalar (see
     /// `adapter_readthrough_rate` in the schema).
     #[serde(skip)]
@@ -330,7 +333,7 @@ mod tests {
         let result = accum.into_result();
         assert_eq!(result.total_pairs_observed, 4);
         assert!((result.frac_lt_80 - 0.5).abs() < 1e-12);
-        assert!((result.frac_gt_300 - 0.5).abs() < 1e-12);
+        assert!((result.frac_ge_300 - 0.5).abs() < 1e-12);
     }
 
     #[test]
@@ -341,7 +344,7 @@ mod tests {
         assert_eq!(r.median, 0);
         assert_eq!(r.mean, 0.0);
         assert_eq!(r.frac_lt_80, 0.0);
-        assert_eq!(r.frac_gt_300, 0.0);
+        assert_eq!(r.frac_ge_300, 0.0);
         assert_eq!(r.bins.total(), 0);
     }
 

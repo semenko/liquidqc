@@ -63,7 +63,7 @@ fn qc_flags(env: &serde_json::Value) -> Vec<&str> {
 #[test]
 fn schema_version_bumped_to_phase4() {
     let env = run_with(&["--library-prep", "unknown"], "schema-version");
-    assert_eq!(env["schema_version"].as_str(), Some("0.4.0-stub"));
+    assert_eq!(env["schema_version"].as_str(), Some("0.5.0-stub"));
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn schema_subcommand_includes_phase2_blocks_and_flag() {
         );
     }
 
-    // Phase 4: schema_version examples should include 0.4.0-stub.
+    // Phase 4 + bug-fix pass: schema_version examples should include 0.5.0-stub.
     let version_examples: Vec<&str> = parsed["properties"]["schema_version"]["examples"]
         .as_array()
         .expect("schema_version examples missing")
@@ -189,8 +189,8 @@ fn schema_subcommand_includes_phase2_blocks_and_flag() {
         .filter_map(|v| v.as_str())
         .collect();
     assert!(
-        version_examples.contains(&"0.4.0-stub"),
-        "schema_version examples should include 0.4.0-stub; got {:?}",
+        version_examples.contains(&"0.5.0-stub"),
+        "schema_version examples should include 0.5.0-stub; got {:?}",
         version_examples
     );
 

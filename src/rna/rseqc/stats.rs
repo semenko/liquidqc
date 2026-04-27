@@ -59,10 +59,10 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         .with_context(|| format!("Failed to create stats file: {}", output_path.display()))?;
 
     // Header comment — MultiQC detects "This file was produced by samtools stats"
-    writeln!(out, "# This file was produced by samtools stats and RustQC")?;
+    writeln!(out, "# This file was produced by samtools stats and liquidqc")?;
     writeln!(
         out,
-        "# The command line was: rustqc rna (samtools stats compatible output)"
+        "# The command line was: liquidqc rna (samtools stats compatible output)"
     )?;
 
     // Derived values

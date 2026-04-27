@@ -95,7 +95,7 @@ impl Ui {
         eprintln!();
         eprintln!(
             "  {} {}",
-            self.style_header.apply_to(format!("RustQC v{version}")),
+            self.style_header.apply_to(format!("liquidqc v{version}")),
             self.style_dim
                 .apply_to(format!("({commit}, built {build})")),
         );

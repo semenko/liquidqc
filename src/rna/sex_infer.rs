@@ -21,8 +21,18 @@ const Y_AUTOSOME_RATIO_STRONG: f64 = 1e-3;
 
 /// XIST read fraction (`xist_reads / fc_assigned`) above which the XIST
 /// signal is "strong". Females typically express XIST at ~10⁻⁴ of total
-/// assigned reads in cfRNA; males have orders-of-magnitude less.
-const XIST_FRACTION_STRONG: f64 = 1e-5;
+/// assigned reads in cfRNA; males have orders-of-magnitude less. Tuned to
+/// the female regime (10⁻⁴) — the earlier 10⁻⁵ value sat in male leakage
+/// territory and forced "ambiguous" calls on male blood samples with even
+/// a few residual XIST reads.
+const XIST_FRACTION_STRONG: f64 = 1e-4;
+
+/// RPS4Y1 read fraction above which the male signal from this gene alone
+/// is "strong". RPS4Y1 is a Y-chromosome ribosomal protein gene that is
+/// expressed in males and absent in females; its read count is an
+/// orthogonal male signal independent of total chrY mapping density (which
+/// can pick up reads on PAR / pseudoautosomal regions in females).
+const RPS4Y1_FRACTION_STRONG: f64 = 1e-5;
 
 /// Minimum total mapped reads required to attempt a confident call. Below
 /// this we report `unknown` regardless of ratios because counting noise
@@ -168,14 +178,18 @@ fn predict(
     autosome_reads: u64,
     y_ratio: f64,
     xist_fraction: f64,
-    _rps4y1_fraction: f64,
+    rps4y1_fraction: f64,
 ) -> PredictedSex {
     if autosome_reads < MIN_MAPPED_FOR_CALL {
         return PredictedSex::Unknown;
     }
-    let y_strong = y_ratio > Y_AUTOSOME_RATIO_STRONG;
-    let xist_strong = xist_fraction > XIST_FRACTION_STRONG;
-    match (y_strong, xist_strong) {
+    // Two orthogonal male signals: chrY/autosome mapping density (sensitive
+    // but pollutable by PAR mismaps) and RPS4Y1 expression (specific to
+    // male chrY transcription). Either alone suffices for a "male" call.
+    let male_strong = y_ratio > Y_AUTOSOME_RATIO_STRONG
+        || rps4y1_fraction > RPS4Y1_FRACTION_STRONG;
+    let female_strong = xist_fraction > XIST_FRACTION_STRONG;
+    match (male_strong, female_strong) {
         (true, false) => PredictedSex::Male,
         (false, true) => PredictedSex::Female,
         (true, true) => PredictedSex::Ambiguous,
