@@ -1,6 +1,68 @@
 # liquidqc Changelog
 
-## [Unreleased] — 0.1.0-bootstrap (Phase 0) — 2026-04-26
+## [Unreleased] — Phase 1 (per-sample envelope) — 2026-04-26
+
+### v1 envelope wiring
+
+- The canonical per-sample output is now `<sample_id>.liquidqc.json`,
+  written into `--outdir` for every BAM processed. The envelope follows
+  `schema/v1/liquidqc.schema.json` and embeds inherited accumulator
+  results as optional metric blocks (`bam_stat`, `infer_experiment`,
+  `read_distribution`, `read_duplication`, `junction_annotation`,
+  `junction_saturation`, `inner_distance`, `tin`, `preseq`, `qualimap`,
+  `dupradar`, `featurecounts`).
+- Added `src/envelope.rs` with `SampleEnvelope`, `Filters`, the per-tool
+  view structs, `SCHEMA_VERSION = "0.1.0-stub"`, and a builder/writer
+  pair. View structs decouple the public schema from internal struct
+  drift; each has a `from_result(...)` constructor.
+- Added `src/qc_flags.rs` (Phase 1 rule engine). Wires
+  `single_end_no_tlen`, `low_paired_fraction`, `low_mapping_rate`,
+  `high_rrna_fraction`, `tagmentation_endmotif_bias`,
+  `unstranded_endbias_unreliable`, `read_length_caps_long_fragments`,
+  `low_complexity_library`, and `high_duplication_nonbiological`.
+  `cfdna_contamination_suspected` (needs fragmentomics) and
+  `sex_swap_warning` (needs user metadata) keep their enum variants but
+  are deferred to Phases 2+ / 4+ respectively.
+- Added `src/hash.rs` (`md5_and_size`, `md5`, `md5_uncompressed`) for
+  envelope provenance fields. `bam_md5` is the BGZF bytes as on disk;
+  `gtf_md5` is the **uncompressed** bytes (gzip-transparent);
+  `reference_fasta_md5` is the file as supplied. Per-BAM hashes run in
+  parallel via rayon before per-BAM processing.
+- Added `src/runtime_stats.rs` (`peak_rss_mb`) using `getrusage` with
+  Linux/macOS unit-handling. Reported value is process-level — every
+  per-sample envelope in a multi-BAM run sees the same final
+  high-water mark.
+- Refactored `write_rseqc_outputs` to bubble out every accumulator
+  result via an extended `RseqcOutputs` struct so the envelope writer
+  can read them. No external behavior change for inherited TSV/text/PNG
+  outputs.
+
+### Removed (Phase 0 → Phase 1, breaking)
+
+- The legacy per-run `liquidqc_summary.json` writer and the
+  `--json-summary` / `RUSTQC_JSON_SUMMARY` flag. Per-sample envelopes
+  are the canonical output; no run-level manifest is emitted.
+- `tests/snapshot/empty_envelope.json` — replaced by a live-build
+  envelope check in `tests/phase0_cli.rs`.
+- `src/summary.rs` (RunSummary / InputSummary / CountingSummary /
+  DupradarSummary / OutputFile structs) — superseded by `src/envelope.rs`.
+
+### Tests
+
+- Added `tests/phase1_envelope.rs` with smoke tests for envelope shape,
+  QC-flag wiring, and metric-block presence on the inherited test BAM.
+- `tests/phase0_cli.rs::live_envelope_satisfies_schema_required_fields`
+  replaces the static fixture-based check.
+- All inherited R-parity tests (`tests/integration_test.rs`) continue
+  to pass byte-for-byte.
+
+### Build
+
+- Added direct `md-5 = "0.10"` and `libc = "0.2"` dependencies. Enabled
+  the `serde` feature on `indexmap` so biotype-keyed maps serialize
+  cleanly.
+
+## [0.1.0-bootstrap (Phase 0)] — 2026-04-26
 
 ### Project
 

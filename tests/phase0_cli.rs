@@ -102,11 +102,48 @@ fn schema_subcommand_emits_valid_json() {
 }
 
 #[test]
-fn empty_envelope_fixture_satisfies_schema_required_fields() {
-    // Sanity: tests/snapshot/empty_envelope.json should mention every field
-    // the schema marks as required. Full JSON-schema validation (with a
-    // Draft 2020-12 validator crate) is intentionally deferred — adding a
-    // new dev-dependency for one test isn't worth it in Phase 0.
+fn live_envelope_satisfies_schema_required_fields() {
+    // Phase 1 replaces the static fixture check with a live-build assertion:
+    // run the binary against tests/data, then verify the produced envelope
+    // contains every field the schema marks as required. This eliminates the
+    // drift risk a hand-edited fixture would have.
+    let outdir = std::env::temp_dir().join(format!(
+        "liquidqc-phase0-live-envelope-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&outdir);
+    std::fs::create_dir_all(&outdir).unwrap();
+
+    let out = Command::new(binary())
+        .args([
+            "rna",
+            "tests/data/test.bam",
+            "--gtf",
+            "tests/data/test.gtf",
+            "--outdir",
+            outdir.to_str().unwrap(),
+            "--library-prep",
+            "unknown",
+            "--skip-dup-check",
+        ])
+        .output()
+        .expect("Failed to execute liquidqc rna");
+    assert!(
+        out.status.success(),
+        "liquidqc rna failed: status={:?}, stderr={}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let envelope_path = outdir.join("test.liquidqc.json");
+    let envelope_text = std::fs::read_to_string(&envelope_path)
+        .unwrap_or_else(|e| panic!("envelope not found at {envelope_path:?}: {e}"));
+    let envelope: serde_json::Value =
+        serde_json::from_str(&envelope_text).expect("envelope is not valid JSON");
+    let envelope_obj = envelope
+        .as_object()
+        .expect("envelope must be a JSON object");
+
     let schema_text =
         std::fs::read_to_string("schema/v1/liquidqc.schema.json").expect("Schema file missing");
     let schema: serde_json::Value =
@@ -119,18 +156,10 @@ fn empty_envelope_fixture_satisfies_schema_required_fields() {
         .filter_map(|v| v.as_str())
         .collect();
 
-    let envelope_text = std::fs::read_to_string("tests/snapshot/empty_envelope.json")
-        .expect("empty_envelope.json fixture missing");
-    let envelope: serde_json::Value =
-        serde_json::from_str(&envelope_text).expect("empty_envelope.json is not valid JSON");
-    let envelope_obj = envelope
-        .as_object()
-        .expect("empty_envelope.json must be a JSON object");
-
     for field in required {
         assert!(
             envelope_obj.contains_key(field),
-            "tests/snapshot/empty_envelope.json missing required field `{field}`"
+            "envelope missing schema-required field `{field}` (file: {envelope_path:?})"
         );
     }
 }

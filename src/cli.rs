@@ -157,10 +157,6 @@ pub struct RnaArgs {
     #[arg(short, long, value_name = "CONFIG", help_heading = "Input / Output")]
     pub config: Option<String>,
 
-    /// JSON summary path (use "-" for stdout)
-    #[arg(short = 'j', long = "json-summary", value_name = "PATH", num_args = 0..=1, default_missing_value = "", env = "RUSTQC_JSON_SUMMARY", help_heading = "Input / Output")]
-    pub json_summary: Option<String>,
-
     // ── Library ─────────────────────────────────────────────────────────
     /// Strandedness: unstranded, forward, reverse
     #[arg(

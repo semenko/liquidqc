@@ -18,10 +18,13 @@ mod citations;
 mod cli;
 mod config;
 mod cpu;
+mod envelope;
 mod gtf;
+mod hash;
 mod io;
+mod qc_flags;
 mod rna;
-mod summary;
+mod runtime_stats;
 mod ui;
 
 use anyhow::{ensure, Context, Result};
@@ -30,48 +33,13 @@ use log::debug;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use ui::{format_count, format_duration, format_pct, Ui, Verbosity};
 
 use rust_htslib::bam::Read as BamRead;
 
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
-
-/// Common BAM filename suffixes added by alignment and duplicate-marking tools.
-///
-/// Return the current UTC time formatted as ISO-8601 (e.g. `2026-03-07T12:34:56Z`).
-///
-/// Uses only `std::time` — no external chrono dependency.
-fn format_utc_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    // Convert epoch seconds to a UTC date-time the hard way.
-    let days = (secs / 86400) as i64;
-    let time_of_day = secs % 86400;
-    let hh = time_of_day / 3600;
-    let mm = (time_of_day % 3600) / 60;
-    let ss = time_of_day % 60;
-
-    // Days since 1970-01-01 → (year, month, day) using the civil-from-days algorithm.
-    // Ref: Howard Hinnant, chrono-Compatible Low-Level Date Algorithms
-    // <http://howardhinnant.github.io/date_algorithms.html>
-    let z = days + 719468;
-    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, hh, mm, ss)
-}
 
 fn main() -> Result<()> {
     // Guard against running a SIMD-optimized binary on incompatible hardware.
@@ -310,10 +278,32 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     }
 
     let start = Instant::now();
-    let start_time = format_utc_now();
     let n_bams = args.input.len();
 
-    // --sample-name (or config sample_name) only makes sense for a single BAM
+    // Hash inputs for the v1 envelope provenance fields. GTF + FASTA hash
+    // once and are shared across all BAMs; per-BAM MD5s are computed in
+    // parallel before per-BAM processing starts.
+    let gtf_md5 =
+        hash::md5_uncompressed(&args.gtf).with_context(|| format!("hashing GTF: {}", args.gtf))?;
+    let gtf_path_abs = absolutize(&args.gtf);
+    let reference_fasta_md5 = match args.reference {
+        Some(ref p) => {
+            Some(hash::md5(p).with_context(|| format!("hashing reference FASTA: {}", p))?)
+        }
+        None => None,
+    };
+    let bam_hashes: HashMap<String, (String, u64)> = args
+        .input
+        .par_iter()
+        .map(|p| {
+            hash::md5_and_size(p)
+                .map(|h| (p.clone(), h))
+                .with_context(|| format!("hashing BAM: {}", p))
+        })
+        .collect::<Result<_>>()?;
+
+    // --sample-name / --sample-id / config sample_name only make sense for a
+    // single BAM — using them with multi-BAM would collide output filenames.
     let effective_sample_name = args
         .sample_name
         .as_deref()
@@ -329,9 +319,13 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
              (would produce identical output filenames)"
         );
     }
+    if n_bams > 1 && args.sample_id.is_some() {
+        anyhow::bail!(
+            "--sample-id cannot be used with multiple input files \
+             (would produce identical envelope filenames)"
+        );
+    }
 
-    let cpu_target = cpu::binary_target();
-    let cpu_features = cpu::detected_features();
     let cpu_info = cpu::cpu_info_line();
     ui.header(
         env!("CARGO_PKG_VERSION"),
@@ -606,6 +600,12 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
         gtf_path: &args.gtf,
+        gtf_path_abs: &gtf_path_abs,
+        gtf_md5: &gtf_md5,
+        reference_fasta_md5: reference_fasta_md5.as_deref(),
+        bam_hashes: &bam_hashes,
+        library_prep: &args.library_prep,
+        sample_id_override: args.sample_id.as_deref(),
         sample_name_override: effective_sample_name,
     };
 
@@ -636,28 +636,12 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         })
     };
 
-    // Collect results for summary
+    // Collect results
     let mut n_err = 0;
-    let mut input_summaries: Vec<summary::InputSummary> = Vec::new();
-
     for (bam_path, result) in &bam_results {
-        match result {
-            Ok(bam_result) => {
-                input_summaries.push(bam_result.to_input_summary(bam_path));
-            }
-            Err(e) => {
-                n_err += 1;
-                ui.error(&format!("Failed to process {}: {:#}", bam_path, e));
-                input_summaries.push(summary::InputSummary {
-                    bam_file: bam_path.clone(),
-                    status: "failed".to_string(),
-                    error: Some(format!("{:#}", e)),
-                    runtime_seconds: 0.0,
-                    counting: None,
-                    dupradar: None,
-                    outputs: vec![],
-                });
-            }
+        if let Err(e) = result {
+            n_err += 1;
+            ui.error(&format!("Failed to process {}: {:#}", bam_path, e));
         }
     }
 
@@ -689,36 +673,6 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     }
 
     let elapsed = start.elapsed();
-    let end_time = format_utc_now();
-
-    // Write JSON summary if requested
-    if let Some(ref json_path) = args.json_summary {
-        let run_summary = summary::RunSummary {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            commit: env!("GIT_SHORT_HASH").to_string(),
-            binary_target: cpu_target.to_string(),
-            cpu_features: cpu_features.iter().map(|s| s.to_string()).collect(),
-            timestamp_start: start_time.clone(),
-            timestamp_end: end_time.clone(),
-            runtime_seconds: elapsed.as_secs_f64(),
-            inputs: input_summaries,
-        };
-        let json = serde_json::to_string_pretty(&run_summary)
-            .context("Failed to serialize JSON summary")?;
-        if json_path == "-" {
-            println!("{json}");
-            ui.detail("JSON summary written to stdout");
-        } else {
-            let path = if json_path.is_empty() {
-                outdir.join("liquidqc_summary.json")
-            } else {
-                Path::new(json_path).to_path_buf()
-            };
-            std::fs::write(&path, &json)
-                .with_context(|| format!("Failed to write JSON summary to {}", path.display()))?;
-            ui.output_item("JSON summary", &path.display().to_string());
-        }
-    }
 
     // Write citations file
     let citations_path = outdir.join("CITATIONS.md");
@@ -852,103 +806,38 @@ struct SharedParams<'a> {
     tin_min_coverage: u32,
     /// Path to GTF file (for Qualimap report output).
     gtf_path: &'a str,
+    /// Absolute GTF path string for the envelope (computed once in `run_rna`).
+    gtf_path_abs: &'a str,
+    /// MD5 of the (uncompressed) GTF bytes — schema-required envelope field.
+    gtf_md5: &'a str,
+    /// MD5 of the reference FASTA file as supplied, or `None` if no
+    /// `--reference` was provided.
+    reference_fasta_md5: Option<&'a str>,
+    /// Per-BAM (md5, size_bytes) keyed by the path string passed on the CLI.
+    bam_hashes: &'a HashMap<String, (String, u64)>,
+    /// `--library-prep` value (required, never silently defaulted).
+    library_prep: &'a str,
+    /// Optional `--sample-id` override (single-BAM only); otherwise
+    /// `sample_name_override` and BAM stem are used.
+    sample_id_override: Option<&'a str>,
 }
 
 // ============================================================================
 // Per-BAM result
 // ============================================================================
 
-/// Collected results from processing a single BAM file, used for the summary
-/// box display and JSON output.
-#[derive(Debug, Default)]
+/// Per-BAM result returned from `process_single_bam`.
+///
+/// Carries only the fields used by the run-level loop (timing for the
+/// summary box, infer_experiment result for the strandedness-mismatch
+/// warning). The canonical per-sample output is the `<sample_id>.liquidqc.json`
+/// envelope written from inside `process_single_bam`.
+#[derive(Debug)]
 struct BamResult {
     /// Wall-clock processing time.
     duration: std::time::Duration,
-    /// Total reads in the BAM.
-    total_reads: u64,
-    /// Total fragments (pairs or single reads).
-    total_fragments: u64,
-    /// Mapped reads.
-    mapped_reads: u64,
-    /// Fragments assigned to a gene.
-    assigned: u64,
-    /// Fragments with no overlapping gene.
-    no_features: u64,
-    /// Fragments overlapping multiple genes.
-    ambiguous: u64,
-    /// Duplicate-flagged reads.
-    duplicates: u64,
-    /// Multimapping reads.
-    multimappers: u64,
-    /// dupRadar fit intercept (if available).
-    dupradar_intercept: Option<f64>,
-    /// dupRadar fit slope (if available).
-    dupradar_slope: Option<f64>,
-    /// dupRadar gene stats.
-    dupradar_total_genes: u64,
-    /// Genes with reads.
-    dupradar_genes_with_reads: u64,
-    /// Genes with duplicates.
-    dupradar_genes_with_dups: u64,
-    /// Output files written (tool, path).
-    outputs: Vec<(String, String)>,
     /// infer_experiment result (if the tool was enabled).
     infer_experiment: Option<rna::rseqc::infer_experiment::InferExperimentResult>,
-}
-
-impl BamResult {
-    /// Convert to a JSON-serializable InputSummary.
-    fn to_input_summary(&self, bam_path: &str) -> summary::InputSummary {
-        let counting = Some(summary::CountingSummary {
-            total_reads: self.total_reads,
-            mapped_reads: self.mapped_reads,
-            fragments: self.total_fragments,
-            assigned: self.assigned,
-            no_features: self.no_features,
-            ambiguous: self.ambiguous,
-            duplicates: self.duplicates,
-            multimappers: self.multimappers,
-            assigned_pct: if self.total_fragments > 0 {
-                self.assigned as f64 / self.total_fragments as f64 * 100.0
-            } else {
-                0.0
-            },
-            duplicate_pct: if self.mapped_reads > 0 {
-                self.duplicates as f64 / self.mapped_reads as f64 * 100.0
-            } else {
-                0.0
-            },
-        });
-
-        let dupradar = if self.dupradar_total_genes > 0 {
-            Some(summary::DupradarSummary {
-                total_genes: self.dupradar_total_genes,
-                genes_with_reads: self.dupradar_genes_with_reads,
-                genes_with_duplication: self.dupradar_genes_with_dups,
-                intercept: self.dupradar_intercept,
-                slope: self.dupradar_slope,
-            })
-        } else {
-            None
-        };
-
-        summary::InputSummary {
-            bam_file: bam_path.to_string(),
-            status: "success".to_string(),
-            error: None,
-            runtime_seconds: self.duration.as_secs_f64(),
-            counting,
-            dupradar,
-            outputs: self
-                .outputs
-                .iter()
-                .map(|(tool, path)| summary::OutputFile {
-                    tool: tool.clone(),
-                    path: path.clone(),
-                })
-                .collect(),
-        }
-    }
 }
 
 // ============================================================================
@@ -979,8 +868,11 @@ fn process_single_bam(
         .context("Input path has no filename")?
         .to_str()
         .context("Input filename is not valid UTF-8")?;
+    // sample_id resolution: --sample-id wins, then --sample-name (inherited),
+    // then BAM stem with QC suffixes stripped.
     let sample_name = params
-        .sample_name_override
+        .sample_id_override
+        .or(params.sample_name_override)
         .map(|s| s.to_string())
         .unwrap_or_else(|| bam_stem.to_string());
 
@@ -1244,9 +1136,7 @@ fn process_single_bam(
     }
 
     // === dupRadar outputs ===
-    let mut dupradar_intercept: Option<f64> = None;
-    let mut dupradar_slope: Option<f64> = None;
-    let mut dupradar_total_genes: u64 = 0;
+    let mut dupradar_fit: Option<rna::dupradar::fitting::FitResult> = None;
     let mut dupradar_genes_with_reads: u64 = 0;
     let mut dupradar_genes_with_dups: u64 = 0;
 
@@ -1260,7 +1150,6 @@ fn process_single_bam(
         let dup_matrix = rna::dupradar::dupmatrix::DupMatrix::build(genes, &count_result);
 
         let stats = dup_matrix.get_stats();
-        dupradar_total_genes = stats.n_regions as u64;
         dupradar_genes_with_reads = stats.n_regions_covered as u64;
         dupradar_genes_with_dups = stats.n_regions_duplication as u64;
 
@@ -1278,36 +1167,31 @@ fn process_single_bam(
             || config.dupradar.multiqc_intercept
             || config.dupradar.multiqc_curve;
 
-        let fit_ok = if need_fit {
+        if need_fit {
             let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
             let dup_rate_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.dup_rate).collect();
 
-            let fit_result = rna::dupradar::fitting::duprate_exp_fit(&rpk_values, &dup_rate_values);
-            match &fit_result {
+            match rna::dupradar::fitting::duprate_exp_fit(&rpk_values, &dup_rate_values) {
                 Ok(fit) => {
-                    dupradar_intercept = Some(fit.intercept);
-                    dupradar_slope = Some(fit.slope);
                     ui.output_detail(&format!(
                         "Model fit: intercept={:.6}, slope={:.6}",
                         fit.intercept, fit.slope
                     ));
                     if config.dupradar.intercept_slope {
                         let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", sample_name));
-                        rna::dupradar::plots::write_intercept_slope(fit, &sample_name, &fit_path)?;
+                        rna::dupradar::plots::write_intercept_slope(&fit, &sample_name, &fit_path)?;
                         let p = fit_path.display().to_string();
                         ui.output_detail(&format!("Fit results: {p}"));
                         written_outputs.push(("dupRadar fit".into(), p));
                     }
-                    Some(fit.clone())
+                    dupradar_fit = Some(fit);
                 }
                 Err(e) => {
                     ui.warn(&format!("Could not fit dupRadar model: {}", e));
-                    None
                 }
             }
-        } else {
-            None
-        };
+        }
+        let fit_ok = dupradar_fit.as_ref();
 
         // Generate plots (in parallel — all plots read shared immutable data)
         let any_plot = config.dupradar.density_scatter_plot
@@ -1316,7 +1200,7 @@ fn process_single_bam(
 
         if any_plot {
             let rpkm_threshold = 0.5;
-            let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
+            let rpkm_threshold_rpk = fit_ok.and_then(|_fit| {
                 let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
                 let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
                 rna::dupradar::fitting::compute_rpkm_threshold_rpk(
@@ -1334,7 +1218,7 @@ fn process_single_bam(
             std::thread::scope(|s| -> Result<()> {
                 // Density scatter plot (only if fit succeeded and enabled)
                 let density_handle = if config.dupradar.density_scatter_plot {
-                    fit_ok.as_ref().map(|fit| {
+                    fit_ok.map(|fit| {
                         let dm_ref = &dup_matrix;
                         let thresh = rpkm_threshold_rpk;
                         let path = &density_path;
@@ -1400,7 +1284,7 @@ fn process_single_bam(
         }
 
         // Write MultiQC-compatible output files
-        if let Some(ref fit) = fit_ok {
+        if let Some(fit) = fit_ok {
             if config.dupradar.multiqc_intercept {
                 let mqc_intercept_path =
                     dr_dir.join(format!("{}_dup_intercept_mqc.txt", sample_name));
@@ -1429,10 +1313,10 @@ fn process_single_bam(
             format_count(stats.n_regions as u64),
             format_count(stats.n_regions_covered as u64),
         ));
-        if let (Some(intercept), Some(slope)) = (dupradar_intercept, dupradar_slope) {
+        if let Some(fit) = fit_ok {
             ui.output_detail(&format!(
                 "Model fit: intercept={:.6}, slope={:.6}",
-                intercept, slope,
+                fit.intercept, fit.slope,
             ));
         }
     }
@@ -1486,26 +1370,79 @@ fn process_single_bam(
     written_outputs.extend(rseqc_outputs.written);
 
     let bam_duration = bam_start.elapsed();
+
+    // === v1 envelope (canonical per-sample output) ===
+    let (bam_md5, bam_size_bytes) = params
+        .bam_hashes
+        .get(bam_path)
+        .cloned()
+        .with_context(|| format!("internal: missing precomputed BAM hash for {bam_path}"))?;
+    let bam_path_abs = absolutize(bam_path);
+    let biotype_counts = rna::featurecounts::output::aggregate_biotype_counts(&count_result);
+    let biotype_rrna_count = biotype_counts.get("rRNA").copied().unwrap_or(0);
+
+    let qc_flags_vec = qc_flags::evaluate(&qc_flags::QcContext {
+        paired_end: params.paired,
+        strandedness: params.stranded,
+        library_prep: params.library_prep,
+        bam_stat: rseqc_outputs.bam_stat.as_ref(),
+        count_result: Some(&count_result),
+        preseq: rseqc_outputs.preseq.as_ref(),
+        dupradar_fit: dupradar_fit.as_ref(),
+        dupradar_genes_with_reads,
+        featurecounts_biotype_rrna: biotype_rrna_count,
+    });
+
+    let envelope_value = envelope::build(envelope::BuildInputs {
+        extractor_version: env!("CARGO_PKG_VERSION"),
+        git_commit: env!("GIT_SHORT_HASH"),
+        sample_id: &sample_name,
+        bam_path: &bam_path_abs,
+        bam_md5: &bam_md5,
+        bam_size_bytes,
+        gtf_path: params.gtf_path_abs,
+        gtf_md5: params.gtf_md5,
+        reference_fasta_md5: params.reference_fasta_md5,
+        library_prep: params.library_prep,
+        paired_end: params.paired,
+        strandedness: params.stranded,
+        filters: envelope::Filters::from_mapq(params.mapq_cut),
+        runtime_seconds: bam_duration.as_secs_f64(),
+        peak_rss_mb: runtime_stats::peak_rss_mb(),
+        qc_flags: qc_flags_vec,
+        bam_stat: rseqc_outputs.bam_stat.as_ref(),
+        infer_experiment: rseqc_outputs.infer_experiment.as_ref(),
+        read_distribution: rseqc_outputs.read_distribution.as_ref(),
+        read_duplication: rseqc_outputs.read_duplication.as_ref(),
+        junction_annotation: rseqc_outputs.junction_annotation.as_ref(),
+        junction_saturation: rseqc_outputs.junction_saturation.as_ref(),
+        inner_distance: rseqc_outputs.inner_distance.as_ref(),
+        tin: rseqc_outputs.tin.as_ref(),
+        preseq: rseqc_outputs.preseq.as_ref(),
+        qualimap: count_result.qualimap.as_ref(),
+        count_result: Some(&count_result),
+        dupradar_fit: dupradar_fit.as_ref(),
+        dupradar_genes_with_reads,
+        dupradar_genes_with_duplication: dupradar_genes_with_dups,
+    });
+    let envelope_path = outdir.join(format!("{sample_name}.liquidqc.json"));
+    envelope::write(&envelope_value, &envelope_path)?;
+    ui.output_item("envelope", &envelope_path.display().to_string());
+
     ui.finish(bam_stem, bam_duration);
 
     Ok(BamResult {
         duration: bam_duration,
-        total_reads: count_result.stat_total_reads,
-        total_fragments: count_result.stat_total_fragments,
-        mapped_reads: total_mapped,
-        assigned: count_result.stat_assigned,
-        no_features: count_result.stat_no_features,
-        ambiguous: count_result.stat_ambiguous,
-        duplicates: total_dup,
-        multimappers: count_result.fc_multimapping,
-        dupradar_intercept,
-        dupradar_slope,
-        dupradar_total_genes,
-        dupradar_genes_with_reads,
-        dupradar_genes_with_dups,
-        outputs: written_outputs,
         infer_experiment: rseqc_outputs.infer_experiment,
     })
+}
+
+/// Convert a possibly-relative path string into an absolute string without
+/// resolving symlinks (so `/private/var/...` doesn't surface on macOS).
+fn absolutize(path: &str) -> String {
+    std::path::absolute(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string())
 }
 
 // ============================================================================
@@ -1513,12 +1450,22 @@ fn process_single_bam(
 // ============================================================================
 
 /// Results returned from `write_rseqc_outputs`, bundling output file paths
-/// with the optional infer_experiment result for downstream strandedness checks.
+/// with the per-tool result structs needed for the v1 envelope and downstream
+/// checks (e.g. strandedness mismatch).
 struct RseqcOutputs {
     /// Output files written (tool, path).
     written: Vec<(String, String)>,
+    /// bam_stat result (also feeds samtools-equivalent outputs above).
+    bam_stat: Option<rna::rseqc::bam_stat::BamStatResult>,
     /// infer_experiment result, if the tool was enabled and produced data.
     infer_experiment: Option<rna::rseqc::infer_experiment::InferExperimentResult>,
+    read_distribution: Option<rna::rseqc::read_distribution::ReadDistributionResult>,
+    read_duplication: Option<rna::rseqc::read_duplication::ReadDuplicationResult>,
+    junction_annotation: Option<rna::rseqc::junction_annotation::JunctionResults>,
+    junction_saturation: Option<rna::rseqc::junction_saturation::SaturationResult>,
+    inner_distance: Option<rna::rseqc::inner_distance::InnerDistanceResult>,
+    tin: Option<rna::rseqc::tin::TinResults>,
+    preseq: Option<rna::preseq::PreseqResult>,
 }
 
 /// Write all RSeQC outputs from the single-pass accumulators.
@@ -1538,6 +1485,18 @@ fn write_rseqc_outputs(
     let mut written: Vec<(String, String)> = Vec::new();
     let mut infer_experiment_result: Option<rna::rseqc::infer_experiment::InferExperimentResult> =
         None;
+    let mut read_distribution_result: Option<
+        rna::rseqc::read_distribution::ReadDistributionResult,
+    > = None;
+    let mut read_duplication_result: Option<rna::rseqc::read_duplication::ReadDuplicationResult> =
+        None;
+    let mut junction_annotation_result: Option<rna::rseqc::junction_annotation::JunctionResults> =
+        None;
+    let mut junction_saturation_result: Option<rna::rseqc::junction_saturation::SaturationResult> =
+        None;
+    let mut inner_distance_result: Option<rna::rseqc::inner_distance::InnerDistanceResult> = None;
+    let mut tin_result: Option<rna::rseqc::tin::TinResults> = None;
+    let mut preseq_result: Option<rna::preseq::PreseqResult> = None;
 
     // Build tool-specific output directories: nested subdirectories by default, flat if requested
     let flat = params.flat_output;
@@ -1667,6 +1626,7 @@ fn write_rseqc_outputs(
         let p = rseqc_read_dup_dir.display().to_string();
         ui.output_item("read_duplication", &format!("{p}/{sample_name}.*"));
         written.push(("read_duplication".into(), p));
+        read_duplication_result = Some(result);
     }
 
     // --- infer_experiment ---
@@ -1704,6 +1664,7 @@ fn write_rseqc_outputs(
             format_count(result.total_tags - result.unassigned_tags),
         ));
         written.push(("read_distribution".into(), p));
+        read_distribution_result = Some(result);
     }
 
     // --- junction_annotation ---
@@ -1746,6 +1707,7 @@ fn write_rseqc_outputs(
         let p = rseqc_junc_annot_dir.display().to_string();
         ui.output_item("junction_annotation", &format!("{p}/{sample_name}.*"));
         written.push(("junction_annotation".into(), p));
+        junction_annotation_result = Some(results);
     }
 
     // --- junction_saturation ---
@@ -1779,6 +1741,7 @@ fn write_rseqc_outputs(
         let p = rseqc_junc_sat_dir.display().to_string();
         ui.output_item("junction_saturation", &format!("{p}/{sample_name}.*"));
         written.push(("junction_saturation".into(), p));
+        junction_saturation_result = Some(results);
     }
 
     // --- inner_distance ---
@@ -1832,6 +1795,7 @@ fn write_rseqc_outputs(
             format_count(results.total_pairs),
         ));
         written.push(("inner_distance".into(), p));
+        inner_distance_result = Some(results);
     }
 
     // --- TIN ---
@@ -1864,6 +1828,7 @@ fn write_rseqc_outputs(
             format_count(results.len() as u64)
         ));
         written.push(("TIN".into(), p));
+        tin_result = Some(results);
     }
 
     // --- preseq (library complexity) ---
@@ -1901,6 +1866,7 @@ fn write_rseqc_outputs(
                 ui.output_item("preseq", &p);
                 ui.output_detail(&format!("{} extrapolation points", result.curve.len(),));
                 written.push(("preseq".into(), p));
+                preseq_result = Some(result);
             }
             Err(e) => {
                 ui.warn(&format!("preseq: skipped — {}", e));
@@ -1910,6 +1876,14 @@ fn write_rseqc_outputs(
 
     Ok(RseqcOutputs {
         written,
+        bam_stat: bam_stat_result,
         infer_experiment: infer_experiment_result,
+        read_distribution: read_distribution_result,
+        read_duplication: read_duplication_result,
+        junction_annotation: junction_annotation_result,
+        junction_saturation: junction_saturation_result,
+        inner_distance: inner_distance_result,
+        tin: tin_result,
+        preseq: preseq_result,
     })
 }

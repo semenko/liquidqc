@@ -168,10 +168,19 @@ the `rna:` section as `flat_output: true`.
 
 **Default:** `false` (nested subdirectories)
 
-#### `-j, --json-summary [<PATH>]`
+#### Per-sample envelope output
 
-Write a JSON summary of all QC results to the specified path. If no path is
-given, the summary is written to stdout. Use `"-"` explicitly for stdout.
+Every BAM produces a canonical per-sample JSON envelope at
+`<outdir>/<sample_id>.liquidqc.json` matching `schema/v1/liquidqc.schema.json`.
+The envelope contains the schema-required provenance fields
+(`extractor_version`, `schema_version`, `git_commit`, BAM/GTF/FASTA MD5s,
+`library_prep`, paired/strandedness/read-length summaries, applied filters,
+runtime + peak RSS, auto-computed `qc_flags`) plus optional metric blocks
+for each tool that ran (`bam_stat`, `read_distribution`, `inner_distance`,
+`junction_annotation`, `dupradar`, `featurecounts`, etc.).
+
+Resolve `<sample_id>` via, in priority order:
+`--sample-id` → `--sample-name` → BAM stem (with QC suffixes stripped).
 
 #### `-c, --config <PATH>`
 

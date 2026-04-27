@@ -703,6 +703,20 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
     let mut f = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create TIN summary: {}", output_path.display()))?;
 
+    let (mean, median, stdev) = summary_stats(results);
+
+    writeln!(f, "Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)")?;
+    writeln!(f, "{}\t{}\t{}\t{}", bam_name, mean, median, stdev)?;
+
+    Ok(())
+}
+
+/// Summary statistics over transcripts that passed the coverage threshold.
+///
+/// Matches upstream RSeQC's `sample_TINs` aggregation: only `passed_threshold`
+/// transcripts contribute, and stdev uses the population variance (divide by
+/// `n`, not `n-1`).
+pub fn summary_stats(results: &TinResults) -> (f64, f64, f64) {
     let scores: Vec<f64> = results
         .transcripts
         .iter()
@@ -710,24 +724,14 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
         .map(|r| r.tin)
         .collect();
 
-    let (mean, median, stdev) = if scores.is_empty() {
-        (0.0, 0.0, 0.0)
-    } else {
-        let n = scores.len() as f64;
-        let mean = scores.iter().sum::<f64>() / n;
-
-        let median = crate::io::median(&scores);
-
-        let variance = scores.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
-        let stdev = variance.sqrt();
-
-        (mean, median, stdev)
-    };
-
-    writeln!(f, "Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)")?;
-    writeln!(f, "{}\t{}\t{}\t{}", bam_name, mean, median, stdev)?;
-
-    Ok(())
+    if scores.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let n = scores.len() as f64;
+    let mean = scores.iter().sum::<f64>() / n;
+    let median = crate::io::median(&scores);
+    let variance = scores.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+    (mean, median, variance.sqrt())
 }
 
 // ===================================================================
