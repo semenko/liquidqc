@@ -214,6 +214,7 @@ mod tests {
             rseqc: None,
             qualimap: None,
             fragmentomics: None,
+            per_gene: None,
         }
     }
 

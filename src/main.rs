@@ -607,6 +607,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         library_prep: &args.library_prep,
         sample_id_override: args.sample_id.as_deref(),
         sample_name_override: effective_sample_name,
+        min_gene_reads: args.min_gene_reads,
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -821,6 +822,9 @@ struct SharedParams<'a> {
     /// Optional `--sample-id` override (single-BAM only); otherwise
     /// `sample_name_override` and BAM stem are used.
     sample_id_override: Option<&'a str>,
+    /// Minimum primary read count for a gene to appear as a row in the
+    /// per-gene Tier-2 Parquet (`--min-gene-reads`).
+    min_gene_reads: u32,
 }
 
 // ============================================================================
@@ -953,6 +957,10 @@ fn process_single_bam(
         None
     };
 
+    // Per-gene merged-exon and intron geometry, indexed by GeneIdx. Built
+    // once per run; consumed by the per-gene Tier-2 Parquet writer.
+    let per_gene_shape_index = rna::per_gene::shape::GeneShapeIndex::build(genes);
+
     // === dupRadar counting ===
     ui.blank();
     ui.section(&format!("Processing {}", bam_path));
@@ -982,6 +990,7 @@ fn process_single_bam(
         qualimap_index.as_ref(),
         Some(&fragmentomics_config),
         params.fasta.map(std::path::Path::new),
+        Some(&per_gene_shape_index),
         Some(&pb),
     )?;
     let count_duration = count_start.elapsed();
@@ -1006,6 +1015,12 @@ fn process_single_bam(
             Some((a, b, c, d)) => (a, b, c, d),
             None => (None, None, None, None),
         };
+
+    // Apply the `--min-gene-reads` threshold and assemble per-gene Parquet rows.
+    let per_gene_output = count_result
+        .per_gene
+        .take()
+        .map(|pg| pg.finalize(params.min_gene_reads, genes, &count_result.gene_counts));
 
     // Summary stats for the box
     let total_mapped = count_result.stat_total_mapped;
@@ -1420,6 +1435,41 @@ fn process_single_bam(
         featurecounts_biotype_rrna: biotype_rrna_count,
     });
 
+    // Write the per-gene Parquet sibling and assemble its envelope block.
+    let per_gene_block = if let Some(output) = per_gene_output.as_ref() {
+        let parquet_filename = format!("{sample_name}.per_gene.parquet");
+        let parquet_path = outdir.join(&parquet_filename);
+        let strandedness_str = params.stranded.to_string();
+        let meta = rna::per_gene::PerGeneFileMeta {
+            sample_id: sample_name.clone(),
+            extractor_version: env!("CARGO_PKG_VERSION").to_string(),
+            git_commit: env!("GIT_SHORT_HASH").to_string(),
+            per_gene_schema_version: rna::per_gene::writer::PER_GENE_SCHEMA_VERSION.to_string(),
+            bam_md5: bam_md5.clone(),
+            gtf_md5: params.gtf_md5.to_string(),
+            library_prep: params.library_prep.to_string(),
+            min_gene_reads_threshold: output.min_gene_reads_threshold,
+            n_genes_total: output.n_genes_total,
+            n_genes_emitted: output.n_genes_emitted,
+            paired_end: params.paired,
+            strandedness: strandedness_str,
+        };
+        let parquet_md5 =
+            rna::per_gene::writer::write_per_gene_parquet(&output.rows, &meta, &parquet_path)?;
+        ui.output_item("per_gene_parquet", &parquet_path.display().to_string());
+        Some(envelope::PerGeneBlock {
+            parquet_path: parquet_filename,
+            parquet_md5,
+            n_genes_total: output.n_genes_total,
+            n_genes_emitted: output.n_genes_emitted,
+            min_gene_reads_threshold: output.min_gene_reads_threshold,
+            schema_version_per_gene: rna::per_gene::writer::PER_GENE_SCHEMA_VERSION.to_string(),
+            columns: rna::per_gene::column_names(),
+        })
+    } else {
+        None
+    };
+
     let envelope_value = envelope::build(envelope::BuildInputs {
         extractor_version: env!("CARGO_PKG_VERSION"),
         git_commit: env!("GIT_SHORT_HASH"),
@@ -1456,6 +1506,7 @@ fn process_single_bam(
         soft_clips: soft_clips_result.as_ref(),
         periodicity: periodicity_result.as_ref(),
         fasta_provided: params.fasta.is_some(),
+        per_gene: per_gene_block.as_ref(),
     });
     let envelope_path = outdir.join(format!("{sample_name}.liquidqc.json"));
     envelope::write(&envelope_value, &envelope_path)?;

@@ -40,7 +40,7 @@ use crate::rna::rseqc::tin::TinResults;
 ///
 /// Must equal the `schema_version` example string in
 /// `schema/v1/liquidqc.schema.json`. Bump together when the wire format changes.
-pub const SCHEMA_VERSION: &str = "0.2.0-stub";
+pub const SCHEMA_VERSION: &str = "0.3.0-stub";
 
 /// QC flag identifiers (must match the `qc_flags` enum in
 /// `schema/v1/liquidqc.schema.json`). Phase 2 sets the four below; later
@@ -117,6 +117,36 @@ pub struct SampleEnvelope {
     pub soft_clips: Option<SoftClipsBlock>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub periodicity: Option<PeriodicityBlock>,
+
+    // ---- Per-gene Tier-2 reference ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_gene: Option<PerGeneBlock>,
+}
+
+/// Reference to the per-gene Tier-2 sparse Parquet sibling file.
+///
+/// The Parquet itself is the canonical output for Tier-2 (one row per
+/// gene that passes `--min-gene-reads`); this block embeds discovery
+/// metadata (path, md5, row counts, threshold, schema version, columns)
+/// so consumers can validate and locate it without opening the file.
+#[derive(Debug, Clone, Serialize)]
+pub struct PerGeneBlock {
+    /// Filename (no directory component) of the per-gene Parquet, located
+    /// next to the JSON envelope.
+    pub parquet_path: String,
+    /// md5 hex digest of the Parquet file bytes.
+    pub parquet_md5: String,
+    /// Total genes considered (from the GTF).
+    pub n_genes_total: u64,
+    /// Genes that passed `--min-gene-reads` and are represented as Parquet rows.
+    pub n_genes_emitted: u64,
+    /// Threshold applied (`--min-gene-reads`).
+    pub min_gene_reads_threshold: u32,
+    /// Per-gene table schema version (independent of the envelope's
+    /// `schema_version`).
+    pub schema_version_per_gene: String,
+    /// Column names in declaration order.
+    pub columns: Vec<String>,
 }
 
 /// Filters applied to the BAM read stream before metric computation.
@@ -770,6 +800,9 @@ pub struct BuildInputs<'a> {
     /// True iff `--fasta` was provided on the CLI. Used to emit the
     /// `end_motifs_skipped_no_fasta` qc_flag when `false`.
     pub fasta_provided: bool,
+
+    // ---- Per-gene Tier-2 reference ----
+    pub per_gene: Option<&'a PerGeneBlock>,
 }
 
 /// Build a [`SampleEnvelope`] from collected accumulator results.
@@ -872,6 +905,7 @@ pub fn build(inputs: BuildInputs<'_>) -> SampleEnvelope {
         end_motifs: inputs.end_motifs.map(EndMotifsBlock::from_result),
         soft_clips: inputs.soft_clips.map(SoftClipsBlock::from_result),
         periodicity: inputs.periodicity.map(PeriodicityBlock::from_result),
+        per_gene: inputs.per_gene.cloned(),
     }
 }
 
@@ -950,6 +984,7 @@ mod tests {
             end_motifs: None,
             soft_clips: None,
             periodicity: None,
+            per_gene: None,
         };
         let v: serde_json::Value = serde_json::to_value(&env).unwrap();
         let schema_text = include_str!("../schema/v1/liquidqc.schema.json");

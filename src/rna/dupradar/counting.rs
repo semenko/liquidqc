@@ -11,7 +11,9 @@
 
 use crate::cli::Strandedness;
 use crate::gtf::Gene;
-use crate::rna::fragmentomics::{FragmentomicsAccumulators, FragmentomicsConfig};
+use crate::rna::fragmentomics::{EndMotifAccum, FragmentomicsAccumulators, FragmentomicsConfig};
+use crate::rna::per_gene::shape::GeneShapeIndex;
+use crate::rna::per_gene::PerGeneAccumulator;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 use crate::ui::format_count;
@@ -304,6 +306,10 @@ pub struct CountResult {
     /// Phase 2 Tier 1 fragmentomics accumulators, merged across workers.
     /// `None` when fragmentomics was disabled at run time.
     pub fragmentomics: Option<FragmentomicsAccumulators>,
+
+    /// Per-gene Tier-2 accumulator, merged across workers. `None` when
+    /// per-gene output was disabled at run time.
+    pub per_gene: Option<PerGeneAccumulator>,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -467,6 +473,119 @@ struct MateInfo {
     /// Whether this read is read1 (FLAG 0x40) — used to prevent false pairing
     /// of secondary alignments at the same position as the primary.
     is_read1: bool,
+    /// Aligned (M/=/X) blocks from this mate's CIGAR, in 0-based half-open
+    /// reference coords. Empty when per-gene Tier-2 dispatch is disabled.
+    aligned_blocks: Vec<(u64, u64)>,
+    /// Strand-corrected presence of soft clips at the read's 5' end.
+    softclip_5p: bool,
+    /// Strand-corrected presence of soft clips at the read's 3' end.
+    softclip_3p: bool,
+    /// Whether this primary mate passed the filters that gate
+    /// `primary_reads` accumulation in per-gene state. Mirrors the
+    /// `is_primary_mapped` predicate from `fragmentomics::common`.
+    is_primary_mapped: bool,
+    /// TLEN + end-positions iff this mate is the leftmost-proper-pair
+    /// mate (`fragmentomics::common::is_leftmost_proper_pair_mate`). At most
+    /// one of the two mates carries this; cross-chromosome pairs never do.
+    leftmost_meta: Option<LeftmostMeta>,
+}
+
+/// Leftmost-proper-pair fragment-end coordinates, captured once per pair
+/// for TLEN and end-motif accumulation.
+#[derive(Debug, Clone, Copy)]
+struct LeftmostMeta {
+    tlen_abs: u32,
+    leftmost_pos: u64,
+    rightmost_pos: u64,
+}
+
+/// Per-gene dispatch helper for a paired-end fragment that the counting
+/// dispatcher just resolved to exactly one gene. Used by both the
+/// in-worker cross-chromosome reconciliation path and the post-merge
+/// (parallel-only) reconciliation path. `leftmost_meta` is `None` for
+/// cross-chromosome pairs (those don't satisfy `is_leftmost_proper_pair_mate`).
+fn dispatch_per_gene_paired(
+    per_gene: &mut Option<PerGeneAccumulator>,
+    shape_index: Option<&GeneShapeIndex>,
+    gene_idx: GeneIdx,
+    mate_a: &MateInfo,
+    mate_b: &MateInfo,
+    leftmost_meta: Option<LeftmostMeta>,
+    em_accum_and_chrom: Option<(&mut EndMotifAccum, &str)>,
+) {
+    let (Some(pg), Some(idx)) = (per_gene.as_mut(), shape_index) else {
+        return;
+    };
+    let Some(shape) = idx.get(gene_idx as usize) else {
+        return;
+    };
+    use crate::rna::per_gene::{LeftmostContribution, PairedMateContribution};
+    let (lm, em_lookup) = match (leftmost_meta, em_accum_and_chrom) {
+        (Some(meta), Some((em, chrom))) => (
+            Some(LeftmostContribution {
+                tlen_abs: meta.tlen_abs,
+                leftmost_pos: meta.leftmost_pos,
+                rightmost_pos: meta.rightmost_pos,
+                fasta_chrom: chrom,
+            }),
+            Some(em),
+        ),
+        (Some(meta), None) => (
+            Some(LeftmostContribution {
+                tlen_abs: meta.tlen_abs,
+                leftmost_pos: meta.leftmost_pos,
+                rightmost_pos: meta.rightmost_pos,
+                fasta_chrom: "",
+            }),
+            None,
+        ),
+        (None, _) => (None, None),
+    };
+    pg.dispatch_paired_fragment(
+        gene_idx,
+        shape,
+        PairedMateContribution {
+            is_primary_mapped: mate_a.is_primary_mapped,
+            aligned_blocks: &mate_a.aligned_blocks,
+            softclip_5p: mate_a.softclip_5p,
+            softclip_3p: mate_a.softclip_3p,
+        },
+        PairedMateContribution {
+            is_primary_mapped: mate_b.is_primary_mapped,
+            aligned_blocks: &mate_b.aligned_blocks,
+            softclip_5p: mate_b.softclip_5p,
+            softclip_3p: mate_b.softclip_3p,
+        },
+        lm,
+        em_lookup,
+    );
+}
+
+/// Per-gene dispatch helper for a singleton (one mate, no partner).
+/// No TLEN/end-motif (no proper pair); decile/intron-exon from the lone
+/// primary mate.
+fn dispatch_per_gene_singleton(
+    per_gene: &mut Option<PerGeneAccumulator>,
+    shape_index: Option<&GeneShapeIndex>,
+    gene_idx: GeneIdx,
+    mate: &MateInfo,
+) {
+    let (Some(pg), Some(idx)) = (per_gene.as_mut(), shape_index) else {
+        return;
+    };
+    let Some(shape) = idx.get(gene_idx as usize) else {
+        return;
+    };
+    pg.contribute_fragment(gene_idx);
+    if mate.is_primary_mapped {
+        pg.contribute_read(
+            gene_idx,
+            shape,
+            &mate.aligned_blocks,
+            mate.softclip_5p,
+            mate.softclip_3p,
+        );
+    }
 }
 
 /// Key for the mate buffer, matching featureCounts' `SAM_pairer_get_read_full_name()`.
@@ -486,6 +605,23 @@ type MateBufferKey = (u64, i32, i64, i32, i64, i32);
 #[inline(always)]
 fn hash_qname(qname: &[u8]) -> u64 {
     crate::io::fnv1a(qname)
+}
+
+/// Per-gene dispatch context handed to `process_counting_record`.
+///
+/// Bundles the per-worker per-gene accumulator, the shared GTF-derived
+/// gene-shape index, and an optional borrowed end-motif FASTA reader
+/// (re-used from the sample-level `EndMotifAccum` to avoid opening a
+/// second handle per worker). The `mapq_cut` is the same threshold the
+/// fragmentomics dispatcher uses for `is_leftmost_proper_pair_mate`.
+struct PerGeneDispatch<'a> {
+    accum: &'a mut PerGeneAccumulator,
+    shape_index: &'a GeneShapeIndex,
+    em_lookup: Option<&'a mut EndMotifAccum>,
+    /// Raw BAM contig name (matches FASTA contig naming for end-motif lookups).
+    fasta_chrom: &'a str,
+    /// MAPQ filter for proper-pair / primary-mapped predicates.
+    mapq_cut: u8,
 }
 
 /// Accumulated results from processing a batch of chromosomes.
@@ -550,6 +686,10 @@ struct ChromResult {
 
     /// Phase 2 Tier 1 fragmentomics accumulators (if enabled).
     fragmentomics: Option<FragmentomicsAccumulators>,
+
+    /// Per-gene Tier-2 accumulator (if enabled). Built once per worker;
+    /// merged additively across workers.
+    per_gene: Option<PerGeneAccumulator>,
 }
 
 impl ChromResult {
@@ -584,11 +724,18 @@ impl ChromResult {
             fc_biotype_no_features: 0,
             qualimap: None,
             fragmentomics: None,
+            per_gene: None,
         }
     }
 
     /// Merge another ChromResult into this one (additive).
-    fn merge(&mut self, other: ChromResult) {
+    ///
+    /// `gene_shape_index` is required when per-gene Tier-2 is enabled; it
+    /// is consulted during cross-worker mate reconciliation to populate
+    /// per-gene decile/intron-exon contributions for unambiguously
+    /// assigned cross-chromosome pairs. Pass `None` when per-gene is
+    /// disabled.
+    fn merge(&mut self, other: ChromResult, gene_shape_index: Option<&GeneShapeIndex>) {
         for (i, counts) in other.gene_counts.into_iter().enumerate() {
             self.gene_counts[i].all_multi += counts.all_multi;
             self.gene_counts[i].nodup_multi += counts.nodup_multi;
@@ -625,6 +772,19 @@ impl ChromResult {
                         frag_is_multi,
                     ) {
                         self.stat_assigned += 1;
+                        // Cross-worker pair: tid != mtid for both mates, so neither
+                        // carries leftmost_meta — no TLEN/end-motif contribution.
+                        // Decile / intron-exon use each mate's aligned blocks against
+                        // the gene's geometry; off-chromosome blocks contribute zero.
+                        dispatch_per_gene_paired(
+                            &mut self.per_gene,
+                            gene_shape_index,
+                            combined_genes[0],
+                            &self_info,
+                            &other_info,
+                            None,
+                            None,
+                        );
                     }
                 } else {
                     // False match: same read direction (e.g. secondary alignment
@@ -681,6 +841,13 @@ impl ChromResult {
                 self_frag.merge(other_frag);
             } else {
                 self.fragmentomics = Some(other_frag);
+            }
+        }
+        if let Some(other_pg) = other.per_gene {
+            if let Some(ref mut self_pg) = self.per_gene {
+                self_pg.merge(other_pg);
+            } else {
+                self.per_gene = Some(other_pg);
             }
         }
     }
@@ -802,6 +969,8 @@ fn process_counting_record(
     gene_hits: &mut Vec<GeneIdx>,
     biotype_hits_buf: &mut Vec<u16>,
     mate_buffer: &mut HashMap<MateBufferKey, MateInfo>,
+    // Per-gene Tier-2 dispatch context. `None` when per-gene is disabled.
+    per_gene_dispatch: Option<&mut PerGeneDispatch<'_>>,
 ) {
     let flags = record.flags();
 
@@ -873,6 +1042,40 @@ fn process_counting_record(
         result,
     );
 
+    // Compute soft-clip flags + (paired-end) leftmost-mate metadata once
+    // here so they can be shared between the unambiguous-assignment per-gene
+    // dispatch path and the mate-buffer path.
+    let per_record_is_primary = per_gene_dispatch.is_some()
+        && crate::rna::fragmentomics::common::is_primary_mapped(
+            record,
+            per_gene_dispatch.as_ref().map_or(0, |d| d.mapq_cut),
+        );
+    let (per_record_sc_5p, per_record_sc_3p) = if per_gene_dispatch.is_some() {
+        crate::rna::fragmentomics::common::softclip_status_5p3p(record)
+    } else {
+        (false, false)
+    };
+    let per_record_leftmost = if let Some(d) = per_gene_dispatch.as_ref() {
+        if paired
+            && crate::rna::fragmentomics::common::is_leftmost_proper_pair_mate(record, d.mapq_cut)
+        {
+            // SAM TLEN is i32; positive (leftmost) values fit in u32 for any realistic library.
+            let tlen_abs_u64 = record.insert_size().unsigned_abs();
+            let tlen_abs = tlen_abs_u64.min(u32::MAX as u64) as u32;
+            let leftmost = record.pos() as u64;
+            let rightmost = leftmost + tlen_abs_u64.saturating_sub(1);
+            Some(LeftmostMeta {
+                tlen_abs,
+                leftmost_pos: leftmost,
+                rightmost_pos: rightmost,
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // --- Single-end counting ---
     if !paired {
         result.n_multi_dup += 1;
@@ -889,6 +1092,21 @@ fn process_counting_record(
             result.stat_ambiguous += 1;
         } else if assign_fragment_to_gene(gene_hits, &mut result.gene_counts, is_dup, is_multi) {
             result.stat_assigned += 1;
+            if let Some(dispatch) = per_gene_dispatch {
+                let gene_idx = gene_hits[0];
+                if let Some(shape) = dispatch.shape_index.get(gene_idx as usize) {
+                    dispatch.accum.contribute_fragment(gene_idx);
+                    if per_record_is_primary {
+                        dispatch.accum.contribute_read(
+                            gene_idx,
+                            shape,
+                            aligned_blocks_buf,
+                            per_record_sc_5p,
+                            per_record_sc_3p,
+                        );
+                    }
+                }
+            }
         }
         return;
     }
@@ -959,9 +1177,42 @@ fn process_counting_record(
             frag_is_multi,
         ) {
             result.stat_assigned += 1;
+            if let Some(dispatch) = per_gene_dispatch {
+                let gene_idx = combined_genes[0];
+                if let Some(shape) = dispatch.shape_index.get(gene_idx as usize) {
+                    use crate::rna::per_gene::{LeftmostContribution, PairedMateContribution};
+                    let leftmost = per_record_leftmost.or(mate_info.leftmost_meta).map(|m| {
+                        LeftmostContribution {
+                            tlen_abs: m.tlen_abs,
+                            leftmost_pos: m.leftmost_pos,
+                            rightmost_pos: m.rightmost_pos,
+                            fasta_chrom: dispatch.fasta_chrom,
+                        }
+                    });
+                    dispatch.accum.dispatch_paired_fragment(
+                        gene_idx,
+                        shape,
+                        PairedMateContribution {
+                            is_primary_mapped: mate_info.is_primary_mapped,
+                            aligned_blocks: &mate_info.aligned_blocks,
+                            softclip_5p: mate_info.softclip_5p,
+                            softclip_3p: mate_info.softclip_3p,
+                        },
+                        PairedMateContribution {
+                            is_primary_mapped: per_record_is_primary,
+                            aligned_blocks: aligned_blocks_buf,
+                            softclip_5p: per_record_sc_5p,
+                            softclip_3p: per_record_sc_3p,
+                        },
+                        leftmost,
+                        dispatch.em_lookup.as_deref_mut(),
+                    );
+                }
+            }
         }
     } else {
-        // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
+        // Take ownership of gene_hits and aligned_blocks_buf instead of
+        // cloning. They are cleared at the next iteration's loop start.
         mate_buffer.insert(
             buffer_key,
             MateInfo {
@@ -969,6 +1220,15 @@ fn process_counting_record(
                 is_dup,
                 is_multi,
                 is_read1,
+                aligned_blocks: if per_gene_dispatch.is_some() {
+                    aligned_blocks_buf.clone()
+                } else {
+                    Vec::new()
+                },
+                softclip_5p: per_record_sc_5p,
+                softclip_3p: per_record_sc_3p,
+                is_primary_mapped: per_record_is_primary,
+                leftmost_meta: per_record_leftmost,
             },
         );
     }
@@ -998,6 +1258,7 @@ fn process_chromosome_batch(
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
     fragmentomics_config: Option<&FragmentomicsConfig>,
     fasta_path: Option<&Path>,
+    per_gene_shape_index: Option<&GeneShapeIndex>,
     gene_to_biotype: &[u16],
     num_biotypes: usize,
     progress: Option<&ProgressBar>,
@@ -1011,6 +1272,8 @@ fn process_chromosome_batch(
         Some(cfg) => Some(FragmentomicsAccumulators::new(cfg, fasta_path)?),
         None => None,
     };
+    let per_gene_mapq_cut = fragmentomics_config.map(|c| c.mapq_cut).unwrap_or(0);
+    let mut per_gene_accum = per_gene_shape_index.map(|_| PerGeneAccumulator::new(num_genes));
 
     // Pre-compute resolved chromosome names per TID (apply prefix/mapping once,
     // not on every read). Used by both featureCounts counting and RSeQC tools.
@@ -1102,23 +1365,39 @@ fn process_chromosome_batch(
             // needs to resolve the chromosome name (FASTA contig name = the
             // raw BAM header name, NOT the chrom-mapped GTF name, since
             // end-motif lookup is against the user's reference FASTA).
+            let rec_tid = record.tid();
+            let frag_chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_name.len() {
+                tid_to_name[rec_tid as usize].as_str()
+            } else {
+                ""
+            };
             if let Some(ref mut frag) = fragmentomics_accums {
-                let rec_tid = record.tid();
-                let frag_chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_name.len() {
-                    tid_to_name[rec_tid as usize].as_str()
-                } else {
-                    ""
-                };
                 frag.process_read(&record, frag_chrom);
             }
 
             // Resolve chromosome for gene counting
-            let rec_tid = record.tid();
             let chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_gtf_chrom.len() {
                 tid_to_gtf_chrom[rec_tid as usize].as_str()
             } else {
                 ""
             };
+
+            // Per-gene Tier-2 dispatch context (re-borrows the FASTA reader
+            // from the sample-level EndMotifAccum to share contig caches and
+            // avoid opening a second handle per worker).
+            let mut per_gene_dispatch: Option<PerGeneDispatch<'_>> =
+                match (per_gene_accum.as_mut(), per_gene_shape_index) {
+                    (Some(accum), Some(shape_index)) => Some(PerGeneDispatch {
+                        accum,
+                        shape_index,
+                        em_lookup: fragmentomics_accums
+                            .as_mut()
+                            .and_then(|f| f.end_motifs.as_mut()),
+                        fasta_chrom: frag_chrom,
+                        mapq_cut: per_gene_mapq_cut,
+                    }),
+                    _ => None,
+                };
 
             process_counting_record(
                 &record,
@@ -1132,6 +1411,7 @@ fn process_chromosome_batch(
                 &mut gene_hits,
                 &mut biotype_hits_buf,
                 &mut mate_buffer,
+                per_gene_dispatch.as_mut(),
             );
         }
     }
@@ -1139,6 +1419,7 @@ fn process_chromosome_batch(
     // Move unmatched mates into the result for cross-chromosome reconciliation
     result.unmatched_mates = mate_buffer;
     result.fragmentomics = fragmentomics_accums;
+    result.per_gene = per_gene_accum;
     Ok((result, rseqc_accums))
 }
 
@@ -1193,6 +1474,9 @@ pub fn count_reads(
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
     fragmentomics_config: Option<&FragmentomicsConfig>,
     fasta_path: Option<&Path>,
+    // Present iff per-gene Tier-2 is enabled. Required for the per-gene
+    // accumulator's decile and intron-exon helpers.
+    per_gene_shape_index: Option<&GeneShapeIndex>,
     progress: Option<&ProgressBar>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
@@ -1343,6 +1627,7 @@ pub fn count_reads(
                         qualimap_index,
                         fragmentomics_config,
                         fasta_path,
+                        per_gene_shape_index,
                         &gene_to_biotype,
                         num_biotypes,
                         progress,
@@ -1357,7 +1642,7 @@ pub fn count_reads(
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         for result in results {
             let (chrom_result, rseqc_result) = result?;
-            merged.merge(chrom_result);
+            merged.merge(chrom_result, per_gene_shape_index);
             if let (Some(ref mut merged_acc), Some(worker_acc)) = (&mut merged_rseqc, rseqc_result)
             {
                 merged_acc.merge(worker_acc);
@@ -1380,6 +1665,9 @@ pub fn count_reads(
             Some(cfg) => Some(FragmentomicsAccumulators::new(cfg, fasta_path)?),
             None => None,
         };
+        let per_gene_mapq_cut = fragmentomics_config.map(|c| c.mapq_cut).unwrap_or(0);
+        let mut per_gene_accum =
+            per_gene_shape_index.map(|_| PerGeneAccumulator::new(interner.len()));
 
         // Pre-compute resolved chromosome names for RSeQC tools
         // (apply chromosome prefix and mapping, same as parallel path)
@@ -1468,23 +1756,37 @@ pub fn count_reads(
             // --- Phase 2 fragmentomics dispatch (before counting filters) ---
             // Use raw BAM contig name (not chrom_mapping output) so it matches
             // FASTA contig names for end-motif lookups.
+            let tid = record.tid();
+            let frag_chrom = if tid >= 0 && (tid as usize) < tid_to_name.len() {
+                tid_to_name[tid as usize].as_str()
+            } else {
+                ""
+            };
             if let Some(ref mut frag) = fragmentomics_accums {
-                let tid = record.tid();
-                let frag_chrom = if tid >= 0 && (tid as usize) < tid_to_name.len() {
-                    tid_to_name[tid as usize].as_str()
-                } else {
-                    ""
-                };
                 frag.process_read(&record, frag_chrom);
             }
 
             // Resolve chromosome for gene counting
-            let tid = record.tid();
             let chrom = if tid >= 0 && (tid as usize) < tid_to_rseqc_chrom.len() {
                 tid_to_rseqc_chrom[tid as usize].as_str()
             } else {
                 ""
             };
+
+            // Per-gene Tier-2 dispatch context.
+            let mut per_gene_dispatch: Option<PerGeneDispatch<'_>> =
+                match (per_gene_accum.as_mut(), per_gene_shape_index) {
+                    (Some(accum), Some(shape_index)) => Some(PerGeneDispatch {
+                        accum,
+                        shape_index,
+                        em_lookup: fragmentomics_accums
+                            .as_mut()
+                            .and_then(|f| f.end_motifs.as_mut()),
+                        fasta_chrom: frag_chrom,
+                        mapq_cut: per_gene_mapq_cut,
+                    }),
+                    _ => None,
+                };
 
             process_counting_record(
                 &record,
@@ -1498,12 +1800,14 @@ pub fn count_reads(
                 &mut gene_hits,
                 &mut biotype_hits_buf,
                 &mut mate_buffer,
+                per_gene_dispatch.as_mut(),
             );
         }
 
         result.unmatched_mates = mate_buffer;
         result.qualimap = qualimap_accum;
         result.fragmentomics = fragmentomics_accums;
+        result.per_gene = per_gene_accum;
         (result, rseqc_accums)
     };
 
@@ -1634,8 +1938,18 @@ pub fn count_reads(
                     frag_is_multi,
                 ) {
                     merged.stat_assigned += 1;
-                    // Coverage recording skipped — no aligned blocks available for
-                    // cross-chromosome mate reconciliation.
+                    // Cross-chrom pair: tid != mtid → no leftmost_meta on either
+                    // side → no TLEN/end-motif contribution. Off-chrom aligned
+                    // blocks miss the gene's geometry and contribute zero.
+                    dispatch_per_gene_paired(
+                        &mut merged.per_gene,
+                        per_gene_shape_index,
+                        combined_genes[0],
+                        &mate_info,
+                        &info,
+                        None,
+                        None,
+                    );
                 }
             } else {
                 still_unmatched.insert(key, info);
@@ -1678,6 +1992,14 @@ pub fn count_reads(
                 mate_info.is_multi,
             ) {
                 merged.stat_assigned += 1;
+                // Singleton: the partner mate was never observed. No proper pair
+                // → no TLEN/end-motif. Just this mate's decile / intron-exon.
+                dispatch_per_gene_singleton(
+                    &mut merged.per_gene,
+                    per_gene_shape_index,
+                    mate_info.gene_hits[0],
+                    &mate_info,
+                );
             }
         }
     }
@@ -1778,6 +2100,7 @@ pub fn count_reads(
             _ => None,
         },
         fragmentomics: merged.fragmentomics,
+        per_gene: merged.per_gene,
     })
 }
 

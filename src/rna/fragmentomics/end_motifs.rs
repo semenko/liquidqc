@@ -30,7 +30,10 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::common::{encode_kmer4, is_leftmost_proper_pair_mate, kmer_array_to_map, rc_kmer4};
+use super::common::{
+    encode_kmer4, is_leftmost_proper_pair_mate, jsd_log2, kmer_array_to_map, rc_kmer4,
+    shannon_entropy_log2,
+};
 
 #[derive(Debug)]
 pub struct EndMotifAccum {
@@ -97,70 +100,79 @@ impl EndMotifAccum {
             return;
         }
         let tlen = record.insert_size() as u64;
-        let leftmost = record.pos() as u64;
         if tlen < 4 {
             // Fragment too short for a 4-mer at each end.
             self.pair_count_skipped_oob += 1;
             return;
         }
+        let leftmost = record.pos() as u64;
         let rightmost = leftmost + tlen - 1;
+        match self.lookup_kmers_at(chrom, leftmost, rightmost) {
+            EndMotifLookup::Used { kmer_5p, kmer_3p } => {
+                self.kmer_5p[kmer_5p as usize] += 1;
+                self.kmer_3p[kmer_3p as usize] += 1;
+                self.pair_count_used += 1;
+            }
+            EndMotifLookup::SkippedNonAcgt => {
+                self.pair_count_skipped_non_acgt += 1;
+            }
+            EndMotifLookup::SkippedOob => {
+                self.pair_count_skipped_oob += 1;
+            }
+        }
+    }
 
+    /// Pure FASTA-bound lookup of the 5' and 3' fragment-end 4-mers for
+    /// the given proper-pair leftmost/rightmost reference coordinates.
+    ///
+    /// Does NOT update this accumulator's k-mer arrays nor the pair-count
+    /// counters — the caller decides where to record the result. Updates
+    /// internal contig-length caches as a side effect, which is shared
+    /// across consumers. Phase 3 per-gene Tier-2 reuses this entry point
+    /// so we only open one `faidx::Reader` per worker and only seek the
+    /// FASTA once per pair.
+    pub fn lookup_kmers_at(
+        &mut self,
+        chrom: &str,
+        leftmost: u64,
+        rightmost: u64,
+    ) -> EndMotifLookup {
+        if rightmost < leftmost + 3 {
+            // Fragment shorter than 4 bp at either end.
+            return EndMotifLookup::SkippedOob;
+        }
         let len = match self.contig_len(chrom) {
             Some(l) => l,
-            None => {
-                self.pair_count_skipped_oob += 1;
-                return;
-            }
+            None => return EndMotifLookup::SkippedOob,
         };
         if rightmost >= len {
-            self.pair_count_skipped_oob += 1;
-            return;
+            return EndMotifLookup::SkippedOob;
         }
-
-        // 5' end-motif: reference bases [leftmost, leftmost+3] (inclusive).
         let bases_5p =
             match self
                 .reader
                 .fetch_seq(chrom, leftmost as usize, (leftmost + 3) as usize)
             {
                 Ok(v) if v.len() == 4 => v,
-                _ => {
-                    self.pair_count_skipped_oob += 1;
-                    return;
-                }
+                _ => return EndMotifLookup::SkippedOob,
             };
-        // 3' end-motif: reference bases [rightmost-3, rightmost] (inclusive),
-        // reverse-complemented.
         let bases_3p_ref =
             match self
                 .reader
                 .fetch_seq(chrom, (rightmost - 3) as usize, rightmost as usize)
             {
                 Ok(v) if v.len() == 4 => v,
-                _ => {
-                    self.pair_count_skipped_oob += 1;
-                    return;
-                }
+                _ => return EndMotifLookup::SkippedOob,
             };
-
         let kmer_5p = match encode_kmer4(&bases_5p) {
             Some(k) => k,
-            None => {
-                self.pair_count_skipped_non_acgt += 1;
-                return;
-            }
+            None => return EndMotifLookup::SkippedNonAcgt,
         };
         let kmer_3p = match encode_kmer4(&bases_3p_ref) {
             Some(k) => rc_kmer4(k),
-            None => {
-                self.pair_count_skipped_non_acgt += 1;
-                return;
-            }
+            None => return EndMotifLookup::SkippedNonAcgt,
         };
-
-        self.kmer_5p[kmer_5p as usize] += 1;
-        self.kmer_3p[kmer_3p as usize] += 1;
-        self.pair_count_used += 1;
+        EndMotifLookup::Used { kmer_5p, kmer_3p }
     }
 
     pub fn merge(&mut self, other: EndMotifAccum) {
@@ -175,67 +187,34 @@ impl EndMotifAccum {
     }
 
     pub fn into_result(self) -> EndMotifResult {
+        // Empty histograms are reported as `0.0` for Phase-2 schema
+        // backwards-compatibility (the field is `type: number, minimum: 0`,
+        // never null).
         EndMotifResult {
             kmer_5p: kmer_array_to_map(&self.kmer_5p),
             kmer_3p: kmer_array_to_map(&self.kmer_3p),
-            shannon_entropy_5p: shannon_entropy_log2(&self.kmer_5p),
-            shannon_entropy_3p: shannon_entropy_log2(&self.kmer_3p),
-            jensen_shannon_divergence_5p_vs_3p: jensen_shannon_log2(&self.kmer_5p, &self.kmer_3p),
+            shannon_entropy_5p: shannon_entropy_log2(&self.kmer_5p).unwrap_or(0.0),
+            shannon_entropy_3p: shannon_entropy_log2(&self.kmer_3p).unwrap_or(0.0),
+            jensen_shannon_divergence_5p_vs_3p: jsd_log2(&self.kmer_5p, &self.kmer_3p)
+                .unwrap_or(0.0),
             pair_count_used: self.pair_count_used,
             pair_count_skipped_non_acgt: self.pair_count_skipped_non_acgt,
         }
     }
 }
 
-fn normalize(arr: &[u64; 256]) -> Option<[f64; 256]> {
-    let total: u64 = arr.iter().sum();
-    if total == 0 {
-        return None;
-    }
-    let total_f = total as f64;
-    let mut out = [0f64; 256];
-    for (i, c) in arr.iter().enumerate() {
-        out[i] = *c as f64 / total_f;
-    }
-    Some(out)
-}
-
-fn shannon_entropy_log2(arr: &[u64; 256]) -> f64 {
-    let probs = match normalize(arr) {
-        Some(p) => p,
-        None => return 0.0,
-    };
-    let mut h = 0.0;
-    for p in probs {
-        if p > 0.0 {
-            h -= p * p.log2();
-        }
-    }
-    h
-}
-
-fn jensen_shannon_log2(a: &[u64; 256], b: &[u64; 256]) -> f64 {
-    let pa = normalize(a);
-    let pb = normalize(b);
-    let (pa, pb) = match (pa, pb) {
-        (Some(a), Some(b)) => (a, b),
-        _ => return 0.0,
-    };
-    // M = 0.5 * (P + Q); JSD = 0.5 * KL(P||M) + 0.5 * KL(Q||M).
-    let mut jsd = 0.0;
-    for i in 0..256 {
-        let p = pa[i];
-        let q = pb[i];
-        let m = 0.5 * (p + q);
-        if p > 0.0 && m > 0.0 {
-            jsd += 0.5 * p * (p / m).log2();
-        }
-        if q > 0.0 && m > 0.0 {
-            jsd += 0.5 * q * (q / m).log2();
-        }
-    }
-    // Numerical floor to clamp tiny negative values from FP noise.
-    jsd.max(0.0)
+/// Result of a pure FASTA-bound lookup for the 5'/3' end-motifs of a
+/// fragment. Returned by [`EndMotifAccum::lookup_kmers_at`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndMotifLookup {
+    /// Both 4-mers were ACGT and within the contig. `kmer_3p` is already
+    /// reverse-complemented to fragment-strand orientation.
+    Used { kmer_5p: u8, kmer_3p: u8 },
+    /// One of the 4-mers contained a non-ACGT base.
+    SkippedNonAcgt,
+    /// The fragment ran off the contig, the contig is missing from the
+    /// FASTA, or the fragment is too short for two 4-mers.
+    SkippedOob,
 }
 
 // ---------------------------------------------------------------------------
@@ -262,15 +241,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shannon_zero_for_empty_distribution() {
+    fn shannon_none_for_empty_distribution() {
         let arr = [0u64; 256];
-        assert_eq!(shannon_entropy_log2(&arr), 0.0);
+        assert!(shannon_entropy_log2(&arr).is_none());
     }
 
     #[test]
     fn shannon_uniform_distribution_is_log2_256() {
         let arr = [1u64; 256];
-        let h = shannon_entropy_log2(&arr);
+        let h = shannon_entropy_log2(&arr).expect("non-empty");
         assert!((h - 8.0).abs() < 1e-12);
     }
 
@@ -278,7 +257,7 @@ mod tests {
     fn shannon_concentrated_distribution_is_zero() {
         let mut arr = [0u64; 256];
         arr[42] = 1000;
-        let h = shannon_entropy_log2(&arr);
+        let h = shannon_entropy_log2(&arr).expect("non-empty");
         assert!(h.abs() < 1e-12);
     }
 
@@ -288,7 +267,7 @@ mod tests {
         for (i, v) in arr.iter_mut().enumerate() {
             *v = (i as u64 % 7) + 1;
         }
-        let jsd = jensen_shannon_log2(&arr, &arr);
+        let jsd = jsd_log2(&arr, &arr).expect("non-empty");
         assert!(jsd.abs() < 1e-12, "JSD(P, P) should be 0, got {}", jsd);
     }
 
@@ -298,7 +277,7 @@ mod tests {
         let mut b = [0u64; 256];
         a[0] = 1;
         b[1] = 1;
-        let jsd = jensen_shannon_log2(&a, &b);
+        let jsd = jsd_log2(&a, &b).expect("non-empty");
         // For two distributions with disjoint single-point supports and
         // base-2 log, JSD = 1.
         assert!((jsd - 1.0).abs() < 1e-12, "JSD = {}, expected 1.0", jsd);

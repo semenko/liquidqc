@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/semenko/liquidqc/schema/v1/liquidqc.schema.json",
-  "title": "liquidqc fragmentomics output (v1, Phase 2)",
-  "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Always-present envelope fields are required; the four Phase 2 fragmentomics blocks (fragment_length, end_motifs, soft_clips, periodicity) are optional and follow the schemas defined here. Later phases add per_chromosome, panels, sex_inference, snp_fingerprint, saturation, and cycle_quality. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 + Tier-3 per-gene rows.",
+  "title": "liquidqc fragmentomics output (v1, Phase 3)",
+  "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Always-present envelope fields are required; the four Phase 2 fragmentomics blocks (fragment_length, end_motifs, soft_clips, periodicity) and the Phase 3 `per_gene` reference block are optional and follow the schemas defined here. Later phases add per_chromosome, panels, sex_inference, snp_fingerprint, saturation, and cycle_quality. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 per-gene rows; the `per_gene` block in this envelope locates and validates it.",
   "type": "object",
   "required": [
     "extractor_version",
@@ -36,9 +36,9 @@
     },
     "schema_version": {
       "type": "string",
-      "description": "Semver for this schema. `0.2.0-stub` covers Phase 2; subsequent phases bump again.",
+      "description": "Semver for this schema. `0.3.0-stub` covers Phase 3; subsequent phases bump again.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
-      "examples": ["0.2.0-stub", "1.0.0"]
+      "examples": ["0.2.0-stub", "0.3.0-stub", "1.0.0"]
     },
     "git_commit": {
       "type": "string",
@@ -314,6 +314,59 @@
         "dominant_peak_period_nt":       { "type": ["integer", "null"], "minimum": 0 },
         "dominant_peak_power":           { "type": "number", "minimum": 0, "maximum": 1 },
         "total_power":                   { "type": "number", "minimum": 0 }
+      }
+    },
+    "per_gene": {
+      "type": "object",
+      "description": "Phase 3 Tier 2: reference to the sibling per-gene sparse Parquet (`<sample_id>.per_gene.parquet`) that holds Tier-2 fragmentomics per gene with >= `min_gene_reads_threshold` primary reads. The Parquet itself stores sample-id in file-level KV metadata (not as a column) so cross-sample tables stack cleanly.",
+      "additionalProperties": false,
+      "required": [
+        "parquet_path",
+        "parquet_md5",
+        "n_genes_total",
+        "n_genes_emitted",
+        "min_gene_reads_threshold",
+        "schema_version_per_gene",
+        "columns"
+      ],
+      "properties": {
+        "parquet_path": {
+          "type": "string",
+          "description": "Filename of the per-gene Parquet sibling, located in the same directory as this JSON envelope.",
+          "minLength": 1
+        },
+        "parquet_md5": {
+          "type": "string",
+          "description": "MD5 hex digest of the Parquet file bytes.",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "n_genes_total": {
+          "type": "integer",
+          "description": "Total number of genes considered (size of the GTF gene set).",
+          "minimum": 0
+        },
+        "n_genes_emitted": {
+          "type": "integer",
+          "description": "Number of genes that met `min_gene_reads_threshold` and therefore appear as rows in the Parquet table.",
+          "minimum": 0
+        },
+        "min_gene_reads_threshold": {
+          "type": "integer",
+          "description": "Minimum per-gene primary read count required for a gene to appear as a Parquet row. Mirrors the `--min-gene-reads` CLI value.",
+          "minimum": 0
+        },
+        "schema_version_per_gene": {
+          "type": "string",
+          "description": "Semver of the per-gene Parquet table schema (independent of the envelope `schema_version`).",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
+          "examples": ["1.0.0-stub"]
+        },
+        "columns": {
+          "type": "array",
+          "description": "Column names of the Parquet table in declaration order.",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        }
       }
     }
   }

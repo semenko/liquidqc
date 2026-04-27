@@ -20,12 +20,12 @@
 //! counting (they still count toward the denominator).
 
 use indexmap::IndexMap;
-use rust_htslib::bam::record::{Cigar, Record};
+use rust_htslib::bam::record::Record;
 use serde::Serialize;
 
 use super::common::{
     encode_kmer4, is_primary_mapped, is_reverse_strand, iupac_nibble_to_acgt, kmer_array_to_map,
-    rc_kmer4,
+    leading_softclip_len, rc_kmer4, trailing_softclip_len,
 };
 
 /// Number of clip-length bins: 1 nt, 2 nt, ≥3 nt.
@@ -166,20 +166,6 @@ fn kmer_arrays_to_block(arrays: &[[u64; 256]; N_CLIP_LEN_BINS]) -> SoftClipKmerB
         len_2: kmer_array_to_map(&arrays[1]),
         len_3plus: kmer_array_to_map(&arrays[2]),
     }
-}
-
-fn leading_softclip_len(cigar: &rust_htslib::bam::record::CigarStringView) -> usize {
-    if let Some(Cigar::SoftClip(n)) = cigar.iter().next() {
-        return *n as usize;
-    }
-    0
-}
-
-fn trailing_softclip_len(cigar: &rust_htslib::bam::record::CigarStringView) -> usize {
-    if let Some(Cigar::SoftClip(n)) = cigar.iter().next_back() {
-        return *n as usize;
-    }
-    0
 }
 
 /// Encode a 4-mer from BAM `seq[start..start+4]`, reverse-complementing

@@ -9,6 +9,7 @@ pub mod cpp_rng;
 pub mod dupradar;
 pub mod featurecounts;
 pub mod fragmentomics;
+pub mod per_gene;
 pub mod preseq;
 pub mod qualimap;
 pub mod rseqc;

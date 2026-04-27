@@ -13,7 +13,7 @@
 //! since cross-chromosome pairs do not have a defined fragment length.
 
 use indexmap::IndexMap;
-use rust_htslib::bam::record::Record;
+use rust_htslib::bam::record::{Cigar, Record};
 
 use crate::rna::bam_flags::{
     BAM_FDUP, BAM_FMUNMAP, BAM_FPAIRED, BAM_FPROPER_PAIR, BAM_FQCFAIL, BAM_FREVERSE,
@@ -67,6 +67,45 @@ pub fn is_primary_mapped(record: &Record, mapq_cut: u8) -> bool {
 /// True iff this primary record is on the reverse strand.
 pub fn is_reverse_strand(record: &Record) -> bool {
     record.flags() & BAM_FREVERSE != 0
+}
+
+/// Length in nt of a leading CIGAR `S` op, or 0 if the alignment doesn't
+/// start with one. SAM/BAM stores CIGAR in reference orientation, so this
+/// is the soft clip at the leftmost reference position regardless of
+/// read strand.
+pub fn leading_softclip_len(cigar: &rust_htslib::bam::record::CigarStringView) -> usize {
+    match cigar.iter().next() {
+        Some(Cigar::SoftClip(n)) => *n as usize,
+        _ => 0,
+    }
+}
+
+/// Length in nt of a trailing CIGAR `S` op, or 0.
+pub fn trailing_softclip_len(cigar: &rust_htslib::bam::record::CigarStringView) -> usize {
+    match cigar.iter().next_back() {
+        Some(Cigar::SoftClip(n)) => *n as usize,
+        _ => 0,
+    }
+}
+
+/// Strand-corrected soft-clip lengths at the read's 5' and 3' ends.
+/// For forward-strand reads the leading CIGAR `S` is the 5' clip; for
+/// reverse-strand reads the leading CIGAR `S` is the read's 3' clip.
+pub fn softclip_lens_5p3p(record: &Record) -> (usize, usize) {
+    let cigar = record.cigar();
+    let leading = leading_softclip_len(&cigar);
+    let trailing = trailing_softclip_len(&cigar);
+    if is_reverse_strand(record) {
+        (trailing, leading)
+    } else {
+        (leading, trailing)
+    }
+}
+
+/// Strand-corrected presence of soft clips at the read's 5' and 3' ends.
+pub fn softclip_status_5p3p(record: &Record) -> (bool, bool) {
+    let (a, b) = softclip_lens_5p3p(record);
+    (a > 0, b > 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -143,20 +182,117 @@ pub fn iupac_nibble_to_acgt(code: u8) -> Option<u8> {
 // 4-mer histogram → IndexMap conversion (shared finalization helper).
 // ---------------------------------------------------------------------------
 
-/// Convert a 256-entry 4-mer count array into an `IndexMap<String, u64>`
-/// suitable for JSON serialization, dropping zero entries. Used by both
-/// the end-motif and soft-clip accumulators at finalization.
-pub fn kmer_array_to_map(arr: &[u64; 256]) -> IndexMap<String, u64> {
-    let mut m = IndexMap::with_capacity(arr.iter().filter(|c| **c > 0).count());
-    for (k, count) in arr.iter().enumerate() {
-        if *count == 0 {
-            continue;
-        }
-        let bytes = decode_kmer4(k as u8);
-        let key = String::from_utf8(bytes.to_vec()).expect("ACGT bytes are valid UTF-8");
-        m.insert(key, *count);
+/// Trait for the integer count types stored in 256-entry 4-mer histograms.
+/// Lets the entropy / JSD / serialization helpers below accept either
+/// `[u64; 256]` (Tier-1, sample-level) or `[u32; 256]` (Tier-2, per-gene).
+pub trait KmerCount: Copy {
+    fn as_u64(self) -> u64;
+    fn as_f64(self) -> f64;
+    fn is_zero(self) -> bool;
+}
+impl KmerCount for u64 {
+    fn as_u64(self) -> u64 {
+        self
     }
-    m
+    fn as_f64(self) -> f64 {
+        self as f64
+    }
+    fn is_zero(self) -> bool {
+        self == 0
+    }
+}
+impl KmerCount for u32 {
+    fn as_u64(self) -> u64 {
+        self as u64
+    }
+    fn as_f64(self) -> f64 {
+        self as f64
+    }
+    fn is_zero(self) -> bool {
+        self == 0
+    }
+}
+
+/// Walk a 256-entry 4-mer count array and emit only the nonzero entries
+/// as `(decoded_kmer_string, count)` pairs in 4-mer-index order. Used by
+/// both `IndexMap<String, _>` and `Vec<(String, _)>` consumers.
+pub fn kmer_array_iter_nonzero<T: KmerCount>(
+    arr: &[T; 256],
+) -> impl Iterator<Item = (String, T)> + '_ {
+    arr.iter()
+        .enumerate()
+        .filter_map(|(k, c)| if c.is_zero() { None } else { Some((k, *c)) })
+        .map(|(k, c)| {
+            let bytes = decode_kmer4(k as u8);
+            let key = String::from_utf8(bytes.to_vec()).expect("ACGT bytes are valid UTF-8");
+            (key, c)
+        })
+}
+
+/// Convert a 256-entry 4-mer count array into an `IndexMap<String, T>`
+/// suitable for JSON serialization, dropping zero entries.
+pub fn kmer_array_to_map<T: KmerCount>(arr: &[T; 256]) -> IndexMap<String, T> {
+    kmer_array_iter_nonzero(arr).collect()
+}
+
+/// Normalize a 256-entry count array to a probability distribution.
+/// Returns `None` when the array sums to zero.
+pub fn normalize_kmer_counts<T: KmerCount>(arr: &[T; 256]) -> Option<[f64; 256]> {
+    let total: u64 = arr.iter().map(|c| c.as_u64()).sum();
+    if total == 0 {
+        return None;
+    }
+    let total_f = total as f64;
+    let mut out = [0f64; 256];
+    for (i, c) in arr.iter().enumerate() {
+        out[i] = c.as_f64() / total_f;
+    }
+    Some(out)
+}
+
+/// Shannon entropy (base 2) of a 4-mer distribution. Returns `None` when
+/// the array is all zeros (no observations).
+pub fn shannon_entropy_log2<T: KmerCount>(arr: &[T; 256]) -> Option<f64> {
+    shannon_entropy_log2_from_probs(normalize_kmer_counts(arr)?)
+}
+
+/// Jensen-Shannon divergence (base 2) between two 4-mer distributions.
+/// Returns `None` when either input has zero total count.
+pub fn jsd_log2<T: KmerCount>(a: &[T; 256], b: &[T; 256]) -> Option<f64> {
+    let pa = normalize_kmer_counts(a)?;
+    let pb = normalize_kmer_counts(b)?;
+    Some(jsd_log2_from_probs(&pa, &pb))
+}
+
+/// Shannon entropy of a pre-normalized probability distribution.
+/// Lets callers compute entropy + JSD without re-normalizing the inputs
+/// (saves two `O(256)` sums and divides per gene at finalize time).
+pub fn shannon_entropy_log2_from_probs(probs: [f64; 256]) -> Option<f64> {
+    let mut h = 0.0;
+    for p in probs {
+        if p > 0.0 {
+            h -= p * p.log2();
+        }
+    }
+    Some(h)
+}
+
+/// Jensen-Shannon divergence of two pre-normalized probability distributions.
+pub fn jsd_log2_from_probs(pa: &[f64; 256], pb: &[f64; 256]) -> f64 {
+    let mut jsd = 0.0;
+    for i in 0..256 {
+        let p = pa[i];
+        let q = pb[i];
+        let m = 0.5 * (p + q);
+        if p > 0.0 && m > 0.0 {
+            jsd += 0.5 * p * (p / m).log2();
+        }
+        if q > 0.0 && m > 0.0 {
+            jsd += 0.5 * q * (q / m).log2();
+        }
+    }
+    // Numerical floor to clamp tiny negative values from FP noise.
+    jsd.max(0.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +351,55 @@ mod tests {
         for k in 0u8..=255 {
             assert_eq!(rc_kmer4(rc_kmer4(k)), k);
         }
+    }
+
+    use rust_htslib::bam::record::CigarString;
+
+    fn build_record(cigar: CigarString, reverse: bool) -> Record {
+        // Construct a minimal record. Tests only exercise flags + CIGAR.
+        let mut record = Record::new();
+        let total: u32 = cigar.iter().map(|c| c.len()).sum();
+        let bases = vec![b'A'; total.max(1) as usize];
+        let quals = vec![20u8; bases.len()];
+        record.set(b"r", Some(&cigar), &bases, &quals);
+        let mut flags: u16 = 0;
+        if reverse {
+            flags |= BAM_FREVERSE;
+        }
+        record.set_flags(flags);
+        record
+    }
+
+    fn cigar(ops: Vec<Cigar>) -> CigarString {
+        CigarString(ops)
+    }
+
+    #[test]
+    fn softclip_5p_3p_forward_strand() {
+        // Leading soft clip → 5' on a forward-strand read.
+        let r = build_record(cigar(vec![Cigar::SoftClip(3), Cigar::Match(10)]), false);
+        assert_eq!(softclip_status_5p3p(&r), (true, false));
+
+        // Trailing soft clip → 3' on a forward-strand read.
+        let r = build_record(cigar(vec![Cigar::Match(10), Cigar::SoftClip(3)]), false);
+        assert_eq!(softclip_status_5p3p(&r), (false, true));
+    }
+
+    #[test]
+    fn softclip_5p_3p_reverse_strand_swaps() {
+        // Leading soft clip on a reverse read = read 3' end.
+        let r = build_record(cigar(vec![Cigar::SoftClip(3), Cigar::Match(10)]), true);
+        assert_eq!(softclip_status_5p3p(&r), (false, true));
+
+        // Trailing soft clip on a reverse read = read 5' end.
+        let r = build_record(cigar(vec![Cigar::Match(10), Cigar::SoftClip(3)]), true);
+        assert_eq!(softclip_status_5p3p(&r), (true, false));
+    }
+
+    #[test]
+    fn no_softclip_returns_false_false() {
+        let r = build_record(cigar(vec![Cigar::Match(13)]), false);
+        assert_eq!(softclip_status_5p3p(&r), (false, false));
     }
 
     #[test]

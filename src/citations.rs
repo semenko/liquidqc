@@ -64,6 +64,14 @@ const QUALIMAP: Citation = Citation {
     doi: "10.1093/bioinformatics/bts503",
 };
 
+const APACHE_ARROW: Citation = Citation {
+    heading: "Apache Arrow / Parquet (arrow-rs, parquet-rs)",
+    description: "liquidqc emits per-gene Tier-2 rows as Apache Parquet via arrow-rs and parquet-rs (Apache Software Foundation).",
+    reference: "Apache Arrow Project. Apache Arrow: A cross-language development platform for in-memory data. https://arrow.apache.org/",
+    url: "https://github.com/apache/arrow-rs",
+    doi: "10.5281/zenodo.4118858",
+};
+
 fn write_citation(w: &mut impl Write, c: &Citation) -> std::io::Result<()> {
     writeln!(w, "## {}\n", c.heading)?;
     writeln!(w, "{}\n", c.description)?;
@@ -113,6 +121,9 @@ pub fn write_citations(path: &Path, config: &RnaConfig, version: &str, commit: &
     if config.qualimap.enabled {
         write_citation(&mut w, &QUALIMAP)?;
     }
+    // Per-gene Tier-2 Parquet output is always emitted in v1, so the
+    // arrow-rs / parquet-rs citation is unconditional.
+    write_citation(&mut w, &APACHE_ARROW)?;
 
     w.flush()?;
     Ok(())

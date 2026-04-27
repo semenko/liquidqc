@@ -61,9 +61,9 @@ fn qc_flags(env: &serde_json::Value) -> Vec<&str> {
 }
 
 #[test]
-fn schema_version_bumped_to_phase2() {
+fn schema_version_bumped_to_phase3() {
     let env = run_with(&["--library-prep", "unknown"], "schema-version");
-    assert_eq!(env["schema_version"].as_str(), Some("0.2.0-stub"));
+    assert_eq!(env["schema_version"].as_str(), Some("0.3.0-stub"));
 }
 
 #[test]
@@ -159,21 +159,40 @@ fn schema_subcommand_includes_phase2_blocks_and_flag() {
 
     let title = parsed["title"].as_str().unwrap_or("");
     assert!(
-        title.contains("Phase 2"),
-        "Schema title should mention Phase 2; got {:?}",
+        title.contains("Phase 3"),
+        "Schema title should mention Phase 3; got {:?}",
         title
     );
 
     let props = parsed["properties"]
         .as_object()
         .expect("schema properties missing");
-    for block in ["fragment_length", "end_motifs", "soft_clips", "periodicity"] {
+    for block in [
+        "fragment_length",
+        "end_motifs",
+        "soft_clips",
+        "periodicity",
+        "per_gene",
+    ] {
         assert!(
             props.contains_key(block),
             "schema properties should define `{block}`; keys = {:?}",
             props.keys().collect::<Vec<_>>()
         );
     }
+
+    // Phase 3: schema_version examples should include 0.3.0-stub.
+    let version_examples: Vec<&str> = parsed["properties"]["schema_version"]["examples"]
+        .as_array()
+        .expect("schema_version examples missing")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        version_examples.contains(&"0.3.0-stub"),
+        "schema_version examples should include 0.3.0-stub; got {:?}",
+        version_examples
+    );
 
     let enum_values: Vec<&str> = parsed["properties"]["qc_flags"]["items"]["enum"]
         .as_array()

@@ -452,7 +452,8 @@ pub struct RnaArgs {
     )]
     pub snp_panel: Option<String>,
 
-    /// Per-gene Tier-2 minimum read count (default 20). Phase 3.
+    /// Minimum primary read count for a gene to appear as a row in the
+    /// per-gene Tier-2 Parquet sibling (default 20).
     #[arg(
         long = "min-gene-reads",
         value_name = "N",

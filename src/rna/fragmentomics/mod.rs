@@ -28,7 +28,7 @@ use anyhow::Result;
 use rust_htslib::bam::record::Record;
 use std::path::Path;
 
-pub use end_motifs::{EndMotifAccum, EndMotifResult};
+pub use end_motifs::{EndMotifAccum, EndMotifLookup, EndMotifResult};
 pub use fragment_size::{FragmentSizeAccum, FragmentSizeBins, FragmentSizeResult};
 pub use periodicity::{compute as compute_periodicity, PeriodicityResult};
 pub use soft_clips::{SoftClipAccum, SoftClipKmerByLen, SoftClipResult};
