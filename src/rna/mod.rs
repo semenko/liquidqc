@@ -1,12 +1,14 @@
 //! RNA-Seq quality control and analysis modules.
 //!
 //! Contains dupRadar duplication rate analysis, featureCounts-compatible output,
-//! and RSeQC tool reimplementations.
+//! RSeQC tool reimplementations, and the liquidqc Phase 2 Tier 1 fragmentomics
+//! accumulators (end-motifs, soft-clip k-mers, fragment-size bins, periodicity FFT).
 
 pub mod bam_flags;
 pub mod cpp_rng;
 pub mod dupradar;
 pub mod featurecounts;
+pub mod fragmentomics;
 pub mod preseq;
 pub mod qualimap;
 pub mod rseqc;

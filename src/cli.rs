@@ -114,15 +114,15 @@ pub struct RnaArgs {
     )]
     pub gtf: String,
 
-    /// Reference FASTA (required for CRAM)
+    /// Reference FASTA. Required for CRAM input; required for end-motif
+    /// fragmentomics (Phase 2). Other QC features run without it.
     #[arg(
-        short,
         long,
         value_name = "FASTA",
-        env = "RUSTQC_REFERENCE",
+        env = "LIQUIDQC_FASTA",
         help_heading = "Input / Output"
     )]
-    pub reference: Option<String>,
+    pub fasta: Option<String>,
 
     /// Output directory [default: .]
     #[arg(
@@ -571,7 +571,7 @@ mod tests {
             "4",
             "--outdir",
             "/tmp/out",
-            "--reference",
+            "--fasta",
             "genome.fa",
             "-Q",
             "20",
@@ -583,7 +583,7 @@ mod tests {
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");
-                assert_eq!(args.reference, Some("genome.fa".to_string()));
+                assert_eq!(args.fasta, Some("genome.fa".to_string()));
                 assert_eq!(args.mapq_cut, 20);
             }
             #[allow(unreachable_patterns)]

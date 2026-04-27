@@ -223,6 +223,7 @@ fn rna_help_lists_fragmentomics_flags() {
         "--panels",
         "--snp-panel",
         "--min-gene-reads",
+        "--fasta",
     ] {
         assert!(
             stdout.contains(flag),

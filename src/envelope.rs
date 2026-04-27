@@ -21,6 +21,10 @@ use std::path::Path;
 use crate::cli::Strandedness;
 use crate::rna::dupradar::counting::CountResult;
 use crate::rna::dupradar::fitting::FitResult;
+use crate::rna::fragmentomics::{
+    EndMotifResult, FragmentSizeBins, FragmentSizeResult, PeriodicityResult, SoftClipKmerByLen,
+    SoftClipResult,
+};
 use crate::rna::preseq::PreseqResult;
 use crate::rna::qualimap::QualimapResult;
 use crate::rna::rseqc::bam_stat::BamStatResult;
@@ -36,7 +40,15 @@ use crate::rna::rseqc::tin::TinResults;
 ///
 /// Must equal the `schema_version` example string in
 /// `schema/v1/liquidqc.schema.json`. Bump together when the wire format changes.
-pub const SCHEMA_VERSION: &str = "0.1.0-stub";
+pub const SCHEMA_VERSION: &str = "0.2.0-stub";
+
+/// QC flag identifiers (must match the `qc_flags` enum in
+/// `schema/v1/liquidqc.schema.json`). Phase 2 sets the four below; later
+/// phases will introduce the rest.
+const QC_FLAG_SINGLE_END_NO_TLEN: &str = "single_end_no_tlen";
+const QC_FLAG_TAGMENTATION_ENDMOTIF_BIAS: &str = "tagmentation_endmotif_bias";
+const QC_FLAG_READ_LENGTH_CAPS_LONG_FRAGMENTS: &str = "read_length_caps_long_fragments";
+const QC_FLAG_END_MOTIFS_SKIPPED_NO_FASTA: &str = "end_motifs_skipped_no_fasta";
 
 // ============================================================================
 // Top-level envelope
@@ -95,6 +107,16 @@ pub struct SampleEnvelope {
     pub dupradar: Option<DupradarBlock>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub featurecounts: Option<FeatureCountsBlock>,
+
+    // ---- Phase 2 Tier 1 fragmentomics blocks ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fragment_length: Option<FragmentLengthBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_motifs: Option<EndMotifsBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soft_clips: Option<SoftClipsBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub periodicity: Option<PeriodicityBlock>,
 }
 
 /// Filters applied to the BAM read stream before metric computation.
@@ -579,6 +601,126 @@ impl FeatureCountsBlock {
 }
 
 // ============================================================================
+// Phase 2 fragmentomics blocks
+// ============================================================================
+//
+// The four Phase 2 result types are already shaped exactly to the schema; we
+// expose them under `*Block` aliases so the SampleEnvelope field types match
+// the inherited block-naming convention.
+
+/// Wraps [`FragmentSizeResult`] (raw `histogram` + `overflow` fields are
+/// `#[serde(skip)]`, so the wire shape matches the schema). The compute
+/// pipeline keeps a typed reference to `FragmentSizeResult` so the
+/// periodicity FFT can read `histogram`; only the publicly serialized
+/// fields land in the envelope.
+#[derive(Debug, Serialize)]
+pub struct FragmentLengthBlock {
+    pub bins: FragmentSizeBins,
+    pub frac_lt_80: f64,
+    pub frac_gt_300: f64,
+    pub mean: f64,
+    pub median: u64,
+    pub total_pairs_observed: u64,
+}
+
+impl FragmentLengthBlock {
+    pub fn from_result(r: &FragmentSizeResult) -> Self {
+        Self {
+            bins: FragmentSizeBins {
+                lt_50: r.bins.lt_50,
+                b50_80: r.bins.b50_80,
+                b80_120: r.bins.b80_120,
+                b120_160: r.bins.b120_160,
+                b160_200: r.bins.b160_200,
+                b200_300: r.bins.b200_300,
+                b300_500: r.bins.b300_500,
+                gt_500: r.bins.gt_500,
+            },
+            frac_lt_80: r.frac_lt_80,
+            frac_gt_300: r.frac_gt_300,
+            mean: r.mean,
+            median: r.median,
+            total_pairs_observed: r.total_pairs_observed,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct EndMotifsBlock {
+    pub kmer_5p: IndexMap<String, u64>,
+    pub kmer_3p: IndexMap<String, u64>,
+    pub shannon_entropy_5p: f64,
+    pub shannon_entropy_3p: f64,
+    pub jensen_shannon_divergence_5p_vs_3p: f64,
+    pub pair_count_used: u64,
+    pub pair_count_skipped_non_acgt: u64,
+}
+
+impl EndMotifsBlock {
+    pub fn from_result(r: &EndMotifResult) -> Self {
+        Self {
+            kmer_5p: r.kmer_5p.clone(),
+            kmer_3p: r.kmer_3p.clone(),
+            shannon_entropy_5p: r.shannon_entropy_5p,
+            shannon_entropy_3p: r.shannon_entropy_3p,
+            jensen_shannon_divergence_5p_vs_3p: r.jensen_shannon_divergence_5p_vs_3p,
+            pair_count_used: r.pair_count_used,
+            pair_count_skipped_non_acgt: r.pair_count_skipped_non_acgt,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SoftClipsBlock {
+    pub soft_clip_rate_5p: f64,
+    pub soft_clip_rate_3p: f64,
+    pub kmer_5p_by_clip_len: SoftClipKmerByLen,
+    pub kmer_3p_by_clip_len: SoftClipKmerByLen,
+    pub primary_reads_observed: u64,
+}
+
+impl SoftClipsBlock {
+    pub fn from_result(r: &SoftClipResult) -> Self {
+        Self {
+            soft_clip_rate_5p: r.soft_clip_rate_5p,
+            soft_clip_rate_3p: r.soft_clip_rate_3p,
+            kmer_5p_by_clip_len: SoftClipKmerByLen {
+                len_1: r.kmer_5p_by_clip_len.len_1.clone(),
+                len_2: r.kmer_5p_by_clip_len.len_2.clone(),
+                len_3plus: r.kmer_5p_by_clip_len.len_3plus.clone(),
+            },
+            kmer_3p_by_clip_len: SoftClipKmerByLen {
+                len_1: r.kmer_3p_by_clip_len.len_1.clone(),
+                len_2: r.kmer_3p_by_clip_len.len_2.clone(),
+                len_3plus: r.kmer_3p_by_clip_len.len_3plus.clone(),
+            },
+            primary_reads_observed: r.primary_reads_observed,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PeriodicityBlock {
+    pub power_helical_10_to_11_nt: f64,
+    pub power_nucleosomal_145_to_170_nt: f64,
+    pub dominant_peak_period_nt: Option<u32>,
+    pub dominant_peak_power: f64,
+    pub total_power: f64,
+}
+
+impl PeriodicityBlock {
+    pub fn from_result(r: &PeriodicityResult) -> Self {
+        Self {
+            power_helical_10_to_11_nt: r.power_helical_10_to_11_nt,
+            power_nucleosomal_145_to_170_nt: r.power_nucleosomal_145_to_170_nt,
+            dominant_peak_period_nt: r.dominant_peak_period_nt,
+            dominant_peak_power: r.dominant_peak_power,
+            total_power: r.total_power,
+        }
+    }
+}
+
+// ============================================================================
 // Builder + writer
 // ============================================================================
 
@@ -619,6 +761,15 @@ pub struct BuildInputs<'a> {
     pub dupradar_fit: Option<&'a FitResult>,
     pub dupradar_genes_with_reads: u64,
     pub dupradar_genes_with_duplication: u64,
+
+    // ---- Phase 2 fragmentomics inputs ----
+    pub fragment_size: Option<&'a FragmentSizeResult>,
+    pub end_motifs: Option<&'a EndMotifResult>,
+    pub soft_clips: Option<&'a SoftClipResult>,
+    pub periodicity: Option<&'a PeriodicityResult>,
+    /// True iff `--fasta` was provided on the CLI. Used to emit the
+    /// `end_motifs_skipped_no_fasta` qc_flag when `false`.
+    pub fasta_provided: bool,
 }
 
 /// Build a [`SampleEnvelope`] from collected accumulator results.
@@ -642,6 +793,30 @@ pub fn build(inputs: BuildInputs<'_>) -> SampleEnvelope {
     // population every per-tool metric uses.
     let read_count_after_filters = inputs.bam_stat.map(|b| b.unique).unwrap_or(0);
 
+    // Phase 2 qc_flags: appended to the caller's flags, then deduped/sorted.
+    let mut qc_flags = inputs.qc_flags;
+    if !inputs.paired_end {
+        qc_flags.push(QC_FLAG_SINGLE_END_NO_TLEN.to_string());
+    }
+    // "tagmentation" is matched as a case-insensitive substring of
+    // `--library-prep` so prefixed/suffixed labels (e.g.
+    // "illumina_rna_prep_with_enrichment_tagmentation") all trigger.
+    if inputs
+        .library_prep
+        .to_ascii_lowercase()
+        .contains("tagmentation")
+    {
+        qc_flags.push(QC_FLAG_TAGMENTATION_ENDMOTIF_BIAS.to_string());
+    }
+    if read_length_max > 0 && read_length_max < 100 {
+        qc_flags.push(QC_FLAG_READ_LENGTH_CAPS_LONG_FRAGMENTS.to_string());
+    }
+    if !inputs.fasta_provided {
+        qc_flags.push(QC_FLAG_END_MOTIFS_SKIPPED_NO_FASTA.to_string());
+    }
+    qc_flags.sort();
+    qc_flags.dedup();
+
     SampleEnvelope {
         extractor_version: inputs.extractor_version.to_string(),
         schema_version: SCHEMA_VERSION.to_string(),
@@ -661,7 +836,7 @@ pub fn build(inputs: BuildInputs<'_>) -> SampleEnvelope {
         read_count_total,
         read_count_after_filters,
         filters: inputs.filters,
-        qc_flags: inputs.qc_flags,
+        qc_flags,
         runtime_seconds: inputs.runtime_seconds,
         peak_rss_mb: inputs.peak_rss_mb,
         bam_stat: bam_stat_block,
@@ -693,6 +868,10 @@ pub fn build(inputs: BuildInputs<'_>) -> SampleEnvelope {
             )
         }),
         featurecounts: inputs.count_result.map(FeatureCountsBlock::from_result),
+        fragment_length: inputs.fragment_size.map(FragmentLengthBlock::from_result),
+        end_motifs: inputs.end_motifs.map(EndMotifsBlock::from_result),
+        soft_clips: inputs.soft_clips.map(SoftClipsBlock::from_result),
+        periodicity: inputs.periodicity.map(PeriodicityBlock::from_result),
     }
 }
 
@@ -767,6 +946,10 @@ mod tests {
             qualimap: None,
             dupradar: None,
             featurecounts: None,
+            fragment_length: None,
+            end_motifs: None,
+            soft_clips: None,
+            periodicity: None,
         };
         let v: serde_json::Value = serde_json::to_value(&env).unwrap();
         let schema_text = include_str!("../schema/v1/liquidqc.schema.json");

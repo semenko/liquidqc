@@ -131,8 +131,8 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     if let Some(ref biotype) = args.biotype_attribute {
         parts.push(format!("--biotype-attribute {}", shell_escape(biotype)));
     }
-    if let Some(ref reference) = args.reference {
-        parts.push(format!("--reference {}", shell_escape(reference)));
+    if let Some(ref fasta) = args.fasta {
+        parts.push(format!("--fasta {}", shell_escape(fasta)));
     }
     if args.flat_output {
         parts.push("--flat-output".to_string());
@@ -252,15 +252,15 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         config.junction_saturation.seed = Some(seed);
     }
 
-    // Warn early if CRAM input is likely but no reference is provided
+    // Warn early if CRAM input is likely but no FASTA is provided
     if args.input.iter().any(|f| f.ends_with(".cram"))
-        && args.reference.is_none()
+        && args.fasta.is_none()
         && std::env::var("REF_PATH").is_err()
         && std::env::var("REF_CACHE").is_err()
     {
         anyhow::bail!(
             "CRAM input requires a reference FASTA. \
-             Pass --reference <FASTA> or set the REF_PATH environment variable."
+             Pass --fasta <FASTA> or set the REF_PATH environment variable."
         );
     }
 
@@ -268,9 +268,9 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     for bam_path in &args.input {
         let mut reader = rust_htslib::bam::Reader::from_path(bam_path)
             .with_context(|| format!("Cannot open alignment file '{}'", bam_path))?;
-        if let Some(ref reference) = args.reference {
+        if let Some(ref fasta) = args.fasta {
             reader
-                .set_reference(reference)
+                .set_reference(fasta)
                 .with_context(|| format!("Cannot set reference for CRAM file '{}'", bam_path))?;
         }
         let _header = reader.header().clone();
@@ -286,7 +286,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     let gtf_md5 =
         hash::md5_uncompressed(&args.gtf).with_context(|| format!("hashing GTF: {}", args.gtf))?;
     let gtf_path_abs = absolutize(&args.gtf);
-    let reference_fasta_md5 = match args.reference {
+    let reference_fasta_md5 = match args.fasta {
         Some(ref p) => {
             Some(hash::md5(p).with_context(|| format!("hashing reference FASTA: {}", p))?)
         }
@@ -350,8 +350,8 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         }
     }
     ui.config("Annotation", &args.gtf);
-    if let Some(ref reference) = args.reference {
-        ui.config("Reference", reference);
+    if let Some(ref fasta) = args.fasta {
+        ui.config("Reference", fasta);
     }
     ui.config("Stranded", &effective_stranded.to_string());
     ui.config("Paired", &effective_paired.to_string());
@@ -563,7 +563,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         chrom_prefix: chrom_prefix.as_deref(),
         outdir,
         flat_output,
-        reference: args.reference.as_deref(),
+        fasta: args.fasta.as_deref(),
         skip_dup_check: args.skip_dup_check,
         config: &config,
         biotype_attribute: &biotype_attribute,
@@ -750,8 +750,9 @@ struct SharedParams<'a> {
     flat_output: bool,
     /// Optional override for the sample name used in output filenames.
     sample_name_override: Option<&'a str>,
-    /// Optional reference FASTA for CRAM files.
-    reference: Option<&'a str>,
+    /// Optional reference FASTA. Used for CRAM decoding and end-motif
+    /// fragmentomics (Phase 2).
+    fasta: Option<&'a str>,
     /// Whether to skip duplicate-marking validation.
     skip_dup_check: bool,
     /// Configuration for conditional outputs.
@@ -811,7 +812,7 @@ struct SharedParams<'a> {
     /// MD5 of the (uncompressed) GTF bytes — schema-required envelope field.
     gtf_md5: &'a str,
     /// MD5 of the reference FASTA file as supplied, or `None` if no
-    /// `--reference` was provided.
+    /// `--fasta` was provided.
     reference_fasta_md5: Option<&'a str>,
     /// Per-BAM (md5, size_bytes) keyed by the path string passed on the CLI.
     bam_hashes: &'a HashMap<String, (String, u64)>,
@@ -938,6 +939,13 @@ fn process_single_bam(
         || rseqc_config.preseq_enabled
         || rseqc_config.tin_enabled;
 
+    // Phase 2 fragmentomics: end-motifs additionally require --fasta; that
+    // gating happens inside FragmentomicsAccumulators::new.
+    let fragmentomics_config = rna::fragmentomics::FragmentomicsConfig {
+        paired_end: params.paired,
+        mapq_cut: params.mapq_cut,
+    };
+
     // === Build Qualimap exon index (if enabled) ===
     let qualimap_index = if params.config.qualimap.enabled {
         Some(rna::qualimap::QualimapIndex::from_genes(genes))
@@ -958,7 +966,7 @@ fn process_single_bam(
         threads,
         params.chrom_mapping,
         params.chrom_prefix,
-        params.reference,
+        params.fasta,
         params.skip_dup_check,
         params.biotype_attribute,
         if any_rseqc_enabled {
@@ -972,6 +980,8 @@ fn process_single_bam(
             None
         },
         qualimap_index.as_ref(),
+        Some(&fragmentomics_config),
+        params.fasta.map(std::path::Path::new),
         Some(&pb),
     )?;
     let count_duration = count_start.elapsed();
@@ -979,6 +989,23 @@ fn process_single_bam(
 
     // Extract RSeQC accumulators from count_result.
     let rseqc_accums = count_result.rseqc.take();
+
+    // Phase 2: finalize merged fragmentomics accumulators into per-feature
+    // Results; compute periodicity FFT from the merged TLEN histogram.
+    let frag_outputs = count_result.fragmentomics.take().map(|frag| {
+        let fragment_size = frag.fragment_size.map(|a| a.into_result());
+        let periodicity = fragment_size
+            .as_ref()
+            .map(|fs| rna::fragmentomics::compute_periodicity(&fs.histogram));
+        let end_motifs = frag.end_motifs.map(|a| a.into_result());
+        let soft_clips = frag.soft_clips.map(|a| a.into_result());
+        (fragment_size, end_motifs, soft_clips, periodicity)
+    });
+    let (frag_size_result, end_motifs_result, soft_clips_result, periodicity_result) =
+        match frag_outputs {
+            Some((a, b, c, d)) => (a, b, c, d),
+            None => (None, None, None, None),
+        };
 
     // Summary stats for the box
     let total_mapped = count_result.stat_total_mapped;
@@ -1424,6 +1451,11 @@ fn process_single_bam(
         dupradar_fit: dupradar_fit.as_ref(),
         dupradar_genes_with_reads,
         dupradar_genes_with_duplication: dupradar_genes_with_dups,
+        fragment_size: frag_size_result.as_ref(),
+        end_motifs: end_motifs_result.as_ref(),
+        soft_clips: soft_clips_result.as_ref(),
+        periodicity: periodicity_result.as_ref(),
+        fasta_provided: params.fasta.is_some(),
     });
     let envelope_path = outdir.join(format!("{sample_name}.liquidqc.json"));
     envelope::write(&envelope_value, &envelope_path)?;

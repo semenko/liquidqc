@@ -11,6 +11,7 @@
 
 use crate::cli::Strandedness;
 use crate::gtf::Gene;
+use crate::rna::fragmentomics::{FragmentomicsAccumulators, FragmentomicsConfig};
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 use crate::ui::format_count;
@@ -22,6 +23,7 @@ use log::{debug, warn};
 use rayon::prelude::*;
 use rust_htslib::bam::{self, FetchDefinition, Read as BamRead};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // ===================================================================
@@ -299,6 +301,9 @@ pub struct CountResult {
     /// Qualimap RNA-Seq QC results (if enabled).
     #[allow(dead_code)]
     pub qualimap: Option<crate::rna::qualimap::QualimapResult>,
+    /// Phase 2 Tier 1 fragmentomics accumulators, merged across workers.
+    /// `None` when fragmentomics was disabled at run time.
+    pub fragmentomics: Option<FragmentomicsAccumulators>,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -542,6 +547,9 @@ struct ChromResult {
 
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
+
+    /// Phase 2 Tier 1 fragmentomics accumulators (if enabled).
+    fragmentomics: Option<FragmentomicsAccumulators>,
 }
 
 impl ChromResult {
@@ -575,6 +583,7 @@ impl ChromResult {
             fc_biotype_ambiguous: 0,
             fc_biotype_no_features: 0,
             qualimap: None,
+            fragmentomics: None,
         }
     }
 
@@ -664,6 +673,14 @@ impl ChromResult {
                 self_qm.merge(other_qm);
             } else {
                 self.qualimap = Some(other_qm);
+            }
+        }
+        // Merge Phase 2 fragmentomics accumulator
+        if let Some(other_frag) = other.fragmentomics {
+            if let Some(ref mut self_frag) = self.fragmentomics {
+                self_frag.merge(other_frag);
+            } else {
+                self.fragmentomics = Some(other_frag);
             }
         }
     }
@@ -979,6 +996,8 @@ fn process_chromosome_batch(
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
+    fragmentomics_config: Option<&FragmentomicsConfig>,
+    fasta_path: Option<&Path>,
     gene_to_biotype: &[u16],
     num_biotypes: usize,
     progress: Option<&ProgressBar>,
@@ -988,6 +1007,10 @@ fn process_chromosome_batch(
         result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(stranded));
     }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
+    let mut fragmentomics_accums = match fragmentomics_config {
+        Some(cfg) => Some(FragmentomicsAccumulators::new(cfg, fasta_path)?),
+        None => None,
+    };
 
     // Pre-compute resolved chromosome names per TID (apply prefix/mapping once,
     // not on every read). Used by both featureCounts counting and RSeQC tools.
@@ -1074,6 +1097,21 @@ fn process_chromosome_batch(
                 }
             }
 
+            // --- Phase 2 fragmentomics dispatch ---
+            // Each accumulator applies its own filters; the dispatcher only
+            // needs to resolve the chromosome name (FASTA contig name = the
+            // raw BAM header name, NOT the chrom-mapped GTF name, since
+            // end-motif lookup is against the user's reference FASTA).
+            if let Some(ref mut frag) = fragmentomics_accums {
+                let rec_tid = record.tid();
+                let frag_chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_name.len() {
+                    tid_to_name[rec_tid as usize].as_str()
+                } else {
+                    ""
+                };
+                frag.process_read(&record, frag_chrom);
+            }
+
             // Resolve chromosome for gene counting
             let rec_tid = record.tid();
             let chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_gtf_chrom.len() {
@@ -1100,6 +1138,7 @@ fn process_chromosome_batch(
 
     // Move unmatched mates into the result for cross-chromosome reconciliation
     result.unmatched_mates = mate_buffer;
+    result.fragmentomics = fragmentomics_accums;
     Ok((result, rseqc_accums))
 }
 
@@ -1152,6 +1191,8 @@ pub fn count_reads(
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
+    fragmentomics_config: Option<&FragmentomicsConfig>,
+    fasta_path: Option<&Path>,
     progress: Option<&ProgressBar>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
@@ -1300,6 +1341,8 @@ pub fn count_reads(
                         rseqc_annotations,
                         htslib_threads,
                         qualimap_index,
+                        fragmentomics_config,
+                        fasta_path,
                         &gene_to_biotype,
                         num_biotypes,
                         progress,
@@ -1332,6 +1375,11 @@ pub fn count_reads(
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
             qualimap_index.map(|_| crate::rna::qualimap::QualimapAccum::new(stranded));
+        let mut fragmentomics_accums: Option<FragmentomicsAccumulators> = match fragmentomics_config
+        {
+            Some(cfg) => Some(FragmentomicsAccumulators::new(cfg, fasta_path)?),
+            None => None,
+        };
 
         // Pre-compute resolved chromosome names for RSeQC tools
         // (apply chromosome prefix and mapping, same as parallel path)
@@ -1417,6 +1465,19 @@ pub fn count_reads(
                 }
             }
 
+            // --- Phase 2 fragmentomics dispatch (before counting filters) ---
+            // Use raw BAM contig name (not chrom_mapping output) so it matches
+            // FASTA contig names for end-motif lookups.
+            if let Some(ref mut frag) = fragmentomics_accums {
+                let tid = record.tid();
+                let frag_chrom = if tid >= 0 && (tid as usize) < tid_to_name.len() {
+                    tid_to_name[tid as usize].as_str()
+                } else {
+                    ""
+                };
+                frag.process_read(&record, frag_chrom);
+            }
+
             // Resolve chromosome for gene counting
             let tid = record.tid();
             let chrom = if tid >= 0 && (tid as usize) < tid_to_rseqc_chrom.len() {
@@ -1442,6 +1503,7 @@ pub fn count_reads(
 
         result.unmatched_mates = mate_buffer;
         result.qualimap = qualimap_accum;
+        result.fragmentomics = fragmentomics_accums;
         (result, rseqc_accums)
     };
 
@@ -1715,6 +1777,7 @@ pub fn count_reads(
             }
             _ => None,
         },
+        fragmentomics: merged.fragmentomics,
     })
 }
 

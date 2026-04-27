@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/semenko/liquidqc/schema/v1/liquidqc.schema.json",
-  "title": "liquidqc fragmentomics output (v1, Phase 0 stub)",
-  "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Phase 0 covers only the always-present envelope fields; per-metric blocks (fragment_length, end_motifs, soft_clips, periodicity, per_chromosome, panels, sex_inference, snp_fingerprint, saturation, cycle_quality) are added in their owning phases. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 + Tier-3 per-gene rows.",
+  "title": "liquidqc fragmentomics output (v1, Phase 2)",
+  "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Always-present envelope fields are required; the four Phase 2 fragmentomics blocks (fragment_length, end_motifs, soft_clips, periodicity) are optional and follow the schemas defined here. Later phases add per_chromosome, panels, sex_inference, snp_fingerprint, saturation, and cycle_quality. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 + Tier-3 per-gene rows.",
   "type": "object",
   "required": [
     "extractor_version",
@@ -36,9 +36,9 @@
     },
     "schema_version": {
       "type": "string",
-      "description": "Semver for this schema. `0.1.0-stub` until per-metric blocks land.",
+      "description": "Semver for this schema. `0.2.0-stub` covers Phase 2; subsequent phases bump again.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
-      "examples": ["0.1.0-stub", "1.0.0"]
+      "examples": ["0.2.0-stub", "1.0.0"]
     },
     "git_commit": {
       "type": "string",
@@ -75,7 +75,7 @@
     },
     "reference_fasta_md5": {
       "type": ["string", "null"],
-      "description": "MD5 of the reference FASTA. Null if `--fasta` was not supplied (some QC features unavailable).",
+      "description": "MD5 of the reference FASTA. Null if `--fasta` was not supplied (end-motif fragmentomics unavailable).",
       "pattern": "^[0-9a-f]{32}$"
     },
     "library_prep": {
@@ -163,7 +163,8 @@
           "read_length_caps_long_fragments",
           "sex_swap_warning",
           "low_complexity_library",
-          "high_duplication_nonbiological"
+          "high_duplication_nonbiological",
+          "end_motifs_skipped_no_fasta"
         ]
       },
       "uniqueItems": true
@@ -177,6 +178,143 @@
       "type": "number",
       "description": "Peak resident set size in MiB observed during the run.",
       "minimum": 0
+    },
+    "fragment_length": {
+      "type": "object",
+      "description": "Phase 2 Tier 1: fragment-length distribution from |TLEN| of proper pairs (one observation per pair). Absent on single-end input.",
+      "additionalProperties": false,
+      "required": [
+        "bins",
+        "frac_lt_80",
+        "frac_gt_300",
+        "mean",
+        "median",
+        "total_pairs_observed"
+      ],
+      "properties": {
+        "bins": {
+          "type": "object",
+          "description": "Fragment-length histogram in eight named bins. Counts are integer pair observations.",
+          "additionalProperties": false,
+          "required": [
+            "lt_50",
+            "50_80",
+            "80_120",
+            "120_160",
+            "160_200",
+            "200_300",
+            "300_500",
+            "gt_500"
+          ],
+          "properties": {
+            "lt_50":   { "type": "integer", "minimum": 0 },
+            "50_80":   { "type": "integer", "minimum": 0 },
+            "80_120":  { "type": "integer", "minimum": 0 },
+            "120_160": { "type": "integer", "minimum": 0 },
+            "160_200": { "type": "integer", "minimum": 0 },
+            "200_300": { "type": "integer", "minimum": 0 },
+            "300_500": { "type": "integer", "minimum": 0 },
+            "gt_500":  { "type": "integer", "minimum": 0 }
+          }
+        },
+        "frac_lt_80":  { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of pairs with |TLEN| < 80 nt." },
+        "frac_gt_300": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of pairs with |TLEN| > 300 nt." },
+        "mean":        { "type": "number", "minimum": 0, "description": "Mean |TLEN| in nt across observed pairs." },
+        "median":      { "type": "integer", "minimum": 0, "description": "Median |TLEN| in nt across observed pairs." },
+        "total_pairs_observed": { "type": "integer", "minimum": 0, "description": "Number of proper pairs contributing to the histogram." }
+      }
+    },
+    "end_motifs": {
+      "type": "object",
+      "description": "Phase 2 Tier 1: 5' and 3' fragment-end 4-mers from the reference FASTA (cleavage motifs). Absent if `--fasta` was not supplied (qc_flag `end_motifs_skipped_no_fasta` is emitted) or on single-end input. 5' motif: 4 ref bases starting at the leftmost coordinate of a proper pair, in fragment-strand orientation. 3' motif: 4 ref bases ending at the rightmost coordinate, reverse-complemented to fragment-strand orientation. Pairs where any of the eight bases is non-ACGT are dropped.",
+      "additionalProperties": false,
+      "required": [
+        "kmer_5p",
+        "kmer_3p",
+        "shannon_entropy_5p",
+        "shannon_entropy_3p",
+        "jensen_shannon_divergence_5p_vs_3p",
+        "pair_count_used",
+        "pair_count_skipped_non_acgt"
+      ],
+      "properties": {
+        "kmer_5p": {
+          "type": "object",
+          "description": "5'-end 4-mer counts. 256 keys (AAAA..TTTT). Values are integer pair counts.",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "kmer_3p": {
+          "type": "object",
+          "description": "3'-end 4-mer counts (in fragment-strand orientation, reverse-complemented from the reference). 256 keys.",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "shannon_entropy_5p": { "type": "number", "minimum": 0, "description": "Shannon entropy (base 2) of the 5' 4-mer distribution. Max log2(256) = 8." },
+        "shannon_entropy_3p": { "type": "number", "minimum": 0, "description": "Shannon entropy (base 2) of the 3' 4-mer distribution." },
+        "jensen_shannon_divergence_5p_vs_3p": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Jensen-Shannon divergence (base 2) between 5' and 3' 4-mer distributions. 0 = identical, 1 = maximally different."
+        },
+        "pair_count_used": { "type": "integer", "minimum": 0 },
+        "pair_count_skipped_non_acgt": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "soft_clips": {
+      "type": "object",
+      "description": "Phase 2 Tier 1: soft-clip 4-mers from read sequences (not reference). Counts split by clip end (5' vs 3' of the fragment) and by clip-length bin (1 nt, 2 nt, 3+ nt). 5'-clip / 3'-clip end semantics are orientation-corrected against the read strand. Per-end clip rates are over primary mapped reads.",
+      "additionalProperties": false,
+      "required": [
+        "soft_clip_rate_5p",
+        "soft_clip_rate_3p",
+        "kmer_5p_by_clip_len",
+        "kmer_3p_by_clip_len",
+        "primary_reads_observed"
+      ],
+      "properties": {
+        "soft_clip_rate_5p": { "type": "number", "minimum": 0, "maximum": 1 },
+        "soft_clip_rate_3p": { "type": "number", "minimum": 0, "maximum": 1 },
+        "kmer_5p_by_clip_len": {
+          "type": "object",
+          "description": "5'-clip 4-mer counts per clip-length bin (`len_1`, `len_2`, `len_3plus`). Values are 256-key 4-mer histograms.",
+          "additionalProperties": false,
+          "required": ["len_1", "len_2", "len_3plus"],
+          "properties": {
+            "len_1":     { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "len_2":     { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "len_3plus": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+          }
+        },
+        "kmer_3p_by_clip_len": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["len_1", "len_2", "len_3plus"],
+          "properties": {
+            "len_1":     { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "len_2":     { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "len_3plus": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+          }
+        },
+        "primary_reads_observed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "periodicity": {
+      "type": "object",
+      "description": "Phase 2 Tier 1: FFT-based periodicity of the |TLEN| histogram restricted to 50-500 nt (length 451, zero-padded to 512 for the transform). Power values are normalized to total_power (so they form fractions in [0, 1]) — multiply by total_power for raw spectral magnitudes. Absent on single-end input.",
+      "additionalProperties": false,
+      "required": [
+        "power_helical_10_to_11_nt",
+        "power_nucleosomal_145_to_170_nt",
+        "dominant_peak_period_nt",
+        "dominant_peak_power",
+        "total_power"
+      ],
+      "properties": {
+        "power_helical_10_to_11_nt":     { "type": "number", "minimum": 0, "maximum": 1 },
+        "power_nucleosomal_145_to_170_nt": { "type": "number", "minimum": 0, "maximum": 1 },
+        "dominant_peak_period_nt":       { "type": ["integer", "null"], "minimum": 0 },
+        "dominant_peak_power":           { "type": "number", "minimum": 0, "maximum": 1 },
+        "total_power":                   { "type": "number", "minimum": 0 }
+      }
     }
   }
 }

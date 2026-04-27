@@ -28,6 +28,9 @@ clap = { version = "4", features = ["derive", "env"] }
 # BAM file reading
 rust-htslib = { version = "1", features = ["static"] }
 
+# FFT for fragment-length periodicity (Phase 2 fragmentomics)
+realfft = "3"
+
 # Plotting
 plotters = { version = "0.3", features = ["fontconfig-dlopen"] }
 plotters-backend = "0.3"

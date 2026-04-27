@@ -213,6 +213,7 @@ mod tests {
             fc_biotype_no_features: 0,
             rseqc: None,
             qualimap: None,
+            fragmentomics: None,
         }
     }
 

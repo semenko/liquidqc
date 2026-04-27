@@ -111,7 +111,7 @@ Run `rustqc rna --help` to see the associated environment variable for each flag
 | Variable | CLI flag | Description |
 |----------|----------|-------------|
 | `RUSTQC_GTF` | `--gtf` | GTF gene annotation file |
-| `RUSTQC_REFERENCE` | `--reference` | Reference FASTA (for CRAM) |
+| `LIQUIDQC_FASTA` | `--fasta` | Reference FASTA (CRAM input + Phase 2 end-motif fragmentomics) |
 | `RUSTQC_OUTDIR` | `--outdir` | Output directory |
 | `RUSTQC_SAMPLE_NAME` | `--sample-name` | Override sample name |
 | `RUSTQC_FLAT_OUTPUT` | `--flat-output` | Flat output directory (`true`/`false`) |

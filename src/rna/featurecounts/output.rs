@@ -375,6 +375,7 @@ mod tests {
             fc_biotype_no_features: 10,
             rseqc: None,
             qualimap: None,
+            fragmentomics: None,
         };
 
         let biotypes = aggregate_biotype_counts(&count_result);
