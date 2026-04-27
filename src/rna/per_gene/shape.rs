@@ -26,45 +26,63 @@ pub struct GeneShape {
     /// the gene span (1-based inclusive). Length is `exons.len() - 1` for
     /// genes with multiple merged exons.
     pub introns: Vec<(u64, u64)>,
+    /// Sorted, merged CDS bounding-box intervals across all transcripts of
+    /// the gene (1-based inclusive). Each transcript with `cds_start /
+    /// cds_end` Some contributes one bbox; bboxes are then sorted and
+    /// merged. Empty for non-coding genes. Used by Phase 4 Tier 2 CDS-vs-
+    /// UTR coverage; intersected with `exons` to derive CDS-aligned bp.
+    pub cds_bbox: Vec<(u64, u64)>,
     /// Strand: '+', '-', or '.' (treated as '+' for decile orientation).
     pub strand: char,
 }
 
 impl GeneShape {
     /// Build the merged-exon + intron geometry from raw GTF exon list and
-    /// strand.
+    /// strand. Produces an empty `cds_bbox` — Phase-4 callers that need CDS
+    /// classification should use [`GeneShape::from_gene`] instead.
+    #[allow(dead_code)] // Test-only convenience constructor.
     pub fn from_exons<I>(exon_iter: I, strand: char) -> Self
     where
         I: IntoIterator<Item = (u64, u64)>,
     {
-        // Collect, sort, merge.
-        let mut intervals: Vec<(u64, u64)> = exon_iter.into_iter().collect();
-        intervals.sort_unstable();
+        Self::from_exons_and_cds(exon_iter, std::iter::empty(), strand)
+    }
 
-        let mut merged: Vec<(u64, u64)> = Vec::with_capacity(intervals.len());
-        for (start, end) in intervals {
-            if let Some(last) = merged.last_mut() {
-                if start <= last.1 + 1 {
-                    if end > last.1 {
-                        last.1 = end;
-                    }
-                    continue;
-                }
-            }
-            merged.push((start, end));
-        }
+    /// Build the merged-exon + intron + CDS-bbox geometry directly from the
+    /// parsed [`crate::gtf::Gene`]. CDS bbox per transcript is `(cds_start,
+    /// cds_end)`; transcripts without CDS are skipped.
+    pub fn from_gene(gene: &crate::gtf::Gene) -> Self {
+        let exon_iter = gene.exons.iter().map(|e| (e.start, e.end));
+        let cds_iter = gene
+            .transcripts
+            .iter()
+            .filter_map(|t| match (t.cds_start, t.cds_end) {
+                (Some(s), Some(e)) if e >= s => Some((s, e)),
+                _ => None,
+            });
+        Self::from_exons_and_cds(exon_iter, cds_iter, gene.strand)
+    }
+
+    /// Internal builder: merges both exon and CDS-bbox interval streams.
+    pub fn from_exons_and_cds<E, C>(exon_iter: E, cds_iter: C, strand: char) -> Self
+    where
+        E: IntoIterator<Item = (u64, u64)>,
+        C: IntoIterator<Item = (u64, u64)>,
+    {
+        let merged_exons = sort_and_merge(exon_iter);
+        let cds_bbox = sort_and_merge(cds_iter);
 
         // Cumulative exonic length and total.
-        let mut cum_len = Vec::with_capacity(merged.len());
+        let mut cum_len = Vec::with_capacity(merged_exons.len());
         let mut total: u64 = 0;
-        for &(s, e) in merged.iter() {
+        for &(s, e) in merged_exons.iter() {
             cum_len.push(total);
             total += e - s + 1;
         }
 
         // Introns = gaps strictly between consecutive merged exons.
-        let mut introns = Vec::with_capacity(merged.len().saturating_sub(1));
-        for w in merged.windows(2) {
+        let mut introns = Vec::with_capacity(merged_exons.len().saturating_sub(1));
+        for w in merged_exons.windows(2) {
             let prev_end = w[0].1;
             let next_start = w[1].0;
             if next_start > prev_end + 1 {
@@ -73,13 +91,35 @@ impl GeneShape {
         }
 
         Self {
-            exons: merged,
+            exons: merged_exons,
             cum_len,
             total_exonic: total,
             introns,
+            cds_bbox,
             strand,
         }
     }
+}
+
+fn sort_and_merge<I>(iter: I) -> Vec<(u64, u64)>
+where
+    I: IntoIterator<Item = (u64, u64)>,
+{
+    let mut intervals: Vec<(u64, u64)> = iter.into_iter().collect();
+    intervals.sort_unstable();
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(intervals.len());
+    for (start, end) in intervals {
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 + 1 {
+                if end > last.1 {
+                    last.1 = end;
+                }
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+    merged
 }
 
 /// One `GeneShape` per gene, indexed by `GeneIdx` (insertion order in the
@@ -94,12 +134,7 @@ impl GeneShapeIndex {
     /// `IndexMap` insertion order, which is exactly the `GeneIdInterner`
     /// order built by `dupradar::counting::GeneIdInterner::from_genes`.
     pub fn build(genes: &IndexMap<String, Gene>) -> Self {
-        let shapes: Vec<GeneShape> = genes
-            .values()
-            .map(|gene| {
-                GeneShape::from_exons(gene.exons.iter().map(|e| (e.start, e.end)), gene.strand)
-            })
-            .collect();
+        let shapes: Vec<GeneShape> = genes.values().map(GeneShape::from_gene).collect();
         Self { shapes }
     }
 

@@ -377,6 +377,8 @@ mod tests {
             qualimap: None,
             fragmentomics: None,
             per_gene: None,
+            saturation: None,
+            snp_fingerprint: None,
         };
 
         let biotypes = aggregate_biotype_counts(&count_result);

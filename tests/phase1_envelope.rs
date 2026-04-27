@@ -63,7 +63,7 @@ fn envelope_has_expected_top_level_shape() {
     // Identifiers + provenance.
     assert_eq!(obj["sample_id"].as_str(), Some("test"));
     assert_eq!(obj["library_prep"].as_str(), Some("unknown"));
-    assert_eq!(obj["schema_version"].as_str(), Some("0.3.0-stub"));
+    assert_eq!(obj["schema_version"].as_str(), Some("0.4.0-stub"));
     assert_eq!(
         obj["extractor_version"].as_str(),
         Some(env!("CARGO_PKG_VERSION"))

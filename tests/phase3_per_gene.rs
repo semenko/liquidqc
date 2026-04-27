@@ -86,8 +86,8 @@ fn per_gene_parquet_sibling_exists_with_envelope_block() {
     );
     assert_eq!(
         block["schema_version_per_gene"].as_str(),
-        Some("1.0.0-stub"),
-        "schema_version_per_gene should be 1.0.0-stub"
+        Some("1.1.0-stub"),
+        "schema_version_per_gene should be 1.1.0-stub"
     );
     let md5 = block["parquet_md5"].as_str().expect("parquet_md5 missing");
     assert_eq!(md5.len(), 32, "parquet_md5 should be 32-hex");
@@ -179,7 +179,7 @@ fn per_gene_parquet_kv_metadata_is_consistent_with_envelope() {
             .get("liquidqc.per_gene_schema_version")
             .copied()
             .flatten(),
-        Some("1.0.0-stub")
+        Some("1.1.0-stub")
     );
     assert_eq!(
         kv_map.get("liquidqc.library_prep").copied().flatten(),

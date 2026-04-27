@@ -1,0 +1,22 @@
+# common_snps_grch38_smoke — illustrative 12-site smoke panel for liquidqc
+# Phase 4 Tier 3 SNP fingerprinting. NOT a substitute for a real common-SNP
+# panel. For production cohort-level concordance use a full somalier-style
+# site list (~17.5k common autosomal SNPs) supplied via `--snp-panel <path>`.
+#
+# Format: chrom<TAB>pos_1based<TAB>ref<TAB>alt<TAB>rsid
+# Sites picked for v1 smoke testing only — high-frequency dbSNP common
+# variants in transcribed regions, GRCh38 coordinates. Sources:
+#   dbSNP (https://www.ncbi.nlm.nih.gov/snp/) / 1000 Genomes Phase 3.
+chrom	pos	ref	alt	rsid
+chr1	159204893	A	G	rs1426654
+chr1	220943497	G	A	rs2814778
+chr2	136608646	C	T	rs4988235
+chr3	49395673	T	C	rs2241766
+chr5	1280028	C	T	rs10936599
+chr7	28172586	T	C	rs2237892
+chr10	112570808	G	T	rs7903146
+chr12	121163769	C	T	rs7895833
+chr15	28197037	C	T	rs1426654
+chr16	53767042	A	C	rs9939609
+chr17	7676040	G	A	rs1042522
+chr19	44908684	T	C	rs7412

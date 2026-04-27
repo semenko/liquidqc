@@ -1,0 +1,13 @@
+# Hemoglobin subunit genes (HGNC family). One HGNC symbol per line.
+# Used by liquidqc Phase 4 Tier 3 `gene_class_fractions.hemoglobin`.
+# Source: HGNC HBA / HBB / HBG / HBM / HBQ / HBZ subunit groups.
+HBA1
+HBA2
+HBB
+HBD
+HBE1
+HBG1
+HBG2
+HBM
+HBQ1
+HBZ

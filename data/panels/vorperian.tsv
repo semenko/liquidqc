@@ -1,0 +1,32 @@
+# vorperian — illustrative cfRNA cell-of-origin markers from
+# Vorperian et al., Nat Biotechnol 2022 (doi:10.1038/s41587-021-01188-9), an
+# atlas of cell-type contributions to plasma cfRNA. Partial curation: a few
+# canonical lineage markers for the cfRNA-detectable cell types most cited
+# in the paper (hepatocyte, erythroblast, syncytiotrophoblast, brain-cell
+# subtypes, megakaryocyte / platelet).
+#
+# Format: gene_id<TAB>gene_symbol<TAB>panel<TAB>cell_type<TAB>weight
+gene_id	gene_symbol	panel	cell_type	weight
+	ALB	vorperian	Hepatocyte	1
+	HP	vorperian	Hepatocyte	1
+	HBB	vorperian	Erythroblast	1
+	HBA1	vorperian	Erythroblast	1
+	GYPA	vorperian	Erythroblast	1
+	ITGA2B	vorperian	Megakaryocyte_platelet	1
+	PF4	vorperian	Megakaryocyte_platelet	1
+	GP1BA	vorperian	Megakaryocyte_platelet	1
+	CGA	vorperian	Syncytiotrophoblast	1
+	CGB1	vorperian	Syncytiotrophoblast	1
+	CYP19A1	vorperian	Syncytiotrophoblast	1
+	GFAP	vorperian	Astrocyte	1
+	MBP	vorperian	Oligodendrocyte	1
+	SYP	vorperian	Neuron	1
+	RBFOX3	vorperian	Neuron	1
+	INS	vorperian	Pancreatic_beta	1
+	UMOD	vorperian	Kidney_tubular	1
+	NPHS1	vorperian	Kidney_podocyte	1
+	SFTPC	vorperian	Lung_alveolar_AT2	1
+	TNNT2	vorperian	Cardiomyocyte	1
+	MYH7	vorperian	Cardiomyocyte	1
+	SLC12A1	vorperian	Kidney_TAL	1
+	AQP2	vorperian	Kidney_collecting_duct	1

@@ -19,12 +19,16 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::cli::Strandedness;
+use crate::rna::chrom_metrics::ChromMetricsResult;
+use crate::rna::cycle_quality::CycleQualityResult;
 use crate::rna::dupradar::counting::CountResult;
 use crate::rna::dupradar::fitting::FitResult;
 use crate::rna::fragmentomics::{
     EndMotifResult, FragmentSizeBins, FragmentSizeResult, PeriodicityResult, SoftClipKmerByLen,
     SoftClipResult,
 };
+use crate::rna::gene_class::GeneClassFractionsResult;
+use crate::rna::panels::PanelsResult;
 use crate::rna::preseq::PreseqResult;
 use crate::rna::qualimap::QualimapResult;
 use crate::rna::rseqc::bam_stat::BamStatResult;
@@ -35,12 +39,16 @@ use crate::rna::rseqc::junction_saturation::SaturationResult;
 use crate::rna::rseqc::read_distribution::ReadDistributionResult;
 use crate::rna::rseqc::read_duplication::ReadDuplicationResult;
 use crate::rna::rseqc::tin::TinResults;
+use crate::rna::saturation::SaturationResult as Phase4SaturationResult;
+use crate::rna::sex_infer::SexInferenceResult;
+use crate::rna::snp_fingerprint::SnpFingerprintResult;
+use crate::rna::splice_dinuc::SpliceSiteDinucleotidesResult;
 
 /// Schema version this struct serializes to.
 ///
 /// Must equal the `schema_version` example string in
 /// `schema/v1/liquidqc.schema.json`. Bump together when the wire format changes.
-pub const SCHEMA_VERSION: &str = "0.3.0-stub";
+pub const SCHEMA_VERSION: &str = "0.4.0-stub";
 
 /// QC flag identifiers (must match the `qc_flags` enum in
 /// `schema/v1/liquidqc.schema.json`). Phase 2 sets the four below; later
@@ -121,6 +129,68 @@ pub struct SampleEnvelope {
     // ---- Per-gene Tier-2 reference ----
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_gene: Option<PerGeneBlock>,
+
+    // ---- Phase 4 Tier 3: scalar + splice-site dinucleotides ----
+    /// Top-level fraction of leftmost proper-pair mates with `|TLEN|`
+    /// shorter than `2 * leftmost_qlen` — adapter-readthrough proxy.
+    /// Absent on single-end input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adapter_readthrough_rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub splice_site_dinucleotides: Option<SpliceSiteDinucleotidesBlock>,
+
+    // ---- Phase 4 Tier 3: per-chromosome + cycle quality ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_chromosome: Option<ChromMetricsResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cycle_quality: Option<CycleQualityResult>,
+
+    // ---- Phase 4 Tier 3: gene-class fractions ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gene_class_fractions: Option<GeneClassFractionsResult>,
+
+    // ---- Phase 4 Tier 3: marker panels ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub panels: Option<PanelsResult>,
+
+    // ---- Phase 4 Tier 3: sex inference ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sex_inference: Option<SexInferenceResult>,
+
+    // ---- Phase 4 Tier 3: saturation curve ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saturation: Option<Phase4SaturationResult>,
+
+    // ---- Phase 4 Tier 3: SNP fingerprint ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snp_fingerprint: Option<SnpFingerprintResult>,
+}
+
+/// Phase 4 splice-site dinucleotide tally over unique junctions.
+///
+/// Mirrors the four classes in [`SpliceSiteDinucleotidesResult`] verbatim; the
+/// envelope just provides the schema-stable wire shape.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct SpliceSiteDinucleotidesBlock {
+    pub gt_ag: u64,
+    pub gc_ag: u64,
+    pub at_ac: u64,
+    pub other: u64,
+    pub skipped_oob: u64,
+    pub junctions_total: u64,
+}
+
+impl SpliceSiteDinucleotidesBlock {
+    pub fn from_result(r: &SpliceSiteDinucleotidesResult) -> Self {
+        Self {
+            gt_ag: r.gt_ag,
+            gc_ag: r.gc_ag,
+            at_ac: r.at_ac,
+            other: r.other,
+            skipped_oob: r.skipped_oob,
+            junctions_total: r.junctions_total,
+        }
+    }
 }
 
 /// Reference to the per-gene Tier-2 sparse Parquet sibling file.
@@ -803,6 +873,16 @@ pub struct BuildInputs<'a> {
 
     // ---- Per-gene Tier-2 reference ----
     pub per_gene: Option<&'a PerGeneBlock>,
+
+    // ---- Phase 4 Tier 3 inputs ----
+    pub splice_site_dinucleotides: Option<&'a SpliceSiteDinucleotidesResult>,
+    pub per_chromosome: Option<&'a ChromMetricsResult>,
+    pub cycle_quality: Option<&'a CycleQualityResult>,
+    pub gene_class_fractions: Option<&'a GeneClassFractionsResult>,
+    pub panels: Option<&'a PanelsResult>,
+    pub sex_inference: Option<&'a SexInferenceResult>,
+    pub saturation: Option<&'a Phase4SaturationResult>,
+    pub snp_fingerprint: Option<&'a SnpFingerprintResult>,
 }
 
 /// Build a [`SampleEnvelope`] from collected accumulator results.
@@ -906,6 +986,17 @@ pub fn build(inputs: BuildInputs<'_>) -> SampleEnvelope {
         soft_clips: inputs.soft_clips.map(SoftClipsBlock::from_result),
         periodicity: inputs.periodicity.map(PeriodicityBlock::from_result),
         per_gene: inputs.per_gene.cloned(),
+        adapter_readthrough_rate: inputs.fragment_size.map(|fs| fs.adapter_readthrough_rate),
+        splice_site_dinucleotides: inputs
+            .splice_site_dinucleotides
+            .map(SpliceSiteDinucleotidesBlock::from_result),
+        per_chromosome: inputs.per_chromosome.cloned(),
+        cycle_quality: inputs.cycle_quality.cloned(),
+        gene_class_fractions: inputs.gene_class_fractions.copied(),
+        panels: inputs.panels.cloned(),
+        sex_inference: inputs.sex_inference.copied(),
+        saturation: inputs.saturation.cloned(),
+        snp_fingerprint: inputs.snp_fingerprint.cloned(),
     }
 }
 
@@ -985,6 +1076,15 @@ mod tests {
             soft_clips: None,
             periodicity: None,
             per_gene: None,
+            adapter_readthrough_rate: None,
+            splice_site_dinucleotides: None,
+            per_chromosome: None,
+            cycle_quality: None,
+            gene_class_fractions: None,
+            panels: None,
+            sex_inference: None,
+            saturation: None,
+            snp_fingerprint: None,
         };
         let v: serde_json::Value = serde_json::to_value(&env).unwrap();
         let schema_text = include_str!("../schema/v1/liquidqc.schema.json");

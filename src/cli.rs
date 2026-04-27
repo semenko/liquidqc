@@ -432,8 +432,9 @@ pub struct RnaArgs {
     )]
     pub library_prep: String,
 
-    /// Marker panels to load (CSV: lm22,tabula_sapiens,vorperian).
-    /// Phase 4. Empty in Phase 0.
+    /// Bundled marker panels to load (CSV; default: all bundled panels).
+    /// Names: `lm22`, `tabula_sapiens_cfrna`, `vorperian`. Pass an empty
+    /// value to disable bundled panels.
     #[arg(
         long = "panels",
         value_name = "CSV",
@@ -441,6 +442,18 @@ pub struct RnaArgs {
         help_heading = "Fragmentomics (liquidqc v1)"
     )]
     pub panels: Option<String>,
+
+    /// Additional marker-panel TSVs to load alongside the bundled ones.
+    /// Format: `gene_id<TAB>gene_symbol<TAB>panel<TAB>cell_type<TAB>weight`.
+    /// Repeat the flag for multiple files.
+    #[arg(
+        long = "panels-tsv",
+        value_name = "TSV",
+        env = "LIQUIDQC_PANELS_TSV",
+        help_heading = "Fragmentomics (liquidqc v1)",
+        action = clap::ArgAction::Append
+    )]
+    pub panels_tsv: Vec<String>,
 
     /// Common-SNP fingerprint VCF (default: bundled somalier sites).
     /// Phase 4.
@@ -472,6 +485,16 @@ pub struct RnaArgs {
         help_heading = "Fragmentomics (liquidqc v1)"
     )]
     pub sample_id: Option<String>,
+
+    /// Saturation curve fractions (CSV of floats in (0, 1]).
+    /// Default: `0.05,0.10,0.25,0.50,0.75,1.00`.
+    #[arg(
+        long = "saturation-fractions",
+        value_name = "CSV",
+        env = "LIQUIDQC_SATURATION_FRACTIONS",
+        help_heading = "Fragmentomics (liquidqc v1)"
+    )]
+    pub saturation_fractions: Option<String>,
 }
 
 /// Parse command-line arguments and return the Cli struct.

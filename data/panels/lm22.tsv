@@ -1,0 +1,44 @@
+# lm22 — illustrative subset of the CIBERSORT LM22 panel (Newman et al.,
+# Nat Methods 2015. doi:10.1038/nmeth.3337). Partial curation: a handful of
+# well-known marker genes per cell type, intended as a baseline for the v1
+# panel-aggregation infrastructure rather than a faithful LM22 replacement.
+# Replace via `--panels-tsv <path>` for full LM22 weights.
+#
+# Format: gene_id<TAB>gene_symbol<TAB>panel<TAB>cell_type<TAB>weight
+# Empty gene_id is fine; matching falls back to gene_symbol against the GTF
+# `gene_name` attribute. Weight is informational; the v1 aggregator counts
+# reads per (panel, cell_type) and ignores weight (reserved for future use).
+gene_id	gene_symbol	panel	cell_type	weight
+	CD3D	lm22	T_cells	1
+	CD3E	lm22	T_cells	1
+	CD3G	lm22	T_cells	1
+	CD4	lm22	T_cells_CD4	1
+	CD8A	lm22	T_cells_CD8	1
+	CD8B	lm22	T_cells_CD8	1
+	CD19	lm22	B_cells	1
+	MS4A1	lm22	B_cells	1
+	CD79A	lm22	B_cells	1
+	CD79B	lm22	B_cells	1
+	NCAM1	lm22	NK_cells	1
+	NKG7	lm22	NK_cells	1
+	KLRD1	lm22	NK_cells	1
+	GNLY	lm22	NK_cells	1
+	CD14	lm22	Monocytes	1
+	LYZ	lm22	Monocytes	1
+	S100A8	lm22	Monocytes	1
+	S100A9	lm22	Monocytes	1
+	CD68	lm22	Macrophages	1
+	MARCO	lm22	Macrophages	1
+	MRC1	lm22	Macrophages	1
+	CSF1R	lm22	Macrophages	1
+	FCER1A	lm22	Dendritic_cells	1
+	CLEC10A	lm22	Dendritic_cells	1
+	IRF8	lm22	Dendritic_cells	1
+	ELANE	lm22	Neutrophils	1
+	MPO	lm22	Neutrophils	1
+	FCGR3B	lm22	Neutrophils	1
+	CSF3R	lm22	Neutrophils	1
+	FOXP3	lm22	T_cells_regulatory	1
+	IL2RA	lm22	T_cells_regulatory	1
+	TPSAB1	lm22	Mast_cells	1
+	CPA3	lm22	Mast_cells	1

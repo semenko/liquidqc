@@ -119,6 +119,11 @@ pub struct PerGeneState {
     /// Aligned bp from primary reads that overlap this gene's intronic
     /// regions (gene span minus merged-exon union).
     pub intron_aligned_bp: u64,
+    /// Phase 4 Tier 2: aligned bp from primary reads that overlap this
+    /// gene's CDS bbox (intersection of merged exons with the merged
+    /// per-transcript `(cds_start, cds_end)` ranges). Strict subset of
+    /// `exon_aligned_bp`. UTR bp is derived as `exon_aligned_bp - cds_aligned_bp`.
+    pub cds_aligned_bp: u64,
 }
 
 impl Default for PerGeneState {
@@ -142,6 +147,7 @@ impl Default for PerGeneState {
             decile_coverage: [0; DECILE_COUNT],
             exon_aligned_bp: 0,
             intron_aligned_bp: 0,
+            cds_aligned_bp: 0,
         }
     }
 }
@@ -181,6 +187,7 @@ impl PerGeneState {
         self.intron_aligned_bp = self
             .intron_aligned_bp
             .saturating_add(other.intron_aligned_bp);
+        self.cds_aligned_bp = self.cds_aligned_bp.saturating_add(other.cds_aligned_bp);
     }
 
     /// Borrow `em_5p` as a flat `&[u32; 256]`; returns the static zero
@@ -311,14 +318,28 @@ impl PerGeneState {
         }
     }
 
-    /// Intron-exon ratio (intron / (intron + exon)). `None` when neither
-    /// region was hit by any primary read.
-    pub fn intron_exon_ratio(&self) -> Option<f64> {
+    /// Intron retention rate: `intron / (intron + exon)`. `None` when
+    /// neither region was hit by any primary read.
+    pub fn intron_retention_rate(&self) -> Option<f64> {
         let total = self.exon_aligned_bp + self.intron_aligned_bp;
         if total == 0 {
             None
         } else {
             Some(self.intron_aligned_bp as f64 / total as f64)
+        }
+    }
+
+    /// UTR aligned bp = exonic bp not overlapping any CDS bbox.
+    pub fn utr_aligned_bp(&self) -> u64 {
+        self.exon_aligned_bp.saturating_sub(self.cds_aligned_bp)
+    }
+
+    /// `cds / (cds + utr)`. `None` when no exonic bp was observed.
+    pub fn cds_utr_ratio(&self) -> Option<f64> {
+        if self.exon_aligned_bp == 0 {
+            None
+        } else {
+            Some(self.cds_aligned_bp as f64 / self.exon_aligned_bp as f64)
         }
     }
 }
@@ -438,8 +459,10 @@ mod tests {
     #[test]
     fn merge_min_treats_zero_as_unset() {
         let mut a = PerGeneState::default(); // tlen_min = 0 (unset)
-        let mut b = PerGeneState::default();
-        b.tlen_min = 75;
+        let b = PerGeneState {
+            tlen_min: 75,
+            ..Default::default()
+        };
         a.merge(b);
         assert_eq!(a.tlen_min, 75);
     }
@@ -449,19 +472,21 @@ mod tests {
         let s = PerGeneState::default();
         assert!(s.soft_clip_rate_5p().is_none());
         assert!(s.soft_clip_rate_3p().is_none());
-        assert!(s.intron_exon_ratio().is_none());
+        assert!(s.intron_retention_rate().is_none());
     }
 
     #[test]
     fn rates_use_primary_reads_denominator() {
-        let mut s = PerGeneState::default();
-        s.primary_reads = 100;
-        s.primary_reads_with_5p_clip = 25;
-        s.primary_reads_with_3p_clip = 5;
-        s.exon_aligned_bp = 800;
-        s.intron_aligned_bp = 200;
+        let s = PerGeneState {
+            primary_reads: 100,
+            primary_reads_with_5p_clip: 25,
+            primary_reads_with_3p_clip: 5,
+            exon_aligned_bp: 800,
+            intron_aligned_bp: 200,
+            ..Default::default()
+        };
         assert!((s.soft_clip_rate_5p().unwrap() - 0.25).abs() < 1e-12);
         assert!((s.soft_clip_rate_3p().unwrap() - 0.05).abs() < 1e-12);
-        assert!((s.intron_exon_ratio().unwrap() - 0.2).abs() < 1e-12);
+        assert!((s.intron_retention_rate().unwrap() - 0.2).abs() < 1e-12);
     }
 }

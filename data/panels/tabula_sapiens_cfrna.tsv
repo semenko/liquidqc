@@ -1,0 +1,35 @@
+# tabula_sapiens_cfrna — illustrative cfRNA-relevant tissue / cell-type
+# markers selected from the Tabula Sapiens cell atlas (Tabula Sapiens
+# Consortium, Science 2022. doi:10.1126/science.abl4896). Partial curation:
+# canonical lineage markers for tissues frequently observed in plasma cfRNA
+# (liver, kidney, lung, intestinal epithelium, cardiac muscle). Replace via
+# `--panels-tsv <path>` for fuller cell-type panels.
+#
+# Format: gene_id<TAB>gene_symbol<TAB>panel<TAB>cell_type<TAB>weight
+gene_id	gene_symbol	panel	cell_type	weight
+	ALB	tabula_sapiens_cfrna	Hepatocyte	1
+	APOB	tabula_sapiens_cfrna	Hepatocyte	1
+	APOA1	tabula_sapiens_cfrna	Hepatocyte	1
+	TTR	tabula_sapiens_cfrna	Hepatocyte	1
+	CYP3A4	tabula_sapiens_cfrna	Hepatocyte	1
+	HNF4A	tabula_sapiens_cfrna	Hepatocyte	1
+	UMOD	tabula_sapiens_cfrna	Kidney_tubular	1
+	SLC12A3	tabula_sapiens_cfrna	Kidney_tubular	1
+	NPHS1	tabula_sapiens_cfrna	Kidney_podocyte	1
+	NPHS2	tabula_sapiens_cfrna	Kidney_podocyte	1
+	SFTPC	tabula_sapiens_cfrna	Lung_alveolar_AT2	1
+	SFTPB	tabula_sapiens_cfrna	Lung_alveolar_AT2	1
+	SCGB1A1	tabula_sapiens_cfrna	Lung_club_cell	1
+	FOXJ1	tabula_sapiens_cfrna	Lung_ciliated	1
+	MUC2	tabula_sapiens_cfrna	Intestinal_goblet	1
+	VIL1	tabula_sapiens_cfrna	Intestinal_enterocyte	1
+	LGR5	tabula_sapiens_cfrna	Intestinal_stem	1
+	TNNT2	tabula_sapiens_cfrna	Cardiomyocyte	1
+	MYH7	tabula_sapiens_cfrna	Cardiomyocyte	1
+	NKX2-5	tabula_sapiens_cfrna	Cardiomyocyte	1
+	INS	tabula_sapiens_cfrna	Pancreatic_beta	1
+	GCG	tabula_sapiens_cfrna	Pancreatic_alpha	1
+	NEUROD1	tabula_sapiens_cfrna	Pancreatic_endocrine	1
+	GFAP	tabula_sapiens_cfrna	Astrocyte	1
+	MBP	tabula_sapiens_cfrna	Oligodendrocyte	1
+	MAP2	tabula_sapiens_cfrna	Neuron	1

@@ -1,0 +1,26 @@
+# Apolipoprotein gene family (HGNC). One HGNC symbol per line.
+# Used by liquidqc Phase 4 Tier 3 `gene_class_fractions.apolipoprotein`.
+# Source: HGNC APO* family. Excludes apoptosis-related symbols (APOPT1) by
+# enumerating explicitly rather than prefix-matching.
+APOA1
+APOA2
+APOA4
+APOA5
+APOB
+APOC1
+APOC2
+APOC3
+APOC4
+APOD
+APOE
+APOF
+APOH
+APOL1
+APOL2
+APOL3
+APOL4
+APOL5
+APOL6
+APOM
+APOO
+APOOL

@@ -310,6 +310,12 @@ pub struct CountResult {
     /// Per-gene Tier-2 accumulator, merged across workers. `None` when
     /// per-gene output was disabled at run time.
     pub per_gene: Option<PerGeneAccumulator>,
+
+    /// Phase 4 Tier 3 saturation-curve accumulator, merged across workers.
+    pub saturation: Option<crate::rna::saturation::SaturationAccum>,
+
+    /// Phase 4 Tier 3 SNP-fingerprint accumulator, merged across workers.
+    pub snp_fingerprint: Option<crate::rna::snp_fingerprint::SnpFingerprintAccum>,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -690,6 +696,15 @@ struct ChromResult {
     /// Per-gene Tier-2 accumulator (if enabled). Built once per worker;
     /// merged additively across workers.
     per_gene: Option<PerGeneAccumulator>,
+
+    /// Phase 4 Tier 3 saturation-curve accumulator (sample-level). Always
+    /// allocated when the per-pass dispatch runs.
+    saturation: Option<crate::rna::saturation::SaturationAccum>,
+
+    /// Phase 4 Tier 3 SNP-fingerprint accumulator (sample-level). Allocated
+    /// only when the SNP-site index is non-empty after BAM-header
+    /// resolution.
+    snp_fingerprint: Option<crate::rna::snp_fingerprint::SnpFingerprintAccum>,
 }
 
 impl ChromResult {
@@ -725,6 +740,8 @@ impl ChromResult {
             qualimap: None,
             fragmentomics: None,
             per_gene: None,
+            saturation: None,
+            snp_fingerprint: None,
         }
     }
 
@@ -848,6 +865,20 @@ impl ChromResult {
                 self_pg.merge(other_pg);
             } else {
                 self.per_gene = Some(other_pg);
+            }
+        }
+        if let Some(other_sat) = other.saturation {
+            if let Some(ref mut self_sat) = self.saturation {
+                self_sat.merge(other_sat);
+            } else {
+                self.saturation = Some(other_sat);
+            }
+        }
+        if let Some(other_snp) = other.snp_fingerprint {
+            if let Some(ref mut self_snp) = self.snp_fingerprint {
+                self_snp.merge(other_snp);
+            } else {
+                self.snp_fingerprint = Some(other_snp);
             }
         }
     }
@@ -1041,6 +1072,17 @@ fn process_counting_record(
         biotype_hits_buf,
         result,
     );
+
+    // --- Phase 4 saturation tracking ---
+    // One observation per unambiguously assigned (non-multi, single gene)
+    // record. Hashes the read name to a deterministic subsampling bucket;
+    // counts are accumulated per (gene, bucket) and the saturation curve is
+    // computed at finalize time.
+    if !is_multi && gene_hits.len() == 1 {
+        if let Some(ref mut sat) = result.saturation {
+            sat.observe(gene_hits[0], record.qname());
+        }
+    }
 
     // Compute soft-clip flags + (paired-end) leftmost-mate metadata once
     // here so they can be shared between the unambiguous-assignment per-gene
@@ -1259,6 +1301,7 @@ fn process_chromosome_batch(
     fragmentomics_config: Option<&FragmentomicsConfig>,
     fasta_path: Option<&Path>,
     per_gene_shape_index: Option<&GeneShapeIndex>,
+    snp_site_index: Option<&crate::rna::snp_fingerprint::SnpSiteIndex>,
     gene_to_biotype: &[u16],
     num_biotypes: usize,
     progress: Option<&ProgressBar>,
@@ -1267,9 +1310,17 @@ fn process_chromosome_batch(
     if qualimap_index.is_some() {
         result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(stranded));
     }
+    result.saturation = Some(crate::rna::saturation::SaturationAccum::new(num_genes));
+    if snp_site_index.is_some_and(|i| !i.is_empty()) {
+        result.snp_fingerprint = Some(crate::rna::snp_fingerprint::SnpFingerprintAccum::new());
+    }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
     let mut fragmentomics_accums = match fragmentomics_config {
-        Some(cfg) => Some(FragmentomicsAccumulators::new(cfg, fasta_path)?),
+        Some(cfg) => Some(FragmentomicsAccumulators::new(
+            cfg,
+            fasta_path,
+            tid_to_name.len(),
+        )?),
         None => None,
     };
     let per_gene_mapq_cut = fragmentomics_config.map(|c| c.mapq_cut).unwrap_or(0);
@@ -1375,6 +1426,10 @@ fn process_chromosome_batch(
                 frag.process_read(&record, frag_chrom);
             }
 
+            if let (Some(ref mut snp), Some(idx)) = (&mut result.snp_fingerprint, snp_site_index) {
+                snp.process_read(&record, idx, per_gene_mapq_cut);
+            }
+
             // Resolve chromosome for gene counting
             let chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_gtf_chrom.len() {
                 tid_to_gtf_chrom[rec_tid as usize].as_str()
@@ -1477,6 +1532,10 @@ pub fn count_reads(
     // Present iff per-gene Tier-2 is enabled. Required for the per-gene
     // accumulator's decile and intron-exon helpers.
     per_gene_shape_index: Option<&GeneShapeIndex>,
+    // Phase 4 Tier 3 SNP-site index resolved against the BAM header. `None`
+    // disables SNP fingerprinting; `Some` with an empty index (no sites
+    // resolved) produces an empty fingerprint result.
+    snp_site_index: Option<&crate::rna::snp_fingerprint::SnpSiteIndex>,
     progress: Option<&ProgressBar>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
@@ -1628,6 +1687,7 @@ pub fn count_reads(
                         fragmentomics_config,
                         fasta_path,
                         per_gene_shape_index,
+                        snp_site_index,
                         &gene_to_biotype,
                         num_biotypes,
                         progress,
@@ -1656,13 +1716,21 @@ pub fn count_reads(
         // This avoids the need for an index file.
         let global_read_counter = AtomicU64::new(0);
         let mut result = ChromResult::new(interner.len(), num_biotypes);
+        result.saturation = Some(crate::rna::saturation::SaturationAccum::new(interner.len()));
+        if snp_site_index.is_some_and(|i| !i.is_empty()) {
+            result.snp_fingerprint = Some(crate::rna::snp_fingerprint::SnpFingerprintAccum::new());
+        }
         let mut rseqc_accums: Option<RseqcAccumulators> =
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
             qualimap_index.map(|_| crate::rna::qualimap::QualimapAccum::new(stranded));
         let mut fragmentomics_accums: Option<FragmentomicsAccumulators> = match fragmentomics_config
         {
-            Some(cfg) => Some(FragmentomicsAccumulators::new(cfg, fasta_path)?),
+            Some(cfg) => Some(FragmentomicsAccumulators::new(
+                cfg,
+                fasta_path,
+                tid_to_name.len(),
+            )?),
             None => None,
         };
         let per_gene_mapq_cut = fragmentomics_config.map(|c| c.mapq_cut).unwrap_or(0);
@@ -1764,6 +1832,10 @@ pub fn count_reads(
             };
             if let Some(ref mut frag) = fragmentomics_accums {
                 frag.process_read(&record, frag_chrom);
+            }
+
+            if let (Some(ref mut snp), Some(idx)) = (&mut result.snp_fingerprint, snp_site_index) {
+                snp.process_read(&record, idx, per_gene_mapq_cut);
             }
 
             // Resolve chromosome for gene counting
@@ -2101,6 +2173,8 @@ pub fn count_reads(
         },
         fragmentomics: merged.fragmentomics,
         per_gene: merged.per_gene,
+        saturation: merged.saturation,
+        snp_fingerprint: merged.snp_fingerprint,
     })
 }
 

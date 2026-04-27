@@ -5,39 +5,32 @@
 //! envelope construction. Thresholds are intentionally conservative; they are
 //! also the user-visible interpretive layer of the envelope, so the rules are
 //! kept simple and documented inline.
-//!
-//! Two flags defined by the schema are not emitted in Phase 1:
-//! - [`QcFlag::CfdnaContaminationSuspected`] — needs fragmentomics signal
-//!   (Phase 2+).
-//! - [`QcFlag::SexSwapWarning`] — needs user-supplied sex metadata.
-//!
-//! Their enum variants are kept so the wire format is stable.
 
 use crate::cli::Strandedness;
 use crate::rna::dupradar::counting::CountResult;
 use crate::rna::dupradar::fitting::FitResult;
+use crate::rna::fragmentomics::FragmentSizeResult;
 use crate::rna::preseq::PreseqResult;
 use crate::rna::rseqc::bam_stat::BamStatResult;
+use crate::rna::rseqc::read_distribution::ReadDistributionResult;
 
 /// Schema-defined QC-flag identifiers.
 ///
 /// The string forms (returned by [`QcFlag::as_str`]) match the `qc_flags`
-/// enum in `schema/v1/liquidqc.schema.json`.
+/// enum in `schema/v1/liquidqc.schema.json`. Phase 4 dropped the never-
+/// emitted `sex_swap_warning` variant — sex inference now ships
+/// `predicted_sex` directly via the `sex_inference` block, leaving the
+/// metadata comparison to downstream consumers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QcFlag {
     SingleEndNoTlen,
     LowPairedFraction,
     LowMappingRate,
-    /// Phase 2 — requires fragmentomics signal; not emitted in Phase 1.
-    #[allow(dead_code)]
     CfdnaContaminationSuspected,
     HighRrnaFraction,
     TagmentationEndmotifBias,
     UnstrandedEndbiasUnreliable,
     ReadLengthCapsLongFragments,
-    /// Phase 4+ — requires user-supplied sex metadata; not emitted in Phase 1.
-    #[allow(dead_code)]
-    SexSwapWarning,
     LowComplexityLibrary,
     HighDuplicationNonbiological,
 }
@@ -53,7 +46,6 @@ impl QcFlag {
             QcFlag::TagmentationEndmotifBias => "tagmentation_endmotif_bias",
             QcFlag::UnstrandedEndbiasUnreliable => "unstranded_endbias_unreliable",
             QcFlag::ReadLengthCapsLongFragments => "read_length_caps_long_fragments",
-            QcFlag::SexSwapWarning => "sex_swap_warning",
             QcFlag::LowComplexityLibrary => "low_complexity_library",
             QcFlag::HighDuplicationNonbiological => "high_duplication_nonbiological",
         }
@@ -72,7 +64,15 @@ const LOW_COMPLEXITY_PRESEQ_SLOPE_THRESHOLD: f64 = 0.2;
 const LOW_COMPLEXITY_FALLBACK_DUP_FRACTION: f64 = 0.95;
 const LOW_COMPLEXITY_FALLBACK_MAX_BIOTYPE_ASSIGNED: u64 = 1_000_000;
 
-/// All accumulator references needed to evaluate Phase 1 rules.
+// Phase 4 thresholds.
+/// Intronic read fraction above which a sample is suspect — combined with
+/// a long fragment median, the signature of cfDNA contaminating a cfRNA prep.
+const CFDNA_CONTAM_INTRONIC_FRACTION_THRESHOLD: f64 = 0.5;
+/// Median proper-pair `|TLEN|` (nt) above which the fragment-length
+/// distribution looks more like nucleosomal cfDNA than cytoplasmic cfRNA.
+const CFDNA_CONTAM_MEDIAN_TLEN_THRESHOLD: f64 = 150.0;
+
+/// All accumulator references needed to evaluate the Phase 1–4 rules.
 pub struct QcContext<'a> {
     pub paired_end: bool,
     pub strandedness: Strandedness,
@@ -83,6 +83,11 @@ pub struct QcContext<'a> {
     pub dupradar_fit: Option<&'a FitResult>,
     pub dupradar_genes_with_reads: u64,
     pub featurecounts_biotype_rrna: u64,
+    /// Phase 4: median `|TLEN|` source for the cfDNA-contamination rule.
+    pub fragment_size: Option<&'a FragmentSizeResult>,
+    /// Phase 4: intronic / exonic tag distribution source for the
+    /// cfDNA-contamination rule.
+    pub read_distribution: Option<&'a ReadDistributionResult>,
 }
 
 /// Evaluate Phase 1 rules and return matching flag names in schema order.
@@ -140,7 +145,56 @@ pub fn evaluate(ctx: &QcContext<'_>) -> Vec<String> {
         }
     }
 
+    // Phase 4: cfDNA contamination — intronic-heavy reads with a fragment
+    // median in the nucleosomal range. Both signals required so we don't
+    // false-positive on intronic-only libraries (e.g. nascent RNA preps)
+    // nor on long-fragment-only samples.
+    if let (Some(intron_frac), Some(median_tlen)) =
+        (intronic_read_fraction(ctx), median_proper_pair_tlen(ctx))
+    {
+        if intron_frac > CFDNA_CONTAM_INTRONIC_FRACTION_THRESHOLD
+            && median_tlen > CFDNA_CONTAM_MEDIAN_TLEN_THRESHOLD
+        {
+            flags.push(QcFlag::CfdnaContaminationSuspected);
+        }
+    }
+
     flags.into_iter().map(|f| f.as_str().to_string()).collect()
+}
+
+/// Intronic read fraction = intron tags / (intron tags + exonic tags).
+/// Returns `None` when read_distribution is missing or the denominator is 0.
+fn intronic_read_fraction(ctx: &QcContext<'_>) -> Option<f64> {
+    let rd = ctx.read_distribution?;
+    let mut intron_tags: u64 = 0;
+    let mut exonic_tags: u64 = 0;
+    for (name, _bases, tags) in &rd.regions {
+        let n = name.as_str();
+        // Region names follow upstream RSeQC: "CDS_Exons", "5'UTR_Exons",
+        // "3'UTR_Exons", "Introns" — match by suffix to be tolerant of
+        // upstream relabels.
+        if n.eq_ignore_ascii_case("Introns") {
+            intron_tags = intron_tags.saturating_add(*tags);
+        } else if n.contains("UTR_Exons") || n.eq_ignore_ascii_case("CDS_Exons") {
+            exonic_tags = exonic_tags.saturating_add(*tags);
+        }
+    }
+    let denom = intron_tags + exonic_tags;
+    if denom == 0 {
+        None
+    } else {
+        Some(intron_tags as f64 / denom as f64)
+    }
+}
+
+/// Median `|TLEN|` of proper pairs as reported by Phase 2 fragmentomics.
+fn median_proper_pair_tlen(ctx: &QcContext<'_>) -> Option<f64> {
+    let fs = ctx.fragment_size?;
+    if fs.total_pairs_observed == 0 {
+        None
+    } else {
+        Some(fs.median as f64)
+    }
 }
 
 /// Preseq-based low-complexity detection with a duplication-fraction fallback
@@ -215,6 +269,8 @@ mod tests {
             qualimap: None,
             fragmentomics: None,
             per_gene: None,
+            saturation: None,
+            snp_fingerprint: None,
         }
     }
 
@@ -229,6 +285,8 @@ mod tests {
             dupradar_fit: None,
             dupradar_genes_with_reads: 0,
             featurecounts_biotype_rrna: 0,
+            fragment_size: None,
+            read_distribution: None,
         }
     }
 
@@ -248,10 +306,12 @@ mod tests {
 
     #[test]
     fn low_paired_fraction_fires_below_threshold() {
-        let mut stat = BamStatResult::default();
-        stat.mapped = 1000;
-        stat.proper_pairs = 100; // 10% — well below threshold
-        stat.total_records = 1100;
+        let stat = BamStatResult {
+            mapped: 1000,
+            proper_pairs: 100, // 10% — well below threshold
+            total_records: 1100,
+            ..Default::default()
+        };
         let mut ctx = base_ctx("neb_next");
         ctx.bam_stat = Some(&stat);
         let flags = evaluate(&ctx);
@@ -260,10 +320,12 @@ mod tests {
 
     #[test]
     fn low_mapping_rate_fires_below_threshold() {
-        let mut stat = BamStatResult::default();
-        stat.total_records = 1000;
-        stat.mapped = 100; // 10% mapping rate
-        stat.proper_pairs = 100;
+        let stat = BamStatResult {
+            total_records: 1000,
+            mapped: 100, // 10% mapping rate
+            proper_pairs: 100,
+            ..Default::default()
+        };
         let mut ctx = base_ctx("neb_next");
         ctx.bam_stat = Some(&stat);
         let flags = evaluate(&ctx);
@@ -305,8 +367,10 @@ mod tests {
 
     #[test]
     fn short_reads_fire_read_length_caps() {
-        let mut stat = BamStatResult::default();
-        stat.max_len = 75; // boundary value: still fires
+        let stat = BamStatResult {
+            max_len: 75, // boundary value: still fires
+            ..Default::default()
+        };
         let mut ctx = base_ctx("neb_next");
         ctx.bam_stat = Some(&stat);
         let flags = evaluate(&ctx);
@@ -315,8 +379,10 @@ mod tests {
 
     #[test]
     fn long_reads_do_not_fire_read_length_caps() {
-        let mut stat = BamStatResult::default();
-        stat.max_len = 150;
+        let stat = BamStatResult {
+            max_len: 150,
+            ..Default::default()
+        };
         let mut ctx = base_ctx("neb_next");
         ctx.bam_stat = Some(&stat);
         let flags = evaluate(&ctx);
@@ -366,9 +432,11 @@ mod tests {
 
     #[test]
     fn low_complexity_fallback_high_dup_low_assigned() {
-        let mut stat = BamStatResult::default();
-        stat.mapped = 1000;
-        stat.duplicates = 970; // 97% dup
+        let stat = BamStatResult {
+            mapped: 1000,
+            duplicates: 970, // 97% dup
+            ..Default::default()
+        };
         let mut count = empty_count_result();
         count.fc_biotype_assigned = 50_000; // < threshold
         let mut ctx = base_ctx("neb_next");

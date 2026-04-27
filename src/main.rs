@@ -433,6 +433,11 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     ui.blank();
     ui.step("Parsing GTF annotation...");
     let gtf_start = Instant::now();
+    // Phase 4 gene-class fractions resolve genes by `gene_name`; ensure the
+    // attribute is parsed even when the user didn't ask for biotype outputs.
+    if !extra_attributes.iter().any(|a| a == "gene_name") {
+        extra_attributes.push("gene_name".to_string());
+    }
     let genes = gtf::parse_gtf(gtf_path, &extra_attributes)?;
     ui.detail(&format!(
         "Parsed {} genes in {}",
@@ -608,6 +613,10 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         sample_id_override: args.sample_id.as_deref(),
         sample_name_override: effective_sample_name,
         min_gene_reads: args.min_gene_reads,
+        panels: args.panels.as_deref(),
+        panels_tsv: args.panels_tsv.clone(),
+        saturation_fractions: args.saturation_fractions.as_deref(),
+        snp_panel: args.snp_panel.as_deref(),
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -825,6 +834,16 @@ struct SharedParams<'a> {
     /// Minimum primary read count for a gene to appear as a row in the
     /// per-gene Tier-2 Parquet (`--min-gene-reads`).
     min_gene_reads: u32,
+    /// CSV of bundled panel names selected via `--panels`. `None` =
+    /// all bundled panels load (default). Empty string disables bundled.
+    panels: Option<&'a str>,
+    /// User-supplied panel TSV paths via `--panels-tsv`.
+    panels_tsv: Vec<String>,
+    /// CSV of saturation-curve fractions in (0, 1]. `None` = use default
+    /// `[0.05, 0.10, 0.25, 0.50, 0.75, 1.00]`.
+    saturation_fractions: Option<&'a str>,
+    /// User SNP-site panel (TSV). `None` loads the bundled smoke panel.
+    snp_panel: Option<&'a str>,
 }
 
 // ============================================================================
@@ -961,6 +980,19 @@ fn process_single_bam(
     // once per run; consumed by the per-gene Tier-2 Parquet writer.
     let per_gene_shape_index = rna::per_gene::shape::GeneShapeIndex::build(genes);
 
+    // Phase 4 SNP fingerprint: load and resolve the SNP-site panel against
+    // the BAM header before count_reads() so the worker dispatch can use it.
+    // The bundled smoke panel is loaded by default; users override via
+    // `--snp-panel <TSV>`.
+    let snp_site_index = {
+        use rust_htslib::bam::Read;
+        let reader = rust_htslib::bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM for SNP-panel resolve: {}", bam_path))?;
+        let header = reader.header().clone();
+        let user_panel = params.snp_panel.map(std::path::Path::new);
+        rna::snp_fingerprint::SnpSiteIndex::build(&header, user_panel)?
+    };
+
     // === dupRadar counting ===
     ui.blank();
     ui.section(&format!("Processing {}", bam_path));
@@ -991,6 +1023,7 @@ fn process_single_bam(
         Some(&fragmentomics_config),
         params.fasta.map(std::path::Path::new),
         Some(&per_gene_shape_index),
+        Some(&snp_site_index),
         Some(&pb),
     )?;
     let count_duration = count_start.elapsed();
@@ -999,8 +1032,11 @@ fn process_single_bam(
     // Extract RSeQC accumulators from count_result.
     let rseqc_accums = count_result.rseqc.take();
 
-    // Phase 2: finalize merged fragmentomics accumulators into per-feature
-    // Results; compute periodicity FFT from the merged TLEN histogram.
+    // Phase 2/3/4: finalize merged sample-level accumulators (fragmentomics
+    // proper plus the Phase 4 chrom-metrics and cycle-quality riders).
+    // BAM header refs are needed to resolve tid → contig name in the
+    // chrom-metrics finalize, so we capture the result inline before the
+    // unrelated `bam_header_refs` block below.
     let frag_outputs = count_result.fragmentomics.take().map(|frag| {
         let fragment_size = frag.fragment_size.map(|a| a.into_result());
         let periodicity = fragment_size
@@ -1008,13 +1044,27 @@ fn process_single_bam(
             .map(|fs| rna::fragmentomics::compute_periodicity(&fs.histogram));
         let end_motifs = frag.end_motifs.map(|a| a.into_result());
         let soft_clips = frag.soft_clips.map(|a| a.into_result());
-        (fragment_size, end_motifs, soft_clips, periodicity)
+        let cycle_quality = frag.cycle_quality.map(|a| a.into_result(params.paired));
+        (
+            fragment_size,
+            end_motifs,
+            soft_clips,
+            periodicity,
+            frag.chrom_metrics,
+            cycle_quality,
+        )
     });
-    let (frag_size_result, end_motifs_result, soft_clips_result, periodicity_result) =
-        match frag_outputs {
-            Some((a, b, c, d)) => (a, b, c, d),
-            None => (None, None, None, None),
-        };
+    let (
+        frag_size_result,
+        end_motifs_result,
+        soft_clips_result,
+        periodicity_result,
+        chrom_metrics_accum,
+        cycle_quality_result,
+    ) = match frag_outputs {
+        Some((a, b, c, d, e, f)) => (a, b, c, d, e, f),
+        None => (None, None, None, None, None, None),
+    };
 
     // Apply the `--min-gene-reads` threshold and assemble per-gene Parquet rows.
     let per_gene_output = count_result
@@ -1402,6 +1452,10 @@ fn process_single_bam(
             })
             .collect::<Vec<(String, u64)>>()
     };
+    // Finalize Phase 4 chrom_metrics now that `bam_header_refs` is in scope
+    // (chrom_metrics resolves tid → contig name from this slice).
+    let chrom_metrics_result = chrom_metrics_accum.map(|cm| cm.into_result(&bam_header_refs));
+
     let rseqc_outputs = write_rseqc_outputs(
         bam_path,
         &sample_name,
@@ -1433,7 +1487,91 @@ fn process_single_bam(
         dupradar_fit: dupradar_fit.as_ref(),
         dupradar_genes_with_reads,
         featurecounts_biotype_rrna: biotype_rrna_count,
+        fragment_size: frag_size_result.as_ref(),
+        read_distribution: rseqc_outputs.read_distribution.as_ref(),
     });
+
+    // Phase 4 gene-class fractions: bundled hemoglobin / RP / apolipoprotein
+    // symbol lists, summed against `count_result.gene_counts.fc_reads` and
+    // normalized to `fc_assigned`. Always emitted (only blank when the GTF
+    // carried no `gene_name` attribute and no genes matched).
+    let gene_class_index = rna::gene_class::GeneClassIndex::build(genes);
+    let gene_class_fractions =
+        gene_class_index.finalize(&count_result.gene_counts, count_result.fc_assigned);
+
+    // Phase 4 marker-panel aggregation: bundled lm22 / tabula_sapiens_cfrna /
+    // vorperian by default, plus optional user TSV via `--panels-tsv`.
+    // `--panels` CSV picks among the bundled panels; default = all.
+    let panel_selection: Option<Vec<&str>> = params.panels.map(|csv| {
+        csv.split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect()
+    });
+    let panel_user_paths: Vec<&Path> = params
+        .panels_tsv
+        .iter()
+        .map(|p| Path::new(p.as_str()))
+        .collect();
+    let panel_index =
+        rna::panels::PanelIndex::build(genes, panel_selection.as_deref(), &panel_user_paths)?;
+    let panels_result = if panel_index.is_empty() {
+        None
+    } else {
+        Some(panel_index.aggregate(&count_result.gene_counts, count_result.fc_assigned))
+    };
+
+    // Phase 4 sex inference: pure finalize-time computation against
+    // chrom-metrics + gene_counts. No CLI metadata input — emits a
+    // `predicted_sex` label and supporting metrics; downstream consumers
+    // compare against their own subject metadata.
+    let sex_inference_result = rna::sex_infer::compute(
+        chrom_metrics_result.as_ref(),
+        genes,
+        &count_result.gene_counts,
+        count_result.fc_assigned,
+    );
+
+    // Phase 4 saturation curve: deterministic per-read hash bucketing,
+    // computed at the requested fraction grid. Fragments accumulated by
+    // the dispatcher; finalize is a pure traversal of the merged buckets.
+    let saturation_fractions: Vec<f64> = match params.saturation_fractions {
+        Some(csv) => csv
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse::<f64>().ok())
+            .collect(),
+        None => rna::saturation::DEFAULT_FRACTIONS.to_vec(),
+    };
+    let saturation_result = count_result
+        .saturation
+        .take()
+        .map(|s| s.finalize(&saturation_fractions));
+
+    // Phase 4 SNP fingerprint finalize: emit per-site allele counts +
+    // fractions. Skipped when no sites resolved against the BAM header.
+    let snp_fingerprint_result = match (count_result.snp_fingerprint.take(), &snp_site_index) {
+        (Some(accum), idx) if !idx.is_empty() => Some(accum.finalize(idx)),
+        _ => None,
+    };
+
+    // Phase 4 splice-site dinucleotides — finalize-time tally over the
+    // unique junctions in junction_annotation. Requires --fasta. Skipped
+    // silently when the user didn't supply one (no qc_flag added; the
+    // existing `end_motifs_skipped_no_fasta` already signals that case).
+    let splice_dinuc_result = match (rseqc_outputs.junction_annotation.as_ref(), params.fasta) {
+        (Some(jr), Some(fasta_path)) => {
+            match rna::splice_dinuc::compute(jr, std::path::Path::new(fasta_path)) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    ui.detail(&format!("splice_site_dinucleotides skipped: {}", e));
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
 
     // Write the per-gene Parquet sibling and assemble its envelope block.
     let per_gene_block = if let Some(output) = per_gene_output.as_ref() {
@@ -1507,6 +1645,14 @@ fn process_single_bam(
         periodicity: periodicity_result.as_ref(),
         fasta_provided: params.fasta.is_some(),
         per_gene: per_gene_block.as_ref(),
+        splice_site_dinucleotides: splice_dinuc_result.as_ref(),
+        per_chromosome: chrom_metrics_result.as_ref(),
+        cycle_quality: cycle_quality_result.as_ref(),
+        gene_class_fractions: Some(&gene_class_fractions),
+        panels: panels_result.as_ref(),
+        sex_inference: Some(&sex_inference_result),
+        saturation: saturation_result.as_ref(),
+        snp_fingerprint: snp_fingerprint_result.as_ref(),
     });
     let envelope_path = outdir.join(format!("{sample_name}.liquidqc.json"));
     envelope::write(&envelope_value, &envelope_path)?;

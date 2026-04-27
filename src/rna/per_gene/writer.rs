@@ -72,7 +72,14 @@ pub struct PerGeneRow {
 
     pub exon_aligned_bp: u64,
     pub intron_aligned_bp: u64,
-    pub intron_exon_ratio: Option<f64>,
+    /// Phase 4: aligned bp inside any merged CDS bbox.
+    pub cds_aligned_bp: u64,
+    /// Phase 4: `exon_aligned_bp - cds_aligned_bp` (exonic-but-not-CDS).
+    pub utr_aligned_bp: u64,
+    /// `cds_aligned_bp / exon_aligned_bp`. None when no exonic bp.
+    pub cds_utr_ratio: Option<f64>,
+    /// `intron_aligned_bp / (intron_aligned_bp + exon_aligned_bp)`.
+    pub intron_retention_rate: Option<f64>,
 }
 
 /// Key/value metadata to attach to the Parquet file.
@@ -140,7 +147,10 @@ pub fn column_names() -> Vec<String> {
         "primary_reads_with_3p_clip",
         "exon_aligned_bp",
         "intron_aligned_bp",
-        "intron_exon_ratio",
+        "cds_aligned_bp",
+        "utr_aligned_bp",
+        "cds_utr_ratio",
+        "intron_retention_rate",
     ]
     .into_iter()
     .map(String::from)
@@ -278,7 +288,10 @@ fn build_row(gene_id: &str, gene: &Gene, counts: &GeneCounts, state: &PerGeneSta
 
         exon_aligned_bp: state.exon_aligned_bp,
         intron_aligned_bp: state.intron_aligned_bp,
-        intron_exon_ratio: state.intron_exon_ratio(),
+        cds_aligned_bp: state.cds_aligned_bp,
+        utr_aligned_bp: state.utr_aligned_bp(),
+        cds_utr_ratio: state.cds_utr_ratio(),
+        intron_retention_rate: state.intron_retention_rate(),
     }
 }
 
@@ -374,7 +387,10 @@ pub fn build_arrow_schema() -> arrow::datatypes::Schema {
         Field::new("primary_reads_with_3p_clip", DataType::UInt32, false),
         Field::new("exon_aligned_bp", DataType::UInt64, false),
         Field::new("intron_aligned_bp", DataType::UInt64, false),
-        Field::new("intron_exon_ratio", DataType::Float64, true),
+        Field::new("cds_aligned_bp", DataType::UInt64, false),
+        Field::new("utr_aligned_bp", DataType::UInt64, false),
+        Field::new("cds_utr_ratio", DataType::Float64, true),
+        Field::new("intron_retention_rate", DataType::Float64, true),
     ])
 }
 
@@ -514,8 +530,17 @@ fn rows_to_record_batch(
     let intron_aligned_bp: ArrayRef = Arc::new(UInt64Array::from_iter_values(
         rows.iter().map(|r| r.intron_aligned_bp),
     ));
-    let intron_exon_ratio: ArrayRef = Arc::new(Float64Array::from_iter(
-        rows.iter().map(|r| r.intron_exon_ratio),
+    let cds_aligned_bp: ArrayRef = Arc::new(UInt64Array::from_iter_values(
+        rows.iter().map(|r| r.cds_aligned_bp),
+    ));
+    let utr_aligned_bp: ArrayRef = Arc::new(UInt64Array::from_iter_values(
+        rows.iter().map(|r| r.utr_aligned_bp),
+    ));
+    let cds_utr_ratio: ArrayRef = Arc::new(Float64Array::from_iter(
+        rows.iter().map(|r| r.cds_utr_ratio),
+    ));
+    let intron_retention_rate: ArrayRef = Arc::new(Float64Array::from_iter(
+        rows.iter().map(|r| r.intron_retention_rate),
     ));
 
     let columns = vec![
@@ -562,7 +587,10 @@ fn rows_to_record_batch(
         primary_reads_with_3p_clip,
         exon_aligned_bp,
         intron_aligned_bp,
-        intron_exon_ratio,
+        cds_aligned_bp,
+        utr_aligned_bp,
+        cds_utr_ratio,
+        intron_retention_rate,
     ];
 
     debug_assert_eq!(columns.len(), schema.fields().len());
@@ -571,7 +599,10 @@ fn rows_to_record_batch(
 }
 
 /// Per-gene table schema version embedded in Parquet KV metadata.
-pub const PER_GENE_SCHEMA_VERSION: &str = "1.0.0-stub";
+/// Bumped to 1.1.0-stub in Phase 4 with the addition of `cds_aligned_bp`,
+/// `utr_aligned_bp`, `cds_utr_ratio`, and the rename of `intron_exon_ratio`
+/// to `intron_retention_rate`.
+pub const PER_GENE_SCHEMA_VERSION: &str = "1.1.0-stub";
 
 /// Write the per-gene Parquet file with `SNAPPY` compression and
 /// row-group size 10_000. File-level KV metadata embeds sample-id and

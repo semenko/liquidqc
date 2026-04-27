@@ -24,6 +24,15 @@ pub struct FragmentSizeAccum {
     pub hist: Vec<u64>,
     /// Pairs observed with `|TLEN|` >= HIST_LEN.
     pub overflow: u64,
+    /// Phase 4: leftmost proper-pair mates whose `|TLEN|` is shorter than
+    /// `2 * record.seq_len()` — i.e. the two reads overlap, the classic
+    /// adapter-readthrough signature on Illumina libraries. Counted on the
+    /// same dispatch filter as the histogram so the denominator equals the
+    /// histogram total + overflow. Approximates `|TLEN| < r1.qlen + r2.qlen`
+    /// using only the leftmost mate's qlen (the mate's qlen isn't available
+    /// in this single-pass loop); for libraries where reads are equal length
+    /// the two definitions agree. Documented in the schema.
+    pub adapter_readthrough_pairs: u64,
 }
 
 impl FragmentSizeAccum {
@@ -31,6 +40,7 @@ impl FragmentSizeAccum {
         Self {
             hist: vec![0; HIST_LEN],
             overflow: 0,
+            adapter_readthrough_pairs: 0,
         }
     }
 
@@ -44,6 +54,13 @@ impl FragmentSizeAccum {
         } else {
             self.overflow += 1;
         }
+        // Phase 4 adapter readthrough: pair where |TLEN| < 2 * leftmost_qlen.
+        // Uses the leftmost mate's seq_len() as a proxy for r1.qlen + r2.qlen
+        // (single-pass loop never sees both mates simultaneously).
+        let qlen = record.seq_len() as u64;
+        if qlen > 0 && (isize_abs as u64) < qlen.saturating_mul(2) {
+            self.adapter_readthrough_pairs += 1;
+        }
     }
 
     pub fn merge(&mut self, other: FragmentSizeAccum) {
@@ -56,6 +73,7 @@ impl FragmentSizeAccum {
             self.hist[i] += *v;
         }
         self.overflow += other.overflow;
+        self.adapter_readthrough_pairs += other.adapter_readthrough_pairs;
     }
 
     pub fn into_result(self) -> FragmentSizeResult {
@@ -74,6 +92,7 @@ impl FragmentSizeAccum {
         let count_gt_300: u64 = self.hist.iter().skip(301).sum::<u64>() + self.overflow;
 
         let (mean, median) = mean_and_median(&self.hist, self.overflow, total);
+        let adapter_readthrough_rate = frac(self.adapter_readthrough_pairs);
 
         FragmentSizeResult {
             bins,
@@ -82,6 +101,8 @@ impl FragmentSizeAccum {
             mean,
             median,
             total_pairs_observed: total,
+            adapter_readthrough_rate,
+            adapter_readthrough_pairs: self.adapter_readthrough_pairs,
             histogram: self.hist,
             overflow: self.overflow,
         }
@@ -151,6 +172,16 @@ pub struct FragmentSizeResult {
     pub mean: f64,
     pub median: u64,
     pub total_pairs_observed: u64,
+    /// Phase 4: pair-level adapter-readthrough rate. Defined as the fraction
+    /// of leftmost proper-pair mates with `|TLEN| < 2 * record.seq_len()`.
+    /// Surfaced into the envelope as a top-level scalar (see
+    /// `adapter_readthrough_rate` in the schema).
+    #[serde(skip)]
+    pub adapter_readthrough_rate: f64,
+    /// Raw numerator behind `adapter_readthrough_rate` (debug visibility).
+    #[serde(skip)]
+    #[allow(dead_code)]
+    pub adapter_readthrough_pairs: u64,
     /// Raw histogram (1 nt bins, 0..HIST_LEN). Not serialized into the
     /// envelope JSON — used by the periodicity FFT downstream.
     #[serde(skip)]
@@ -319,11 +350,33 @@ mod tests {
         let mut a = FragmentSizeAccum::new();
         a.hist[100] = 3;
         a.overflow = 1;
+        a.adapter_readthrough_pairs = 2;
         let mut b = FragmentSizeAccum::new();
         b.hist[100] = 2;
         b.overflow = 4;
+        b.adapter_readthrough_pairs = 5;
         a.merge(b);
         assert_eq!(a.hist[100], 5);
         assert_eq!(a.overflow, 5);
+        assert_eq!(a.adapter_readthrough_pairs, 7);
+    }
+
+    #[test]
+    fn adapter_readthrough_rate_is_zero_when_no_pairs() {
+        let r = FragmentSizeAccum::new().into_result();
+        assert_eq!(r.adapter_readthrough_pairs, 0);
+        assert_eq!(r.adapter_readthrough_rate, 0.0);
+    }
+
+    #[test]
+    fn adapter_readthrough_rate_is_numerator_over_total() {
+        // 2 pairs in-range + 1 in overflow = 3 total. 1 of them flagged
+        // as readthrough. Rate = 1/3.
+        let mut accum = FragmentSizeAccum::new();
+        accum.hist[100] = 2;
+        accum.overflow = 1;
+        accum.adapter_readthrough_pairs = 1;
+        let r = accum.into_result();
+        assert!((r.adapter_readthrough_rate - 1.0 / 3.0).abs() < 1e-12);
     }
 }

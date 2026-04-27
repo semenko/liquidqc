@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/semenko/liquidqc/schema/v1/liquidqc.schema.json",
-  "title": "liquidqc fragmentomics output (v1, Phase 3)",
-  "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Always-present envelope fields are required; the four Phase 2 fragmentomics blocks (fragment_length, end_motifs, soft_clips, periodicity) and the Phase 3 `per_gene` reference block are optional and follow the schemas defined here. Later phases add per_chromosome, panels, sex_inference, snp_fingerprint, saturation, and cycle_quality. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 per-gene rows; the `per_gene` block in this envelope locates and validates it.",
+  "title": "liquidqc fragmentomics output (v1, Phase 4)",
+  "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Always-present envelope fields are required; the four Phase 2 fragmentomics blocks (fragment_length, end_motifs, soft_clips, periodicity), the Phase 3 `per_gene` reference block, and the Phase 4 Tier-3 add-ons (`adapter_readthrough_rate`, `splice_site_dinucleotides`, `per_chromosome`, `gene_class_fractions`, `panels`, `sex_inference`, `snp_fingerprint`, `saturation`, `cycle_quality`) are optional and follow the schemas defined here. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 per-gene rows; the `per_gene` block in this envelope locates and validates it.",
   "type": "object",
   "required": [
     "extractor_version",
@@ -36,9 +36,9 @@
     },
     "schema_version": {
       "type": "string",
-      "description": "Semver for this schema. `0.3.0-stub` covers Phase 3; subsequent phases bump again.",
+      "description": "Semver for this schema. `0.4.0-stub` covers Phase 4; the v1 release will bump to `1.0.0`.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
-      "examples": ["0.2.0-stub", "0.3.0-stub", "1.0.0"]
+      "examples": ["0.2.0-stub", "0.3.0-stub", "0.4.0-stub", "1.0.0"]
     },
     "git_commit": {
       "type": "string",
@@ -161,7 +161,6 @@
           "tagmentation_endmotif_bias",
           "unstranded_endbias_unreliable",
           "read_length_caps_long_fragments",
-          "sex_swap_warning",
           "low_complexity_library",
           "high_duplication_nonbiological",
           "end_motifs_skipped_no_fasta"
@@ -359,7 +358,7 @@
           "type": "string",
           "description": "Semver of the per-gene Parquet table schema (independent of the envelope `schema_version`).",
           "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
-          "examples": ["1.0.0-stub"]
+          "examples": ["1.0.0-stub", "1.1.0-stub"]
         },
         "columns": {
           "type": "array",
@@ -367,6 +366,219 @@
           "items": { "type": "string", "minLength": 1 },
           "minItems": 1
         }
+      }
+    },
+    "adapter_readthrough_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Phase 4 Tier 3: fraction of leftmost proper-pair mates with `|TLEN| < 2 * leftmost_qlen`. Approximates `|TLEN| < r1.qlen + r2.qlen`; the two definitions agree when the two reads in a pair are equal length (the Illumina paired-end norm). Absent on single-end input."
+    },
+    "splice_site_dinucleotides": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: tally of donor/acceptor 2 nt pairs over the unique splice junctions discovered by junction_annotation. Counts are over distinct junctions, not splicing events, so depth bias does not dominate. Both reference-strand orientations are folded into each class (e.g. `gt_ag` includes (GT, AG) on the (+) strand and (CT, AC) reverse-complemented from the (-) strand). Requires `--fasta`; absent otherwise.",
+      "additionalProperties": false,
+      "required": ["gt_ag", "gc_ag", "at_ac", "other", "skipped_oob", "junctions_total"],
+      "properties": {
+        "gt_ag":          { "type": "integer", "minimum": 0, "description": "Canonical U2 (GT-AG / CT-AC)." },
+        "gc_ag":          { "type": "integer", "minimum": 0, "description": "Alternative U2 (GC-AG / CT-GC)." },
+        "at_ac":          { "type": "integer", "minimum": 0, "description": "U12-type (AT-AC / GT-AT)." },
+        "other":          { "type": "integer", "minimum": 0, "description": "Any other ACGT pair (incl. non-ACGT bases)." },
+        "skipped_oob":    { "type": "integer", "minimum": 0, "description": "Junctions skipped because the donor/acceptor 2 nt fell off the contig or the contig is missing from the FASTA." },
+        "junctions_total":{ "type": "integer", "minimum": 0, "description": "Total unique junctions considered (sum of the four classes plus `skipped_oob`)." }
+      }
+    },
+    "per_chromosome": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: per-contig read counts and proper-pair |TLEN| mean. Surfaces the chrM (necrosis proxy), chrY (sex / chimerism), and contig-level CNV biases that are otherwise implicit in idxstats and inner_distance.",
+      "additionalProperties": false,
+      "required": ["total_mapped", "contigs"],
+      "properties": {
+        "total_mapped": { "type": "integer", "minimum": 0, "description": "Total mapped reads across all contigs that received at least one record. Used as the denominator for `contigs.<name>.read_fraction`." },
+        "contigs": {
+          "type": "object",
+          "description": "Map keyed by BAM-header contig name. Contigs with no records are dropped (sparse).",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["contig_length", "total_records", "mapped", "duplicates", "read_fraction", "proper_pair_count", "proper_pair_insert_size_mean"],
+            "properties": {
+              "contig_length":              { "type": "integer", "minimum": 0 },
+              "total_records":              { "type": "integer", "minimum": 0 },
+              "mapped":                     { "type": "integer", "minimum": 0 },
+              "duplicates":                 { "type": "integer", "minimum": 0 },
+              "read_fraction":              { "type": "number",  "minimum": 0, "maximum": 1 },
+              "proper_pair_count":          { "type": "integer", "minimum": 0 },
+              "proper_pair_insert_size_mean": { "type": "number",  "minimum": 0, "description": "Mean |insert_size| over leftmost-mate proper pairs on this contig. 0.0 when proper_pair_count == 0." }
+            }
+          }
+        }
+      }
+    },
+    "cycle_quality": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: per-cycle base-quality drop-off, separately for read 1 and read 2. Cycles are sequencing-order (cycle 0 = first base off the sequencer). Long reads contribute only their first `max_cycles_tracked` bases.",
+      "additionalProperties": false,
+      "required": ["read1_mean_quality", "max_cycles_tracked"],
+      "properties": {
+        "read1_mean_quality": {
+          "type": "array",
+          "description": "Mean Phred quality at each sequencing cycle for read 1 (or single-end). Truncated to the longest observed cycle.",
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "read2_mean_quality": {
+          "type": "array",
+          "description": "Mean Phred quality at each sequencing cycle for read 2. Absent on single-end input.",
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "max_cycles_tracked": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cap on cycles tracked. Reads longer than this contribute only their first `max_cycles_tracked` bases."
+        }
+      }
+    },
+    "gene_class_fractions": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: bundled HGNC gene-class read fractions. Each class is computed by summing `featureCounts -g gene_id` per-gene reads across genes whose `gene_name` GTF attribute matches a bundled symbol. Denominator = `featurecounts.assigned`. Classes: hemoglobin (HBA/HBB/HBG/HBM/HBQ/HBZ subunits — RBC lysis QC + erythroid signal), ribosomal_protein (RPS/RPL/MRPS/MRPL families — proliferative / stressed cells), apolipoprotein (APOA*/APOB/APOC*/APOD/APOE/APOF/APOH/APOL*/APOM/APOO* — liver-derived cargo).",
+      "additionalProperties": false,
+      "required": ["hemoglobin", "ribosomal_protein", "apolipoprotein", "denominator"],
+      "properties": {
+        "hemoglobin":         { "$ref": "#/$defs/gene_class_entry" },
+        "ribosomal_protein":  { "$ref": "#/$defs/gene_class_entry" },
+        "apolipoprotein":     { "$ref": "#/$defs/gene_class_entry" },
+        "denominator": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total reads used as the denominator for `fraction` fields (typically `featurecounts.assigned`)."
+        }
+      }
+    },
+    "panels": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: marker-panel read aggregation. For each loaded panel (default = bundled `lm22` + `tabula_sapiens_cfrna` + `vorperian`; user-extensible via `--panels-tsv`), reports per-cell-type read totals and fractions of `denominator` (typically `featurecounts.assigned`). Bundled panels are partial curations — see source-file headers for citations and call out replacement strategies in the README.",
+      "additionalProperties": false,
+      "required": ["denominator", "loaded_entries", "matched_entries", "panels"],
+      "properties": {
+        "denominator":     { "type": "integer", "minimum": 0 },
+        "loaded_entries":  { "type": "integer", "minimum": 0, "description": "Total panel TSV rows loaded across all selected sources." },
+        "matched_entries": { "type": "integer", "minimum": 0, "description": "Subset of loaded rows whose gene_id / gene_symbol resolved against the GTF." },
+        "panels": {
+          "type": "object",
+          "description": "Map keyed by panel name. Each panel maps cell-type → (reads, fraction).",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reads", "fraction"],
+              "properties": {
+                "reads":    { "type": "integer", "minimum": 0 },
+                "fraction": { "type": "number",  "minimum": 0, "maximum": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "saturation": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: gene-detection saturation curve via deterministic per-read hash bucketing (crc32(qname) % 100). Each unambiguously assigned (`featureCounts -g gene_id` Assigned) read lands in one bucket; per-(gene, bucket) counts are accumulated. At each requested `fraction`, the corresponding bucket cutoff is taken and we report `genes_detected` (≥1 read) and `genes_detected_min10` (≥10 reads).",
+      "additionalProperties": false,
+      "required": ["total_buckets", "total_reads_assigned", "points"],
+      "properties": {
+        "total_buckets": { "type": "integer", "minimum": 1 },
+        "total_reads_assigned": { "type": "integer", "minimum": 0 },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fraction", "bucket_cutoff", "reads_in_subsample", "genes_detected", "genes_detected_min10"],
+            "properties": {
+              "fraction":             { "type": "number", "minimum": 0, "maximum": 1 },
+              "bucket_cutoff":        { "type": "integer", "minimum": 0 },
+              "reads_in_subsample":   { "type": "integer", "minimum": 0 },
+              "genes_detected":       { "type": "integer", "minimum": 0 },
+              "genes_detected_min10": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "snp_fingerprint": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: per-site allele depth + ALT fraction at common-SNP positions. Default panel is the bundled 12-site GRCh38 smoke list (NOT suitable for cohort-scale concordance); pass `--snp-panel <TSV>` (chrom<TAB>pos<TAB>ref<TAB>alt[<TAB>rsid]) to use a real ~17.5k-site panel. Skipped silently when no sites resolve to BAM-header contigs.",
+      "additionalProperties": false,
+      "required": [
+        "sites_total", "sites_missing_contig", "sites_with_any_depth",
+        "sites_called", "min_depth_for_called", "sites"
+      ],
+      "properties": {
+        "sites_total":           { "type": "integer", "minimum": 0, "description": "Sites whose contig resolved against the BAM header." },
+        "sites_missing_contig":  { "type": "integer", "minimum": 0 },
+        "sites_with_any_depth":  { "type": "integer", "minimum": 0 },
+        "sites_called":          { "type": "integer", "minimum": 0 },
+        "min_depth_for_called":  { "type": "integer", "minimum": 1 },
+        "sites": {
+          "type": "array",
+          "description": "Per-site rows in panel order (per-tid then by pos).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["chrom", "pos_1based", "ref", "alt", "depth", "ref_count", "alt_count", "other_count", "alt_fraction"],
+            "properties": {
+              "chrom":        { "type": "string", "minLength": 1 },
+              "pos_1based":   { "type": "integer", "minimum": 1 },
+              "ref":          { "type": "string", "enum": ["A", "C", "G", "T"] },
+              "alt":          { "type": "string", "enum": ["A", "C", "G", "T"] },
+              "rsid":         { "type": "string" },
+              "depth":        { "type": "integer", "minimum": 0 },
+              "ref_count":    { "type": "integer", "minimum": 0 },
+              "alt_count":    { "type": "integer", "minimum": 0 },
+              "other_count":  { "type": "integer", "minimum": 0 },
+              "alt_fraction": { "type": "number",  "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "sex_inference": {
+      "type": "object",
+      "description": "Phase 4 Tier 3: sex inference from chrY:autosome read ratio + XIST + RPS4Y1 expression. Always emitted; never compared against user-supplied metadata (the v1 contract is `--bam` only). Downstream consumers can compare `predicted_sex` against their own subject metadata; the schema deliberately does not include a `sex_swap_warning` qc_flag.",
+      "additionalProperties": false,
+      "required": [
+        "chr_y_reads", "autosome_reads", "chr_y_autosome_read_ratio",
+        "xist_reads", "rps4y1_reads", "xist_fraction", "rps4y1_fraction",
+        "denominator", "predicted_sex"
+      ],
+      "properties": {
+        "chr_y_reads":               { "type": "integer", "minimum": 0 },
+        "autosome_reads":            { "type": "integer", "minimum": 0, "description": "Mapped reads on chr1..chr22 (human autosomes)." },
+        "chr_y_autosome_read_ratio": { "type": "number",  "minimum": 0, "description": "`chr_y_reads / autosome_reads`. 0.0 when autosome_reads is 0." },
+        "xist_reads":                { "type": "integer", "minimum": 0, "description": "Sum of `featureCounts -g gene_id` reads across genes whose `gene_name` is XIST." },
+        "rps4y1_reads":              { "type": "integer", "minimum": 0 },
+        "xist_fraction":             { "type": "number",  "minimum": 0, "maximum": 1 },
+        "rps4y1_fraction":           { "type": "number",  "minimum": 0, "maximum": 1 },
+        "denominator":               { "type": "integer", "minimum": 0, "description": "Total reads used for the `*_fraction` fields (typically `featurecounts.assigned`)." },
+        "predicted_sex": {
+          "type": "string",
+          "enum": ["male", "female", "ambiguous", "unknown"],
+          "description": "Predicted from chrY:autosome ratio + XIST. `ambiguous` when both signals are strong; `unknown` at low depth or when neither signal is strong enough to call."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "gene_class_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundled_symbols", "matched_genes", "reads", "fraction"],
+      "properties": {
+        "bundled_symbols": { "type": "integer", "minimum": 0, "description": "Number of HGNC symbols in the bundled list for this class." },
+        "matched_genes":   { "type": "integer", "minimum": 0, "description": "Number of GTF genes that resolved to a bundled symbol (matched on `gene_name`). Zero typically means the GTF lacked the `gene_name` attribute." },
+        "reads":           { "type": "integer", "minimum": 0, "description": "Sum of `featureCounts` per-read counts across the matched genes." },
+        "fraction":        { "type": "number",  "minimum": 0, "maximum": 1, "description": "`reads / denominator`. 0.0 when the denominator is 0." }
       }
     }
   }

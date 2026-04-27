@@ -100,9 +100,10 @@ impl PerGeneAccumulator {
                     state.primary_reads_with_3p_clip.saturating_add(1);
             }
             coverage::add_block_deciles(gene_shape, aligned_blocks, &mut state.decile_coverage);
-            let (ex, intr) = intronexon::count_exon_intron_bp(gene_shape, aligned_blocks);
+            let (ex, intr, cds) = intronexon::count_exon_intron_bp(gene_shape, aligned_blocks);
             state.exon_aligned_bp = state.exon_aligned_bp.saturating_add(ex);
             state.intron_aligned_bp = state.intron_aligned_bp.saturating_add(intr);
+            state.cds_aligned_bp = state.cds_aligned_bp.saturating_add(cds);
         }
     }
 
