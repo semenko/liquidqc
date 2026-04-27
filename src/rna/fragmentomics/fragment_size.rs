@@ -24,15 +24,12 @@ pub struct FragmentSizeAccum {
     pub hist: Vec<u64>,
     /// Pairs observed with `|TLEN|` >= HIST_LEN.
     pub overflow: u64,
-    /// Phase 4: leftmost proper-pair mates whose `|TLEN|` is shorter than
-    /// `record.seq_len()` — i.e. the read literally extends past the
-    /// opposite end of the fragment into adapter sequence. Counted on the
-    /// same dispatch filter as the histogram so the denominator equals the
-    /// histogram total + overflow. Earlier code used `|TLEN| < 2 * qlen`,
-    /// which fires whenever the two reads merely overlap (the norm for
-    /// short cfRNA fragments) and reported ~75% on clean libraries; the
-    /// `|TLEN| < qlen` definition matches the actual adapter-contamination
-    /// regime where each read's 3' end runs into adapter bases.
+    /// Phase 4: leftmost proper-pair mates whose `|TLEN| < record.seq_len()`
+    /// — the read length exceeds the fragment, so each read's 3' end runs
+    /// past the opposite fragment end into adapter sequence. Counted on the
+    /// same dispatch filter as the histogram so the denominator equals
+    /// `total + overflow`. Pre-trimmed libraries report low rates because
+    /// adapter-contaminated bases are clipped before alignment.
     pub adapter_readthrough_pairs: u64,
 }
 

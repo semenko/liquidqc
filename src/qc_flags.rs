@@ -100,12 +100,10 @@ pub fn evaluate(ctx: &QcContext<'_>) -> Vec<String> {
 
     if let Some(stat) = ctx.bam_stat {
         if ctx.paired_end && stat.paired_flagstat > 0 {
-            // Match samtools flagstat semantics: properly_paired / paired-in-sequencing
-            // (both counted on primary records, no MAPQ filter). Earlier code used
-            // `stat.proper_pairs / stat.mapped`, which mixed a post-MAPQ-filter
-            // primary-only numerator against a denominator that includes secondary
-            // alignments — clean BAMs with many multimappers fired the flag at ~0.66
-            // even when samtools reported 99.97% properly paired.
+            // Flagstat semantics: numerator and denominator both count primary
+            // records without a MAPQ filter. Mixing post-filter numerators with
+            // a denominator that includes secondary alignments will fire on
+            // clean BAMs.
             let frac = stat.properly_paired as f64 / stat.paired_flagstat as f64;
             if frac < LOW_PAIRED_FRACTION_THRESHOLD {
                 flags.push(QcFlag::LowPairedFraction);

@@ -1,5 +1,45 @@
 # liquidqc Changelog
 
+## [Unreleased] — bug-fix pass — 2026-04-27
+
+### Schema 0.5.0-stub (breaking rename)
+
+- Renamed `fragment_length.frac_gt_300` → `frac_ge_300`. The new field
+  uses half-open `[300, ∞)` semantics so it matches `(bins.300_500 +
+  bins.gt_500) / total_pairs_observed`. The previous `> 300` count was
+  inconsistent with the bin convention.
+
+### Bug fixes
+
+- `qc_flags::low_paired_fraction` — denominator changed from
+  `stat.mapped` (includes secondary alignments) to `stat.paired_flagstat`,
+  with `properly_paired` numerator. The previous formula fired on clean
+  BAMs at ~0.66 even when samtools reported 99.97% properly paired.
+- `fragmentomics::periodicity` — dominant-peak FFT search now skips
+  bins for periods longer than the data window. Bin 1 corresponds to
+  period == PADDED_LEN (longer than the window itself) and dominated
+  any unimodal fragment-length distribution by virtue of residual
+  low-frequency content.
+- `sex_infer` — `XIST_FRACTION_STRONG` raised from 1e-5 → 1e-4 to match
+  the female-expression regime documented in the file's own docstring.
+  The previous threshold sat in male-leakage territory and forced
+  ambiguous calls on most male blood samples. Added
+  `RPS4Y1_FRACTION_STRONG` and consumed `rps4y1_fraction` in
+  `predict()` (it was previously computed-then-ignored).
+- `fragmentomics::fragment_size::adapter_readthrough` — threshold
+  tightened from `|TLEN| < 2*qlen` (any read overlap; the norm for
+  short cfRNA fragments) to `|TLEN| < qlen` (read length exceeds
+  fragment so reads extend into adapter). The old definition reported
+  ~75% on clean libraries.
+
+### Branding
+
+- User-facing output (banner, `CITATIONS.md`, `featureCounts.tsv` header
+  comment, `samtools.stats` header, `qualimapReport.html`) now says
+  `liquidqc` with upstream RustQC kept as a fork-attribution link where
+  appropriate. Inherited internal doc-comments and source-file headers
+  left intact.
+
 ## [Unreleased] — Phase 1 (per-sample envelope) — 2026-04-26
 
 ### v1 envelope wiring

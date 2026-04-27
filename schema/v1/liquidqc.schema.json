@@ -36,7 +36,7 @@
     },
     "schema_version": {
       "type": "string",
-      "description": "Semver for this schema. `0.5.0-stub` covers Phase 4 plus the bug-fix pass that renamed `frac_gt_300` to `frac_ge_300`, redefined `adapter_readthrough_rate`, fixed the `low_paired_fraction` denominator, capped the periodicity dominant-peak search to observable periods, and raised the XIST/RPS4Y1 sex-inference thresholds. The v1 release will bump to `1.0.0`.",
+      "description": "Semver for this schema. The v1 release will bump to `1.0.0`. See CHANGELOG.md for per-version notes.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
       "examples": ["0.2.0-stub", "0.3.0-stub", "0.4.0-stub", "0.5.0-stub", "1.0.0"]
     },
@@ -217,7 +217,7 @@
           }
         },
         "frac_lt_80":  { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of pairs with |TLEN| < 80 nt (matches the lt_50 + 50_80 bin sum / total)." },
-        "frac_ge_300": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of pairs with |TLEN| >= 300 nt (matches the 300_500 + gt_500 bin sum / total). Renamed from `frac_gt_300` in schema 0.5.0-stub; the previous strictly-greater-than definition was inconsistent with the half-open `[300, 500)` bin convention." },
+        "frac_ge_300": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of pairs with |TLEN| >= 300 nt. Equals (bins.300_500 + bins.gt_500) / total_pairs_observed." },
         "mean":        { "type": "number", "minimum": 0, "description": "Mean |TLEN| in nt across observed pairs." },
         "median":      { "type": "integer", "minimum": 0, "description": "Median |TLEN| in nt across observed pairs." },
         "total_pairs_observed": { "type": "integer", "minimum": 0, "description": "Number of proper pairs contributing to the histogram." }
@@ -372,7 +372,7 @@
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "description": "Phase 4 Tier 3: fraction of leftmost proper-pair mates with `|TLEN| < leftmost_qlen` — i.e. the read length exceeds the fragment, so each read extends past the opposite end of the fragment into adapter sequence. Earlier `|TLEN| < 2 * qlen` definition (any read overlap) was inflated by short cfRNA fragments where reads merely overlap each other without reaching adapter. Absent on single-end input."
+      "description": "Phase 4 Tier 3: fraction of leftmost proper-pair mates with `|TLEN| < leftmost_qlen` — the read length exceeds the fragment so each read extends past the opposite fragment end into adapter sequence. Pre-trimmed libraries report low rates because adapter-contaminated bases are clipped before alignment. Absent on single-end input."
     },
     "splice_site_dinucleotides": {
       "type": "object",
