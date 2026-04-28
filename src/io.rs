@@ -11,7 +11,7 @@ use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::Path;
 
 /// Gzip magic bytes: the first two bytes of any gzip-compressed file.
-const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
+pub const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
 /// Open a file and return a buffered reader, transparently decompressing gzip.
 ///

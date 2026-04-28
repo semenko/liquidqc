@@ -146,8 +146,19 @@ fn resolve_gtf_path(
             fp.n_records,
         )
     })?;
-    let cached =
-        cache::lookup_gtf(g)?.ok_or_else(|| anyhow::anyhow!("{}", cache::missing_gtf_error(g)))?;
+    let cached = match cache::lookup_gtf(g)? {
+        cache::CacheLookup::Hit(p) => p,
+        cache::CacheLookup::Stale(p) => {
+            ui.warn(&format!(
+                "Cached GTF at '{}' is not a valid gzip file (likely a truncated or stale download). \
+                 Re-run `liquidqc fetch-references --genome {} --force` to repopulate.",
+                p.display(),
+                g.cache_name(),
+            ));
+            anyhow::bail!("{}", cache::missing_gtf_error(g));
+        }
+        cache::CacheLookup::Missing => anyhow::bail!("{}", cache::missing_gtf_error(g)),
+    };
     ui.detail(&format!(
         "Auto-detected reference: {} ({} @SQ matches, {} naming)",
         g.label(),
@@ -156,6 +167,46 @@ fn resolve_gtf_path(
     ));
     ui.detail(&format!("Using cached GTF: {}", cached.display()));
     Ok(cached.to_string_lossy().into_owned())
+}
+
+/// Emit a single liquidqc-styled warning if any sibling alignment index
+/// is older than the BAM/CRAM file. Suppresses no errors — htslib's own
+/// repeated `[W::hts_idx_load3]` warnings still fire, but the user gets
+/// one clear, actionable message before the noise.
+fn warn_if_index_stale(bam_path: &str, ui: &Ui) {
+    let bam = Path::new(bam_path);
+    let bam_meta = match std::fs::metadata(bam) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    let bam_modified = match bam_meta.modified() {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    // Order matches htslib's index-extension search.
+    for ext in [".bai", ".csi", ".crai"] {
+        let mut idx = bam.as_os_str().to_owned();
+        idx.push(ext);
+        let idx = std::path::PathBuf::from(idx);
+        let idx_meta = match std::fs::metadata(&idx) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let Ok(idx_modified) = idx_meta.modified() else {
+            continue;
+        };
+        if bam_modified > idx_modified {
+            ui.warn(&format!(
+                "Alignment index '{}' is older than '{}'. htslib will repeat-warn \
+                 during the parallel scan; re-run `samtools index '{}'` to silence.",
+                idx.display(),
+                bam_path,
+                bam_path,
+            ));
+        }
+        // Once we've seen any matching index, stop — liquidqc only acts on the first.
+        return;
+    }
 }
 
 /// Reconstruct the command line for the featureCounts-compatible header comment.
@@ -338,6 +389,12 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         }
         let _header = reader.header().clone();
         // Reader dropped — just validating the file is openable
+
+        // Pre-check index freshness once per BAM. htslib's
+        // [W::hts_idx_load3] warning fires once per parallel chromosome
+        // batch (up to ~24 lines on stderr), which drowns out the rest of
+        // the run. Surface a single liquidqc-styled warn line instead.
+        warn_if_index_stale(bam_path, ui);
     }
 
     // Reject duplicate stems early — they would collide on output filenames.
@@ -361,6 +418,45 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     let first_bam = &args.input[0];
     let genome_fp = genome::fingerprint_bam(first_bam)?;
     let gtf_path = resolve_gtf_path(args.gtf.as_deref(), &genome_fp, first_bam, ui)?;
+
+    // Compare BAM and GTF chromosome naming. When BAM is no-prefix and GTF
+    // is chr-prefixed, auto-apply a "chr" prefix at runtime so reads land on
+    // genes — the alternative is silent zero-assignment and a confusing
+    // post-pass error. User-supplied chromosome_prefix/chromosome_mapping
+    // always wins. Bail early on the unsupported reverse direction (Chr BAM
+    // / NoChr GTF) so the user can fix their config before paying for any
+    // BAM scanning.
+    let auto_chr_prefix = if config.has_chromosome_mapping() {
+        // User-supplied chromosome_prefix/chromosome_mapping always wins,
+        // so the GTF peek would only feed dead code — skip it and avoid a
+        // redundant gzip-decompression pass over a multi-MB GTF.
+        None
+    } else {
+        let gtf_chr_style = gtf::peek_gtf_chr_style(&gtf_path)?;
+        match auto_detect::detect_chr_bridge(genome_fp.chr_style, gtf_chr_style, false) {
+            auto_detect::ChrBridge::AddChrPrefix => {
+                ui.detail(
+                    "Auto-bridging chromosome naming: BAM uses no-prefix names, GTF is \
+                     chr-prefixed; applying 'chr' prefix at lookup time.",
+                );
+                Some("chr".to_string())
+            }
+            auto_detect::ChrBridge::StripChrUnsupported => {
+                anyhow::bail!(
+                    "Chromosome-naming mismatch: BAM uses 'chr'-prefixed names but the GTF \
+                     does not. liquidqc only auto-bridges in the other direction. Add a \
+                     chromosome_mapping section to a YAML config and pass it via -c, e.g.\n\n\
+                     rna:\n  \
+                     chromosome_mapping:\n    \
+                     \"1\": chr1\n    \
+                     \"2\": chr2\n    \
+                     # ... through 22, X, Y\n    \
+                     MT: chrM\n",
+                );
+            }
+            auto_detect::ChrBridge::None => None,
+        }
+    };
 
     let start = Instant::now();
     let n_bams = args.input.len();
@@ -419,14 +515,13 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         Some(&cpu_info),
     );
 
+    let first_pass = auto_detect::detect_first_pass(first_bam, auto_detect::PAIRED_SAMPLE_SIZE)?;
+
     let (effective_paired, paired_auto) = match (args.paired, args.single_end, config.paired) {
         (true, _, _) => (true, false),
         (_, true, _) => (false, false),
         (_, _, Some(p)) => (p, false),
-        _ => (
-            auto_detect::detect_paired(first_bam, auto_detect::PAIRED_SAMPLE_SIZE)?,
-            true,
-        ),
+        _ => (first_pass.paired, true),
     };
     if paired_auto {
         ui.detail(&format!(
@@ -436,6 +531,24 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
             first_bam,
         ));
     }
+
+    // qc_flag surfaces an unmarked-dup BAM in the envelope so downstream
+    // consumers know dup-rate metrics are unreliable.
+    let (effective_skip_dup_check, duplicates_not_marked) = if !args.skip_dup_check
+        && first_pass.n_primary_sampled >= auto_detect::DUP_CHECK_MIN_SAMPLE
+        && first_pass.n_duplicate_flagged == 0
+    {
+        ui.warn(&format!(
+            "BAM has no duplicate-flagged reads in the first {} primary records; \
+             auto-disabling the dup-mark requirement. Mark duplicates upstream \
+             (e.g. samblaster, Picard MarkDuplicates) to silence this and to make \
+             dup-rate metrics meaningful.",
+            first_pass.n_primary_sampled,
+        ));
+        (true, true)
+    } else {
+        (args.skip_dup_check, false)
+    };
 
     // Strandedness needs the gene model; resolve below, after GTF parse.
     let stranded_explicit = args.stranded.or(config.stranded);
@@ -544,6 +657,13 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         extra_attributes.push("gene_name".to_string());
     }
     let genes = gtf::parse_gtf(gtf_path, &extra_attributes)?;
+    anyhow::ensure!(
+        !genes.is_empty(),
+        "GTF '{}' parsed to 0 genes — likely a format problem (GFF3 instead of GTF, \
+         a truncated download, or missing exon features with gene_id attributes). \
+         If this came from the liquidqc cache, re-run `liquidqc fetch-references --force`.",
+        gtf_path,
+    );
     ui.detail(&format!(
         "Parsed {} genes in {}",
         format_count(genes.len() as u64),
@@ -613,7 +733,10 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     };
 
     let chrom_mapping = config.alignment_to_gtf_mapping();
-    let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
+    let chrom_prefix = config
+        .chromosome_prefix()
+        .map(|s| s.to_owned())
+        .or_else(|| auto_chr_prefix.clone());
 
     // `stranded_inferred` flags that the value came from the pre-pass
     // (skips the post-run mismatch warning that only makes sense for an
@@ -625,6 +748,8 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
             model,
             args.mapq_cut,
             auto_detect::STRANDED_SAMPLE_SIZE,
+            chrom_prefix.as_deref(),
+            &chrom_mapping,
         )? {
             Some(s) => {
                 ui.detail(&format!(
@@ -694,7 +819,8 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         outdir,
         flat_output,
         fasta: args.fasta.as_deref(),
-        skip_dup_check: args.skip_dup_check,
+        skip_dup_check: effective_skip_dup_check,
+        duplicates_not_marked,
         config: &config,
         biotype_attribute: &biotype_attribute,
         biotype_in_gtf,
@@ -895,6 +1021,10 @@ struct SharedParams<'a> {
     fasta: Option<&'a str>,
     /// Whether to skip duplicate-marking validation.
     skip_dup_check: bool,
+    /// Set when the first-pass auto-detect found zero duplicate flags in
+    /// a sufficient sample. Surfaced as a `duplicates_not_marked` qc_flag
+    /// so envelope consumers know dup-rate metrics are unreliable.
+    duplicates_not_marked: bool,
     /// Configuration for conditional outputs.
     config: &'a config::RnaConfig,
     /// GTF attribute name for biotype counting.
@@ -1607,6 +1737,7 @@ fn process_single_bam(
         featurecounts_biotype_rrna: biotype_rrna_count,
         fragment_size: frag_size_result.as_ref(),
         read_distribution: rseqc_outputs.read_distribution.as_ref(),
+        duplicates_not_marked: params.duplicates_not_marked,
     });
 
     // Phase 4 gene-class fractions: bundled hemoglobin / RP / apolipoprotein

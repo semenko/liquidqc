@@ -33,6 +33,7 @@ pub enum QcFlag {
     ReadLengthCapsLongFragments,
     LowComplexityLibrary,
     HighDuplicationNonbiological,
+    DuplicatesNotMarked,
 }
 
 impl QcFlag {
@@ -48,6 +49,7 @@ impl QcFlag {
             QcFlag::ReadLengthCapsLongFragments => "read_length_caps_long_fragments",
             QcFlag::LowComplexityLibrary => "low_complexity_library",
             QcFlag::HighDuplicationNonbiological => "high_duplication_nonbiological",
+            QcFlag::DuplicatesNotMarked => "duplicates_not_marked",
         }
     }
 }
@@ -88,6 +90,11 @@ pub struct QcContext<'a> {
     /// Phase 4: intronic / exonic tag distribution source for the
     /// cfDNA-contamination rule.
     pub read_distribution: Option<&'a ReadDistributionResult>,
+    /// Set when the first-pass auto-detect found zero duplicate-flagged
+    /// reads in a large enough sample, indicating the BAM was not run
+    /// through a markdup tool. Skipped when the user passed
+    /// `--skip-dup-check` explicitly (we can't tell trust from absence).
+    pub duplicates_not_marked: bool,
 }
 
 /// Evaluate Phase 1 rules and return matching flag names in schema order.
@@ -96,6 +103,10 @@ pub fn evaluate(ctx: &QcContext<'_>) -> Vec<String> {
 
     if !ctx.paired_end {
         flags.push(QcFlag::SingleEndNoTlen);
+    }
+
+    if ctx.duplicates_not_marked {
+        flags.push(QcFlag::DuplicatesNotMarked);
     }
 
     if let Some(stat) = ctx.bam_stat {
@@ -291,6 +302,7 @@ mod tests {
             featurecounts_biotype_rrna: 0,
             fragment_size: None,
             read_distribution: None,
+            duplicates_not_marked: false,
         }
     }
 
@@ -306,6 +318,22 @@ mod tests {
         ctx.paired_end = false;
         let flags = evaluate(&ctx);
         assert!(flags.contains(&"single_end_no_tlen".to_string()));
+    }
+
+    #[test]
+    fn duplicates_not_marked_sets_flag() {
+        let mut ctx = base_ctx("neb_next");
+        ctx.duplicates_not_marked = true;
+        let flags = evaluate(&ctx);
+        assert!(flags.contains(&"duplicates_not_marked".to_string()));
+    }
+
+    #[test]
+    fn duplicates_marked_default_clears_flag() {
+        // Default base_ctx has duplicates_not_marked = false; the flag must
+        // not appear unless explicitly set.
+        let flags = evaluate(&base_ctx("neb_next"));
+        assert!(!flags.contains(&"duplicates_not_marked".to_string()));
     }
 
     #[test]

@@ -157,6 +157,43 @@ struct TranscriptBuilder {
     stop_codons: Vec<(u64, u64)>,
 }
 
+/// Number of non-comment lines [`peek_gtf_chr_style`] inspects before
+/// returning. Enough to span at least a few chromosomes in any sane GTF
+/// (GENCODE/Ensembl group records by chromosome).
+const PEEK_GTF_CHR_STYLE_LINES: usize = 200;
+
+/// Inspect the first [`PEEK_GTF_CHR_STYLE_LINES`] non-comment lines of a
+/// GTF and classify column 1 (chromosome) into a [`crate::genome::ChromStyle`].
+///
+/// Cheap (typically a single decompressed buffer fill) so it can run before
+/// the full `parse_gtf` to drive auto-bridge of chromosome naming.
+pub fn peek_gtf_chr_style(path: &str) -> Result<crate::genome::ChromStyle> {
+    let mut reader = crate::io::open_reader(path)
+        .with_context(|| format!("Failed to open GTF for chr-style peek: {}", path))?;
+    let mut acc = crate::genome::ChrStyleAcc::default();
+    let mut line = String::new();
+    let mut canonical_seen = 0usize;
+    while canonical_seen < PEEK_GTF_CHR_STYLE_LINES {
+        line.clear();
+        let n = reader
+            .read_line(&mut line)
+            .context("Failed to read line during GTF chr-style peek")?;
+        if n == 0 {
+            break;
+        }
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        if let Some((chrom, _)) = trimmed.split_once('\t') {
+            if acc.observe(chrom) {
+                canonical_seen += 1;
+            }
+        }
+    }
+    Ok(acc.into_style())
+}
+
 /// Parse a GTF file and return a map of gene_id -> Gene.
 ///
 /// Extracts all exon and CDS features, groups them by gene_id, and builds
@@ -437,6 +474,51 @@ pub fn attribute_exists_in_gtf(path: &str, attribute_name: &str, max_lines: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::genome::ChromStyle;
+
+    fn write_named_gtf(name: &str, body: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    #[test]
+    fn peek_chr_style_detects_chr_prefix() {
+        let body = "##comment line\n\
+            chr1\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g1\";\n\
+            chr2\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g2\";\n\
+            chrX\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g3\";\n";
+        let p = write_named_gtf("liquidqc_peek_chr.gtf", body);
+        assert_eq!(
+            peek_gtf_chr_style(p.to_str().unwrap()).unwrap(),
+            ChromStyle::Chr,
+        );
+    }
+
+    #[test]
+    fn peek_chr_style_detects_no_prefix() {
+        let body = "1\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g1\";\n\
+            2\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g2\";\n\
+            X\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g3\";\n";
+        let p = write_named_gtf("liquidqc_peek_nochr.gtf", body);
+        assert_eq!(
+            peek_gtf_chr_style(p.to_str().unwrap()).unwrap(),
+            ChromStyle::NoChr,
+        );
+    }
+
+    #[test]
+    fn peek_chr_style_unknown_for_only_alt_contigs() {
+        // Names like "GL000001.1" aren't canonical, so the verdict is Unknown
+        // even though they have no prefix.
+        let body = "GL000001.1\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g1\";\n\
+            KI270727.1\thavana\texon\t100\t200\t.\t+\t.\tgene_id \"g2\";\n";
+        let p = write_named_gtf("liquidqc_peek_alts.gtf", body);
+        assert_eq!(
+            peek_gtf_chr_style(p.to_str().unwrap()).unwrap(),
+            ChromStyle::Unknown,
+        );
+    }
 
     #[test]
     fn test_get_attribute() {

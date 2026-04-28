@@ -163,7 +163,8 @@
           "read_length_caps_long_fragments",
           "low_complexity_library",
           "high_duplication_nonbiological",
-          "end_motifs_skipped_no_fasta"
+          "end_motifs_skipped_no_fasta",
+          "duplicates_not_marked"
         ]
       },
       "uniqueItems": true

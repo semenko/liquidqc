@@ -195,24 +195,73 @@ fn strip_chr_prefix(name: &str) -> &str {
 }
 
 fn detect_chr_style(records: &[(String, u64)]) -> ChromStyle {
-    let mut has_chr = false;
-    let mut has_nochr = false;
+    let mut acc = ChrStyleAcc::default();
     for (name, _) in records {
+        acc.observe(name);
+    }
+    acc.into_style()
+}
+
+/// Streaming accumulator for chromosome-name style classification.
+///
+/// Used by GTF chr-style peeking, where lines stream past one at a time
+/// and pre-collecting every name into a `Vec<String>` would allocate
+/// 200 short strings just to throw them away. Non-canonical names (alts,
+/// scaffolds) are ignored — they shouldn't sway the verdict.
+#[derive(Default)]
+pub struct ChrStyleAcc {
+    has_chr: bool,
+    has_nochr: bool,
+}
+
+impl ChrStyleAcc {
+    /// Observe a chromosome name. Returns `true` if the name was canonical
+    /// (i.e. counted toward the verdict), `false` if it was an alt/scaffold.
+    pub fn observe(&mut self, name: &str) -> bool {
         let core = strip_chr_prefix(name);
         if !is_canonical_chrom(core) {
-            continue;
+            return false;
         }
         if name.starts_with("chr") || name.starts_with("Chr") || name.starts_with("CHR") {
-            has_chr = true;
+            self.has_chr = true;
         } else {
-            has_nochr = true;
+            self.has_nochr = true;
+        }
+        true
+    }
+
+    pub fn into_style(self) -> ChromStyle {
+        match (self.has_chr, self.has_nochr) {
+            (true, false) => ChromStyle::Chr,
+            (false, true) => ChromStyle::NoChr,
+            _ => ChromStyle::Unknown,
         }
     }
-    match (has_chr, has_nochr) {
-        (true, false) => ChromStyle::Chr,
-        (false, true) => ChromStyle::NoChr,
-        _ => ChromStyle::Unknown,
-    }
+}
+
+/// Translate a list of BAM-side chromosome names into the names used by
+/// the GTF, applying the same precedence rule as the dupRadar counting
+/// loop: explicit `chrom_mapping` entries win over the prefix.
+///
+/// Centralising the logic keeps pre-pass auto-detection
+/// ([`crate::auto_detect`]) consistent with the main counting pass.
+pub fn resolve_gtf_chrom_names(
+    bam_names: &[String],
+    chrom_prefix: Option<&str>,
+    chrom_mapping: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    bam_names
+        .iter()
+        .map(|bam_name| {
+            if let Some(mapped) = chrom_mapping.get(bam_name.as_str()) {
+                mapped.clone()
+            } else if let Some(prefix) = chrom_prefix {
+                format!("{}{}", prefix, bam_name)
+            } else {
+                bam_name.clone()
+            }
+        })
+        .collect()
 }
 
 /// True if `name` is a canonical human chromosome name (no `chr` prefix):

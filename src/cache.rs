@@ -11,7 +11,10 @@
 //! `liquidqc rna` never writes to the cache.
 
 use crate::genome::KnownGenome;
+use crate::io::GZIP_MAGIC;
 use anyhow::{anyhow, Result};
+use std::fs::File;
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 
 /// Subdirectory under the cache root holding GTF files.
@@ -54,15 +57,45 @@ pub fn gtf_path_for(genome: KnownGenome) -> Result<PathBuf> {
     Ok(gtf_dir()?.join(format!("{}.gtf.gz", genome.cache_name())))
 }
 
-/// Look up a cached GTF for the given genome. Returns the path if it
-/// exists, or `None` if the file is missing. An IO error short-circuits
-/// to `Err`.
-pub fn lookup_gtf(genome: KnownGenome) -> Result<Option<PathBuf>> {
+/// Status of a cache lookup. `Stale` means a file exists at the cache path
+/// but failed validation (e.g. truncated download from a pre-`sanity_check_gzip`
+/// liquidqc release) and the caller should warn + treat the cache as missing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CacheLookup {
+    Hit(PathBuf),
+    Missing,
+    Stale(PathBuf),
+}
+
+/// Look up a cached GTF for the given genome.
+///
+/// Returns `Hit` when the file exists and looks like a valid gzip stream
+/// (first two bytes are `1f 8b`). A file that exists but fails the magic-byte
+/// check is reported as `Stale` so the caller can prompt the user to re-fetch.
+/// IO errors short-circuit to `Err`.
+pub fn lookup_gtf(genome: KnownGenome) -> Result<CacheLookup> {
     let p = gtf_path_for(genome)?;
-    if p.is_file() {
-        Ok(Some(p))
-    } else {
-        Ok(None)
+    match has_gzip_magic(&p) {
+        Ok(true) => Ok(CacheLookup::Hit(p)),
+        Ok(false) => Ok(CacheLookup::Stale(p)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(CacheLookup::Missing),
+        Err(e) => {
+            Err(anyhow::Error::new(e).context(format!("opening cache file: {}", p.display())))
+        }
+    }
+}
+
+/// Read the first two bytes of `path` and return whether they match the
+/// gzip magic number. A file shorter than 2 bytes is reported as not-gzip.
+/// Surfaces the raw [`std::io::Error`] so callers can distinguish missing
+/// files from other I/O failures without a separate `is_file` check.
+fn has_gzip_magic(path: &Path) -> std::io::Result<bool> {
+    let mut f = File::open(path)?;
+    let mut buf = [0u8; 2];
+    match f.read_exact(&mut buf) {
+        Ok(()) => Ok(buf == GZIP_MAGIC),
+        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
@@ -151,10 +184,13 @@ mod tests {
     }
 
     #[test]
-    fn lookup_returns_none_when_missing() {
+    fn lookup_returns_missing_when_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let _g = EnvGuard::set("LIQUIDQC_CACHE_DIR", tmp.path().to_str().unwrap());
-        assert!(lookup_gtf(KnownGenome::Grch38).unwrap().is_none());
+        assert_eq!(
+            lookup_gtf(KnownGenome::Grch38).unwrap(),
+            CacheLookup::Missing
+        );
     }
 
     #[test]
@@ -163,9 +199,34 @@ mod tests {
         let _g = EnvGuard::set("LIQUIDQC_CACHE_DIR", tmp.path().to_str().unwrap());
         let p = gtf_path_for(KnownGenome::Grch38).unwrap();
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(&p, b"placeholder").unwrap();
+        // Write a 2-byte gzip header so the magic-byte check passes.
+        std::fs::write(&p, GZIP_MAGIC).unwrap();
         let got = lookup_gtf(KnownGenome::Grch38).unwrap();
-        assert_eq!(got, Some(p));
+        assert_eq!(got, CacheLookup::Hit(p));
+    }
+
+    #[test]
+    fn lookup_reports_stale_for_non_gzip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _g = EnvGuard::set("LIQUIDQC_CACHE_DIR", tmp.path().to_str().unwrap());
+        let p = gtf_path_for(KnownGenome::Grch38).unwrap();
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        // 11 bytes of plain text — the exact failure mode observed in practice.
+        std::fs::write(&p, b"not-a-gzip!").unwrap();
+        let got = lookup_gtf(KnownGenome::Grch38).unwrap();
+        assert_eq!(got, CacheLookup::Stale(p));
+    }
+
+    #[test]
+    fn lookup_reports_stale_for_truncated_below_magic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _g = EnvGuard::set("LIQUIDQC_CACHE_DIR", tmp.path().to_str().unwrap());
+        let p = gtf_path_for(KnownGenome::Grch38).unwrap();
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        // 1 byte: shorter than the 2-byte magic — must report Stale, not panic.
+        std::fs::write(&p, [0x1fu8]).unwrap();
+        let got = lookup_gtf(KnownGenome::Grch38).unwrap();
+        assert_eq!(got, CacheLookup::Stale(p));
     }
 
     #[test]
