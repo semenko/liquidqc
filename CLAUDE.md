@@ -88,4 +88,19 @@ See `AGENTS.md` for the full inherited style guide (formatting, imports, naming,
 
 ## Releases
 
-Triggered via `workflow_dispatch` (GitHub Actions UI or `gh workflow run release`). Workflow validates `Cargo.toml` ↔ `Cargo.lock` version match, builds 8 binary targets + Docker images (baseline + 3 SIMD), then tags / publishes / uploads only after all builds pass. To prep: bump `Cargo.toml` version, `cargo update --package liquidqc`, add a `CHANGELOG.md` section, push to `main`, dispatch the workflow.
+Triggered via `workflow_dispatch`. The workflow validates `Cargo.toml` ↔ `Cargo.lock` match, builds 8 binary archives + multi-arch Docker (baseline + 3 SIMD), and only then creates the tag, drafts the GitHub Release, uploads the binaries, publishes to crates.io, and updates the Homebrew tap.
+
+**To cut a release:**
+
+1. Bump `Cargo.toml` version. Run `cargo update --package liquidqc` to refresh `Cargo.lock` (the workflow asserts they match).
+2. Add a `CHANGELOG.md` section with the **exact** header format `## [Version X.Y.Z] - YYYY-MM-DD` (the workflow's awk extractor matches `^## \[Version X.Y.Z\]` and stops at the next `## [` — so any `## [Unreleased]` block above it must be consolidated/renamed first).
+3. Schema bumps live alongside: `SCHEMA_VERSION` in `src/envelope.rs`, the schema `examples` list, and any `tests/phase{1,2,4}_*.rs` assertions that hardcode the old value.
+4. Push to `main`. Push events run the workflow's binary + Docker jobs (smoke-build) but `is_release=false`, so no tag/release/publish.
+5. Dispatch: `gh workflow run release.yml --ref main --repo semenko/liquidqc`. The `--repo` flag is required because the local `upstream` remote points at `seqeralabs/RustQC` — without it `gh` infers the wrong repo and 403s.
+
+**Required repo secrets:**
+
+- `CARGO_REGISTRY_TOKEN` — crates.io API token (scope `publish-update`). The `publish-crate` step skips automatically if the version is already on crates.io, so a manual first-publish to reserve the name is fine.
+- `HOMEBREW_TAP_TOKEN` (optional) — fine-grained PAT with Contents:write on `semenko/homebrew-tap`. The `homebrew-tap` job no-ops without it.
+
+**First-time crates.io setup:** the crate name was reserved by a manual `cargo publish` of v1.0.0; subsequent versions go through the workflow using `CARGO_REGISTRY_TOKEN`. Trusted Publishing (OIDC) is not configured.
