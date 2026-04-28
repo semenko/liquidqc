@@ -78,13 +78,7 @@ impl FragmentSizeAccum {
         let total: u64 = self.hist.iter().sum::<u64>() + self.overflow;
         let bins = compute_bins(&self.hist, self.overflow);
 
-        let frac = |count: u64| -> f64 {
-            if total == 0 {
-                0.0
-            } else {
-                count as f64 / total as f64
-            }
-        };
+        use crate::rna::safe_fraction;
 
         let count_lt_80: u64 = self.hist.iter().take(80).sum();
         // Half-open `[300, ∞)` to match the bin convention (`b300_500` = [300, 500),
@@ -92,16 +86,15 @@ impl FragmentSizeAccum {
         let count_ge_300: u64 = self.hist.iter().skip(300).sum::<u64>() + self.overflow;
 
         let (mean, median) = mean_and_median(&self.hist, self.overflow, total);
-        let adapter_readthrough_rate = frac(self.adapter_readthrough_pairs);
 
         FragmentSizeResult {
             bins,
-            frac_lt_80: frac(count_lt_80),
-            frac_ge_300: frac(count_ge_300),
+            frac_lt_80: safe_fraction(count_lt_80, total),
+            frac_ge_300: safe_fraction(count_ge_300, total),
             mean,
             median,
             total_pairs_observed: total,
-            adapter_readthrough_rate,
+            adapter_readthrough_rate: safe_fraction(self.adapter_readthrough_pairs, total),
             adapter_readthrough_pairs: self.adapter_readthrough_pairs,
             histogram: self.hist,
             overflow: self.overflow,

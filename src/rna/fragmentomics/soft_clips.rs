@@ -138,21 +138,10 @@ impl SoftClipAccum {
     }
 
     pub fn into_result(self) -> SoftClipResult {
-        let total = self.primary_reads_observed.max(1);
-        let rate_5p = if self.primary_reads_observed == 0 {
-            0.0
-        } else {
-            self.reads_with_5p_clip as f64 / total as f64
-        };
-        let rate_3p = if self.primary_reads_observed == 0 {
-            0.0
-        } else {
-            self.reads_with_3p_clip as f64 / total as f64
-        };
-
+        use crate::rna::safe_fraction;
         SoftClipResult {
-            soft_clip_rate_5p: rate_5p,
-            soft_clip_rate_3p: rate_3p,
+            soft_clip_rate_5p: safe_fraction(self.reads_with_5p_clip, self.primary_reads_observed),
+            soft_clip_rate_3p: safe_fraction(self.reads_with_3p_clip, self.primary_reads_observed),
             kmer_5p_by_clip_len: kmer_arrays_to_block(&self.kmer_5p),
             kmer_3p_by_clip_len: kmer_arrays_to_block(&self.kmer_3p),
             primary_reads_observed: self.primary_reads_observed,

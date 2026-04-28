@@ -84,15 +84,8 @@ pub fn compute(
     let xist_reads = symbol_reads[0];
     let rps4y1_reads = symbol_reads[1];
 
-    let frac = |n: u64| -> f64 {
-        if fc_assigned == 0 {
-            0.0
-        } else {
-            n as f64 / fc_assigned as f64
-        }
-    };
-    let xist_fraction = frac(xist_reads);
-    let rps4y1_fraction = frac(rps4y1_reads);
+    let xist_fraction = crate::rna::safe_fraction(xist_reads, fc_assigned);
+    let rps4y1_fraction = crate::rna::safe_fraction(rps4y1_reads, fc_assigned);
 
     let predicted_sex = predict(autosome_reads, ratio, xist_fraction, rps4y1_fraction);
 
@@ -186,8 +179,7 @@ fn predict(
     // Two orthogonal male signals: chrY/autosome mapping density (sensitive
     // but pollutable by PAR mismaps) and RPS4Y1 expression (specific to
     // male chrY transcription). Either alone suffices for a "male" call.
-    let male_strong = y_ratio > Y_AUTOSOME_RATIO_STRONG
-        || rps4y1_fraction > RPS4Y1_FRACTION_STRONG;
+    let male_strong = y_ratio > Y_AUTOSOME_RATIO_STRONG || rps4y1_fraction > RPS4Y1_FRACTION_STRONG;
     let female_strong = xist_fraction > XIST_FRACTION_STRONG;
     match (male_strong, female_strong) {
         (true, false) => PredictedSex::Male,

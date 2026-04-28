@@ -106,31 +106,25 @@ impl GeneClassIndex {
         let hb_reads = sum(&self.hemoglobin);
         let rp_reads = sum(&self.ribosomal_protein);
         let apo_reads = sum(&self.apolipoprotein);
-        let frac = |n: u64| -> f64 {
-            if denominator == 0 {
-                0.0
-            } else {
-                n as f64 / denominator as f64
-            }
-        };
+        use crate::rna::safe_fraction;
         GeneClassFractionsResult {
             hemoglobin: GeneClassEntry {
                 bundled_symbols: self.bundled_counts.hemoglobin,
                 matched_genes: self.hemoglobin.len() as u64,
                 reads: hb_reads,
-                fraction: frac(hb_reads),
+                fraction: safe_fraction(hb_reads, denominator),
             },
             ribosomal_protein: GeneClassEntry {
                 bundled_symbols: self.bundled_counts.ribosomal_protein,
                 matched_genes: self.ribosomal_protein.len() as u64,
                 reads: rp_reads,
-                fraction: frac(rp_reads),
+                fraction: safe_fraction(rp_reads, denominator),
             },
             apolipoprotein: GeneClassEntry {
                 bundled_symbols: self.bundled_counts.apolipoprotein,
                 matched_genes: self.apolipoprotein.len() as u64,
                 reads: apo_reads,
-                fraction: frac(apo_reads),
+                fraction: safe_fraction(apo_reads, denominator),
             },
             denominator,
         }

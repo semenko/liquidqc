@@ -45,7 +45,7 @@ impl std::fmt::Display for Strandedness {
 
 /// Fast quality control tools for sequencing data, written in Rust.
 #[derive(Parser, Debug)]
-#[command(name = "liquidqc", version, about, long_about = None)]
+#[command(name = env!("CARGO_PKG_NAME"), version, about, long_about = None)]
 pub struct Cli {
     /// The analysis subcommand to run.
     #[command(subcommand)]
@@ -527,7 +527,7 @@ mod tests {
     fn test_rna_default_args_gtf() {
         // Test that defaults are sensible with a GTF annotation
         let cli = Cli::parse_from([
-            "liquidqc",
+            env!("CARGO_PKG_NAME"),
             "rna",
             "test.bam",
             "--gtf",
@@ -558,7 +558,7 @@ mod tests {
     fn test_rna_multiple_bams() {
         // Test that multiple BAM files are accepted
         let cli = Cli::parse_from([
-            "liquidqc",
+            env!("CARGO_PKG_NAME"),
             "rna",
             "a.bam",
             "b.bam",
@@ -581,7 +581,7 @@ mod tests {
     #[test]
     fn test_rna_gtf_all_args() {
         let cli = Cli::parse_from([
-            "liquidqc",
+            env!("CARGO_PKG_NAME"),
             "rna",
             "test.bam",
             "--gtf",
@@ -618,15 +618,26 @@ mod tests {
     #[test]
     fn test_rna_missing_gtf() {
         // --gtf is required, so omitting it should fail
-        let result =
-            Cli::try_parse_from(["liquidqc", "rna", "test.bam", "--library-prep", "unknown"]);
+        let result = Cli::try_parse_from([
+            env!("CARGO_PKG_NAME"),
+            "rna",
+            "test.bam",
+            "--library-prep",
+            "unknown",
+        ]);
         assert!(result.is_err(), "Expected error when --gtf is not provided");
     }
 
     #[test]
     fn test_rna_missing_library_prep() {
         // --library-prep is required by the v1 contract; never silently defaulted
-        let result = Cli::try_parse_from(["liquidqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
+        let result = Cli::try_parse_from([
+            env!("CARGO_PKG_NAME"),
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+        ]);
         assert!(
             result.is_err(),
             "Expected error when --library-prep is not provided"
@@ -636,7 +647,7 @@ mod tests {
     #[test]
     fn test_rna_rseqc_params() {
         let cli = Cli::parse_from([
-            "liquidqc",
+            env!("CARGO_PKG_NAME"),
             "rna",
             "test.bam",
             "--gtf",
@@ -673,7 +684,7 @@ mod tests {
     #[test]
     fn test_rna_preseq_params() {
         let cli = Cli::parse_from([
-            "liquidqc",
+            env!("CARGO_PKG_NAME"),
             "rna",
             "test.bam",
             "--gtf",
@@ -705,7 +716,7 @@ mod tests {
     #[test]
     fn test_rna_tool_seeds() {
         let cli = Cli::parse_from([
-            "liquidqc",
+            env!("CARGO_PKG_NAME"),
             "rna",
             "test.bam",
             "--gtf",
@@ -733,7 +744,7 @@ mod tests {
     #[test]
     fn test_rna_skip_preseq() {
         let cli = Cli::parse_from([
-            "liquidqc",
+            env!("CARGO_PKG_NAME"),
             "rna",
             "test.bam",
             "--gtf",

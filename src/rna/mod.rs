@@ -24,3 +24,36 @@ pub mod saturation;
 pub mod sex_infer;
 pub mod snp_fingerprint;
 pub mod splice_dinuc;
+
+/// `numerator / denominator` as f64, with `denominator == 0` mapped to `0.0`.
+///
+/// The "fraction with zero-safe denominator" pattern recurs at every
+/// finalize site (gene-class, sex-inference, fragment-size, periodicity bands,
+/// per-gene rates, panel aggregation, snp depth, saturation, etc.). Pulling
+/// it into one place keeps the divide-by-zero contract uniform across the
+/// envelope.
+pub fn safe_fraction(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_fraction_zero_denominator_is_zero() {
+        assert_eq!(safe_fraction(7, 0), 0.0);
+        assert_eq!(safe_fraction(0, 0), 0.0);
+    }
+
+    #[test]
+    fn safe_fraction_basic_division() {
+        assert!((safe_fraction(1, 2) - 0.5).abs() < 1e-12);
+        assert_eq!(safe_fraction(0, 100), 0.0);
+        assert_eq!(safe_fraction(100, 100), 1.0);
+    }
+}
