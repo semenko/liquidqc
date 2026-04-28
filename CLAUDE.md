@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project context
 
-**liquidqc** is a hard fork of [seqeralabs/RustQC](https://github.com/seqeralabs/RustQC) being extended into a single-pass cfRNA QC + fragmentomics tool. Binary crate (`liquidqc`), Rust edition 2021, GPL-3.0-or-later, MSRV 1.87.
+**liquidqc** is a hard fork of [seqeralabs/RustQC](https://github.com/seqeralabs/RustQC) extended into a single-pass cfRNA QC + fragmentomics tool. Binary crate (`liquidqc`), Rust edition 2021, GPL-3.0-or-later, MSRV 1.87.
 
-The repo is currently in **Phase 0 (bootstrap)**: rename done, schema v1 stub committed, fragmentomics CLI flags scaffolded but not yet wired to computation. The inherited `rna` subcommand runs the full classical RNA-seq QC pipeline end-to-end (dupRadar, featureCounts, 8 RSeQC tools, preseq, samtools-compatible flagstat/idxstats/stats, Qualimap gene body coverage). Subsequent phases (1–6) wire fragmentomics features into a unified per-sample JSON + sparse per-gene Parquet output.
+Tier-1 (sample-level fragmentomics), Tier-2 (per-gene sparse Parquet), and Tier-3 (cohort QC + sample-identity add-ons) are all wired and emit into the v1 envelope. The inherited `rna` subcommand runs the full classical RNA-seq QC pipeline (dupRadar, featureCounts, 8 RSeQC tools, preseq, samtools-compatible flagstat/idxstats/stats, Qualimap gene body coverage) plus all fragmentomics features in one BAM pass and writes `<sample_id>.liquidqc.json` per sample. Schema is currently `0.5.0-stub`; v1 release bumps to `1.0.0`.
 
 The directory on disk is `cfqc/` but the crate, binary, and remote are all `liquidqc`. Don't "fix" this.
 
@@ -26,7 +26,11 @@ cargo clippy -- -D warnings
 # Tests (CI runs in --release on Ubuntu + macOS)
 cargo test
 cargo test --test integration_test          # R-reference numerical comparisons (inherited)
-cargo test --test phase0_cli                # CLI smoke tests for new subcommands
+cargo test --test phase0_cli                # CLI smoke tests for liquidqc subcommands
+cargo test --test phase1_envelope           # per-sample envelope shape + qc_flags
+cargo test --test phase2_fragmentomics      # Tier-1 fragmentomics blocks
+cargo test --test phase3_per_gene           # Tier-2 per-gene Parquet
+cargo test --test phase4_tier3              # Tier-3 cohort/identity add-ons
 cargo test test_<substring>                 # single test by name
 cargo test test_x -- --nocapture            # with stdout
 
@@ -42,17 +46,20 @@ Pure binary crate, no `lib.rs`. Top-level modules declared in `src/main.rs`; int
 
 ```
 src/
-  main.rs        — entry point, subcommand dispatch
-  cli.rs         — clap-derive CLI; Commands = { Rna, Dna, Schema, Version }
-  config.rs      — YAML config (mirrors CLI subcommand hierarchy under `rna:`)
-  cpu.rs         — SIMD CPU compat check (runs before any auto-vectorized code to prevent SIGILL)
-  io.rs          — gzip-transparent file reading (magic-byte detection)
-  gtf.rs         — GTF parser; auto-detects `gene_type` (GENCODE) vs `gene_biotype` (Ensembl)
-  citations.rs   — upstream tool versions for CITATIONS.md
-  summary.rs     — JSON summary writer (`liquidqc_summary.json`)
-  ui.rs          — terminal UI (verbosity, formatters)
-  rna/           — inherited single-pass pipeline; see AGENTS.md for the full submodule map
-schema/v1/liquidqc.schema.json   — v1 envelope schema (currently stub: 0.1.0-stub)
+  main.rs            — entry point, subcommand dispatch
+  cli.rs             — clap-derive CLI; Commands = { Rna, Dna, Schema, Version }
+  config.rs          — YAML config (mirrors CLI subcommand hierarchy under `rna:`)
+  cpu.rs             — SIMD CPU compat check (runs before any auto-vectorized code to prevent SIGILL)
+  io.rs              — gzip-transparent file reading (magic-byte detection)
+  gtf.rs             — GTF parser; auto-detects `gene_type` (GENCODE) vs `gene_biotype` (Ensembl)
+  citations.rs       — upstream tool versions for CITATIONS.md
+  envelope.rs        — v1 envelope (`SampleEnvelope`, `Filters`, per-tool views, builder/writer)
+  qc_flags.rs        — qc_flags rule engine (sample-level diagnostic flags)
+  hash.rs            — md5 helpers for `bam_md5` / `gtf_md5` / `reference_fasta_md5` provenance
+  runtime_stats.rs   — `peak_rss_mb` via getrusage (Linux/macOS unit handling)
+  ui.rs              — terminal UI (verbosity, formatters)
+  rna/               — inherited single-pass pipeline + fragmentomics; see AGENTS.md for the submodule map
+schema/v1/liquidqc.schema.json   — v1 envelope schema (currently 0.5.0-stub; bumps to 1.0.0 at v1 release)
 cpp/rng_shim.cpp                 — std::mt19937 + binomial shim for preseq bootstrap reproducibility
 ```
 
@@ -60,11 +67,11 @@ The `rna` subcommand processes BAM files in a single pass, sharing a read dispat
 
 ## liquidqc-specific contracts (v1)
 
-- **`--library-prep` is required and never silently defaults.** Pass `unknown` if truly unknown. This is enforced by clap (no default) and is part of the v1 contract — do not add a default value. Tests in `tests/phase0_cli.rs` assert this.
-- **`liquidqc dna` is reserved** — it's wired into the CLI but exits 1 in v1. v1 is cfRNA-only.
+- **`--library-prep` is required and never silently defaults.** Pass `unknown` if truly unknown. Enforced by clap (no default) and part of the v1 contract — do not add a default value. Asserted by tests in `tests/phase0_cli.rs`.
+- **`liquidqc dna` is reserved** — wired into the CLI but exits 1 in v1. v1 is cfRNA-only.
 - **`liquidqc schema`** prints the embedded `schema/v1/liquidqc.schema.json` to stdout (via `include_str!`).
-- **Phase 0 fragmentomics flags** (`--panels`, `--snp-panel`, `--min-gene-reads`, `--sample-id`) are parsed but inert. They become load-bearing in Phases 1–4 — don't remove them, but don't expect them to have effects yet either.
-- **Output filename:** `liquidqc_summary.json` (renamed from RustQC's summary). The v1 envelope is the single canonical per-sample output; sparse per-gene Parquet is the Tier-2 output (Phase 3).
+- **Output filenames:** `<sample_id>.liquidqc.json` (canonical per-sample envelope) and `<sample_id>.per_gene.parquet` (Tier-2 sparse per-gene rows, located/validated by the envelope's `per_gene` block). `sample_id` defaults to the BAM basename without extension; override with `--sample-id`. There is no run-level manifest.
+- **Fragmentomics CLI flags** (`--panels`, `--panels-tsv`, `--snp-panel`, `--min-gene-reads`, `--sample-id`, `--saturation-fractions`) are load-bearing — they gate Tier-1/2/3 outputs in the envelope.
 
 ## Numerical accuracy
 
