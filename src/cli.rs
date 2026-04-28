@@ -72,11 +72,40 @@ pub enum Commands {
     /// liquidqc is cfRNA-only; invoking this subcommand exits 1.
     Dna(DnaArgs),
 
+    /// Download pinned GTF annotations into the per-user cache.
+    ///
+    /// With no arguments, fetches every supported genome. Use `--list` to
+    /// see what would be fetched, or `--genome <NAME>` for a single
+    /// assembly. Already-cached files are skipped unless `--force` is
+    /// passed.
+    FetchReferences(FetchReferencesArgs),
+
     /// Print the v1 JSON schema (`schema/v1/liquidqc.schema.json`) to stdout.
     Schema,
 
     /// Print the version (with git short hash and build timestamp).
     Version,
+}
+
+/// Arguments for the `fetch-references` subcommand.
+#[derive(Parser, Debug)]
+pub struct FetchReferencesArgs {
+    /// Genome cache name to fetch (e.g. `GRCh38`, `GRCh37`). Omit to
+    /// fetch every supported genome.
+    #[arg(long, value_name = "NAME")]
+    pub genome: Option<String>,
+
+    /// Re-download even when the cache file already exists.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+
+    /// Print the table of pinned downloads and exit without fetching.
+    #[arg(long, default_value_t = false)]
+    pub list: bool,
+
+    /// Suppress progress messages.
+    #[arg(short = 'q', long, default_value_t = false)]
+    pub quiet: bool,
 }
 
 /// Arguments for the `dna` subcommand. Reserved; not implemented in v1.
@@ -104,7 +133,10 @@ pub struct RnaArgs {
     #[arg(value_name = "INPUT", num_args = 1.., required = true, help_heading = "Input / Output")]
     pub input: Vec<String>,
 
-    /// GTF gene annotation (plain or .gz)
+    /// GTF gene annotation (plain or .gz). If omitted, liquidqc
+    /// fingerprints the BAM's `@SQ` header and loads a cached GTF from
+    /// `${XDG_CACHE_HOME:-~/.cache}/liquidqc/gtf/` — see
+    /// `liquidqc fetch-references`.
     #[arg(
         short,
         long,
@@ -112,7 +144,7 @@ pub struct RnaArgs {
         env = "RUSTQC_GTF",
         help_heading = "Input / Output"
     )]
-    pub gtf: String,
+    pub gtf: Option<String>,
 
     /// Reference FASTA. Required for CRAM input; required for end-motif
     /// fragmentomics (Phase 2). Other QC features run without it.
@@ -168,9 +200,19 @@ pub struct RnaArgs {
     )]
     pub stranded: Option<Strandedness>,
 
-    /// Paired-end reads
-    #[arg(short, long, env = "RUSTQC_PAIRED", help_heading = "Library")]
+    /// Force paired-end interpretation (otherwise auto-detected).
+    #[arg(
+        short,
+        long,
+        env = "RUSTQC_PAIRED",
+        conflicts_with = "single_end",
+        help_heading = "Library"
+    )]
     pub paired: bool,
+
+    /// Force single-end interpretation.
+    #[arg(long = "single-end", help_heading = "Library")]
+    pub single_end: bool,
 
     // ── General ─────────────────────────────────────────────────────────
     /// Number of threads [default: 1]
@@ -538,9 +580,10 @@ mod tests {
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.input, vec!["test.bam"]);
-                assert_eq!(args.gtf, "genes.gtf");
+                assert_eq!(args.gtf.as_deref(), Some("genes.gtf"));
                 assert_eq!(args.stranded, None);
                 assert!(!args.paired);
+                assert!(!args.single_end);
                 assert_eq!(args.threads, 1);
                 assert_eq!(args.outdir, ".");
                 assert!(args.biotype_attribute.is_none());
@@ -571,7 +614,7 @@ mod tests {
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.input, vec!["a.bam", "b.bam", "c.bam"]);
-                assert_eq!(args.gtf, "genes.gtf");
+                assert_eq!(args.gtf.as_deref(), Some("genes.gtf"));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
@@ -602,7 +645,7 @@ mod tests {
         ]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.gtf, "genes.gtf");
+                assert_eq!(args.gtf.as_deref(), Some("genes.gtf"));
                 assert_eq!(args.stranded, Some(Strandedness::Reverse));
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
@@ -616,8 +659,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rna_missing_gtf() {
-        // --gtf is required, so omitting it should fail
+    fn test_rna_omitting_gtf_is_allowed_at_parse_time() {
+        // --gtf is now optional; resolution to a cache file (or a clear
+        // missing-cache error) happens at run time. Parse must succeed
+        // here; tests/phase0_cli covers the runtime behaviour.
         let result = Cli::try_parse_from([
             env!("CARGO_PKG_NAME"),
             "rna",
@@ -625,7 +670,26 @@ mod tests {
             "--library-prep",
             "unknown",
         ]);
-        assert!(result.is_err(), "Expected error when --gtf is not provided");
+        assert!(result.is_ok(), "Parse should succeed without --gtf");
+    }
+
+    #[test]
+    fn test_rna_paired_and_single_end_conflict() {
+        let result = Cli::try_parse_from([
+            env!("CARGO_PKG_NAME"),
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--library-prep",
+            "unknown",
+            "--paired",
+            "--single-end",
+        ]);
+        assert!(
+            result.is_err(),
+            "Expected error when both --paired and --single-end are passed"
+        );
     }
 
     #[test]

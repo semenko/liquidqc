@@ -467,6 +467,15 @@ pub fn format_count(n: u64) -> String {
     }
 }
 
+/// Format a byte count with binary IEC prefixes (KiB / MiB / GiB / TiB).
+pub fn format_bytes(n: u64) -> String {
+    use number_prefix::NumberPrefix;
+    match NumberPrefix::binary(n as f64) {
+        NumberPrefix::Standalone(b) => format!("{b} B"),
+        NumberPrefix::Prefixed(prefix, b) => format!("{b:.1} {prefix}B"),
+    }
+}
+
 /// Format a percentage string (e.g. "83.3%").
 pub fn format_pct(n: u64, total: u64) -> String {
     if total == 0 {

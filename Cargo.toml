@@ -73,6 +73,10 @@ serde_json = "1"
 arrow = "58"
 parquet = "58"
 
+# HTTP client for the `fetch-references` subcommand. rustls-tls so the
+# binary stays self-contained on Linux distros without OpenSSL.
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
+
 [build-dependencies]
 cc = "1"
 

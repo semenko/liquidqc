@@ -39,6 +39,10 @@ fn run_and_load_envelope(label: &str) -> serde_json::Value {
             "--library-prep",
             "unknown",
             "--skip-dup-check",
+            // Pin --stranded so the auto-detect pre-pass doesn't flip
+            // the value on the synthetic test BAM.
+            "--stranded",
+            "unstranded",
         ])
         .output()
         .expect("Failed to execute liquidqc rna");

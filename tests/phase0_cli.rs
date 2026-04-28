@@ -224,10 +224,90 @@ fn rna_help_lists_fragmentomics_flags() {
         "--snp-panel",
         "--min-gene-reads",
         "--fasta",
+        "--single-end",
     ] {
         assert!(
             stdout.contains(flag),
             "rna --help should mention {flag}, got:\n{stdout}"
         );
     }
+}
+
+#[test]
+fn rna_without_gtf_and_empty_cache_errors_clearly() {
+    // BAM is synthetic (chr1/chr2 of 20kb) so the genome fingerprint
+    // returns None — the error should mention `--gtf` and tell the user
+    // that auto-detection failed, surfacing `fetch-references` so they
+    // can populate the cache for a real genome.
+    let outdir =
+        std::env::temp_dir().join(format!("liquidqc-phase0-no-gtf-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outdir);
+    std::fs::create_dir_all(&outdir).unwrap();
+    let cache = std::env::temp_dir().join(format!(
+        "liquidqc-phase0-empty-cache-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&cache);
+    std::fs::create_dir_all(&cache).unwrap();
+
+    let out = Command::new(binary())
+        .args([
+            "rna",
+            "tests/data/test.bam",
+            "--outdir",
+            outdir.to_str().unwrap(),
+            "--library-prep",
+            "unknown",
+        ])
+        .env("LIQUIDQC_CACHE_DIR", cache.to_str().unwrap())
+        // Strip any inherited RUSTQC_GTF that would smuggle a default in.
+        .env_remove("RUSTQC_GTF")
+        .output()
+        .expect("Failed to execute liquidqc rna");
+
+    assert!(!out.status.success(), "expected non-zero exit");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--gtf") || stderr.contains("fetch-references"),
+        "Error should suggest --gtf or fetch-references, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn fetch_references_list_shows_pinned_genomes() {
+    let out = Command::new(binary())
+        .args(["fetch-references", "--list"])
+        .output()
+        .expect("Failed to execute liquidqc fetch-references --list");
+    assert!(
+        out.status.success(),
+        "fetch-references --list should exit 0; stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("GRCh38"),
+        "expected GRCh38 in --list output, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("https://"),
+        "expected an HTTPS URL in --list output, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn fetch_references_unknown_genome_fails_with_message() {
+    let out = Command::new(binary())
+        .args(["fetch-references", "--genome", "NotAGenome"])
+        .output()
+        .expect("Failed to execute liquidqc fetch-references");
+    assert!(
+        !out.status.success(),
+        "fetch-references with bogus --genome should fail"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unknown genome") || stderr.contains("NotAGenome"),
+        "Error should mention the unknown genome, got: {stderr:?}"
+    );
 }

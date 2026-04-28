@@ -14,11 +14,15 @@
 //! curves) and a versioned JSON+Parquet output schema (`schema/v1/`).
 //! Individual tools can be disabled via the YAML config file.
 
+mod auto_detect;
+mod cache;
 mod citations;
 mod cli;
 mod config;
 mod cpu;
 mod envelope;
+mod fetch_references;
+mod genome;
 mod gtf;
 mod hash;
 mod io;
@@ -69,6 +73,23 @@ fn main() -> Result<()> {
             eprintln!("liquidqc dna: not implemented in v1; planned");
             std::process::exit(1);
         }
+        cli::Commands::FetchReferences(args) => {
+            let genome_filter = match args.genome.as_deref() {
+                None => None,
+                Some(name) => match genome::KnownGenome::from_user_string(name) {
+                    Some(g) => Some(g),
+                    None => {
+                        eprintln!(
+                            "liquidqc fetch-references: unknown genome '{}'. \
+                             Run with --list to see supported names.",
+                            name
+                        );
+                        std::process::exit(2);
+                    }
+                },
+            };
+            return fetch_references::run(genome_filter, args.force, args.list, args.quiet);
+        }
         cli::Commands::Rna(_) => {}
     }
 
@@ -94,16 +115,60 @@ fn main() -> Result<()> {
 
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args, &ui),
-        // Schema/Version/Dna are handled before env_logger init above and
-        // early-return out of main(); reaching them here would be a bug.
-        cli::Commands::Schema | cli::Commands::Version | cli::Commands::Dna(_) => {
+        cli::Commands::Schema
+        | cli::Commands::Version
+        | cli::Commands::Dna(_)
+        | cli::Commands::FetchReferences(_) => {
             unreachable!("non-rna subcommands handled before this match")
         }
     }
 }
 
+/// Resolve `--gtf`: explicit path wins; otherwise look up a cached GTF
+/// by genome fingerprint. A fingerprint hit with no cached file (or a
+/// completely unrecognised assembly) is a hard error pointing at
+/// `liquidqc fetch-references`.
+fn resolve_gtf_path(
+    explicit: Option<&str>,
+    fp: &genome::GenomeFingerprint,
+    first_bam: &str,
+    ui: &Ui,
+) -> Result<String> {
+    if let Some(p) = explicit {
+        return Ok(p.to_string());
+    }
+    let g = fp.genome.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not auto-detect a known reference genome from BAM '{}' \
+             ({} @SQ records inspected). Pass --gtf <FILE> explicitly, or run \
+             `liquidqc fetch-references --list` to see supported genomes.",
+            first_bam,
+            fp.n_records,
+        )
+    })?;
+    let cached =
+        cache::lookup_gtf(g)?.ok_or_else(|| anyhow::anyhow!("{}", cache::missing_gtf_error(g)))?;
+    ui.detail(&format!(
+        "Auto-detected reference: {} ({} @SQ matches, {} naming)",
+        g.label(),
+        fp.winning_hit_count,
+        fp.chr_style,
+    ));
+    ui.detail(&format!("Using cached GTF: {}", cached.display()));
+    Ok(cached.to_string_lossy().into_owned())
+}
+
 /// Reconstruct the command line for the featureCounts-compatible header comment.
-fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
+///
+/// Records the *effective* `--gtf`, `--paired`, and `-s` values — what the
+/// run actually used — so the comment block is reproducible whether the
+/// user supplied them or liquidqc auto-detected them.
+fn reconstruct_command_line(
+    args: &cli::RnaArgs,
+    gtf_path: &str,
+    effective_paired: bool,
+    effective_stranded: cli::Strandedness,
+) -> String {
     let mut parts = vec![format!(
         "liquidqc rna {}",
         args.input
@@ -112,11 +177,9 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
             .collect::<Vec<_>>()
             .join(" "),
     )];
-    parts.push(format!("--gtf {}", shell_escape(&args.gtf)));
-    if let Some(s) = args.stranded {
-        parts.push(format!("-s {}", s));
-    }
-    if args.paired {
+    parts.push(format!("--gtf {}", shell_escape(gtf_path)));
+    parts.push(format!("-s {}", effective_stranded));
+    if effective_paired {
         parts.push("-p".to_string());
     }
     if args.threads != 1 {
@@ -277,6 +340,28 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         // Reader dropped — just validating the file is openable
     }
 
+    // Reject duplicate stems early — they would collide on output filenames.
+    if args.input.len() > 1 {
+        let mut seen_stems = HashSet::new();
+        for bam_path in &args.input {
+            let stem = Path::new(bam_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(bam_path);
+            anyhow::ensure!(
+                seen_stems.insert(stem.to_owned()),
+                "Duplicate BAM file stem '{}': multiple BAM files with the same \
+                 filename would produce conflicting output files. Rename or \
+                 reorganise input files so each has a unique filename.",
+                stem
+            );
+        }
+    }
+
+    let first_bam = &args.input[0];
+    let genome_fp = genome::fingerprint_bam(first_bam)?;
+    let gtf_path = resolve_gtf_path(args.gtf.as_deref(), &genome_fp, first_bam, ui)?;
+
     let start = Instant::now();
     let n_bams = args.input.len();
 
@@ -284,8 +369,8 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     // once and are shared across all BAMs; per-BAM MD5s are computed in
     // parallel before per-BAM processing starts.
     let gtf_md5 =
-        hash::md5_uncompressed(&args.gtf).with_context(|| format!("hashing GTF: {}", args.gtf))?;
-    let gtf_path_abs = absolutize(&args.gtf);
+        hash::md5_uncompressed(&gtf_path).with_context(|| format!("hashing GTF: {}", gtf_path))?;
+    let gtf_path_abs = absolutize(&gtf_path);
     let reference_fasta_md5 = match args.fasta {
         Some(ref p) => {
             Some(hash::md5(p).with_context(|| format!("hashing reference FASTA: {}", p))?)
@@ -334,12 +419,26 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         Some(&cpu_info),
     );
 
-    // Resolve effective stranded/paired early for display (config loaded above)
-    let effective_stranded = args
-        .stranded
-        .or(config.stranded)
-        .unwrap_or(cli::Strandedness::Unstranded);
-    let effective_paired = args.paired || config.paired.unwrap_or(false);
+    let (effective_paired, paired_auto) = match (args.paired, args.single_end, config.paired) {
+        (true, _, _) => (true, false),
+        (_, true, _) => (false, false),
+        (_, _, Some(p)) => (p, false),
+        _ => (
+            auto_detect::detect_paired(first_bam, auto_detect::PAIRED_SAMPLE_SIZE)?,
+            true,
+        ),
+    };
+    if paired_auto {
+        ui.detail(&format!(
+            "Auto-detected paired-end: {} (sampled up to {} reads from {})",
+            effective_paired,
+            auto_detect::PAIRED_SAMPLE_SIZE,
+            first_bam,
+        ));
+    }
+
+    // Strandedness needs the gene model; resolve below, after GTF parse.
+    let stranded_explicit = args.stranded.or(config.stranded);
 
     if n_bams == 1 {
         ui.config("Input", &args.input[0]);
@@ -349,12 +448,18 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
             ui.detail(&format!("  {f}"));
         }
     }
-    ui.config("Annotation", &args.gtf);
+    ui.config("Annotation", &gtf_path);
     if let Some(ref fasta) = args.fasta {
         ui.config("Reference", fasta);
     }
-    ui.config("Stranded", &effective_stranded.to_string());
-    ui.config("Paired", &effective_paired.to_string());
+    ui.config(
+        "Paired",
+        &format!(
+            "{}{}",
+            effective_paired,
+            if paired_auto { " (auto)" } else { "" },
+        ),
+    );
     ui.config("CPU Threads", &args.threads.to_string());
     let outdir_display = if std::path::Path::new(&args.outdir).is_relative() {
         format!("./{}", args.outdir)
@@ -375,7 +480,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     let need_biotype = config.any_biotype_output();
 
     // Detect biotype attributes in GTF
-    let gtf_path = &args.gtf;
+    let gtf_path = gtf_path.as_str();
     if need_biotype {
         // Check if the configured biotype attribute exists in the GTF.
         // If not found and the user didn't explicitly set it, try common alternatives:
@@ -510,26 +615,46 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
-    // Reconstruct command line for featureCounts-compatible header
-    let command_line = reconstruct_command_line(&args);
+    // `stranded_inferred` flags that the value came from the pre-pass
+    // (skips the post-run mismatch warning that only makes sense for an
+    // explicit --stranded).
+    let (effective_stranded, stranded_inferred) = match (stranded_explicit, gene_model.as_ref()) {
+        (Some(s), _) => (s, false),
+        (None, Some(model)) => match auto_detect::detect_strandedness(
+            first_bam,
+            model,
+            args.mapq_cut,
+            auto_detect::STRANDED_SAMPLE_SIZE,
+        )? {
+            Some(s) => {
+                ui.detail(&format!(
+                    "Auto-detected strandedness: {} (sampled from {})",
+                    s, first_bam
+                ));
+                (s, true)
+            }
+            None => {
+                ui.warn(
+                    "Could not determine strandedness from a pre-pass sample; \
+                     defaulting to unstranded. Pass --stranded to override.",
+                );
+                (cli::Strandedness::Unstranded, false)
+            }
+        },
+        (None, None) => (cli::Strandedness::Unstranded, false),
+    };
+    ui.config(
+        "Stranded",
+        &format!(
+            "{}{}",
+            effective_stranded,
+            if stranded_inferred { " (auto)" } else { "" },
+        ),
+    );
 
-    // Validate that input file stems are unique (otherwise outputs would collide).
-    if n_bams > 1 {
-        let mut seen_stems = HashSet::new();
-        for bam_path in &args.input {
-            let stem = Path::new(bam_path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(bam_path);
-            anyhow::ensure!(
-                seen_stems.insert(stem.to_owned()),
-                "Duplicate BAM file stem '{}': multiple BAM files with the same \
-                 filename would produce conflicting output files. Rename or \
-                 reorganise input files so each has a unique filename.",
-                stem
-            );
-        }
-    }
+    // Reconstruct command line for featureCounts-compatible header
+    let command_line =
+        reconstruct_command_line(&args, gtf_path, effective_paired, effective_stranded);
 
     // Determine thread allocation for parallel BAM processing.
     // When processing multiple BAMs, we run BAMs in parallel and divide threads
@@ -604,7 +729,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         tin_index: tin_index.as_ref(),
         tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
-        gtf_path: &args.gtf,
+        gtf_path,
         gtf_path_abs: &gtf_path_abs,
         gtf_md5: &gtf_md5,
         reference_fasta_md5: reference_fasta_md5.as_deref(),
@@ -694,34 +819,39 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     )?;
     ui.output_item("Citations", &citations_path.display().to_string());
 
-    // Check for strandedness mismatch between user-specified and inferred values
-    for (bam_path, result) in &bam_results {
-        if let Ok(bam_result) = result {
-            if let Some(ref ie_result) = bam_result.infer_experiment {
-                if let Some((inferred, suggestion)) =
-                    rna::rseqc::infer_experiment::check_strandedness_mismatch(
-                        ie_result,
-                        effective_stranded,
-                    )
-                {
-                    let bam_name = Path::new(bam_path)
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(bam_path);
-                    let line1 = "Strandedness mismatch detected!".to_string();
-                    let line2 = format!(
-                        "{} - you specified '--stranded {}' but infer_experiment suggests '{}'",
-                        bam_name, effective_stranded, inferred,
-                    );
-                    let line3 = format!(
-                        "(forward fraction: {:.4}, reverse fraction: {:.4})",
-                        ie_result.frac_protocol1, ie_result.frac_protocol2,
-                    );
-                    let line4 = format!("Consider re-running with '--stranded {}'", suggestion,);
-                    ui.blank();
-                    ui.warn_box(&[&line1, &line2, &line3, &line4]);
-                }
-            }
+    // Skip the mismatch check when liquidqc inferred --stranded itself:
+    // the value already matches the BAM by construction.
+    if !stranded_inferred {
+        for (bam_path, result) in &bam_results {
+            let Ok(bam_result) = result else { continue };
+            let Some(ie_result) = bam_result.infer_experiment.as_ref() else {
+                continue;
+            };
+            let Some((inferred, suggestion)) =
+                rna::rseqc::infer_experiment::check_strandedness_mismatch(
+                    ie_result,
+                    effective_stranded,
+                )
+            else {
+                continue;
+            };
+            let bam_name = Path::new(bam_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(bam_path);
+            ui.blank();
+            ui.warn_box(&[
+                "Strandedness mismatch detected!",
+                &format!(
+                    "{} - you specified '--stranded {}' but infer_experiment suggests '{}'",
+                    bam_name, effective_stranded, inferred,
+                ),
+                &format!(
+                    "(forward fraction: {:.4}, reverse fraction: {:.4})",
+                    ie_result.frac_protocol1, ie_result.frac_protocol2,
+                ),
+                &format!("Consider re-running with '--stranded {}'", suggestion),
+            ]);
         }
     }
 
@@ -1439,21 +1569,9 @@ fn process_single_bam(
         ui.detail("No RSeQC tools enabled, skipping");
         RseqcAccumulators::empty()
     });
-    // Extract BAM header info (reference names + lengths) for samtools-compatible outputs
-    let bam_header_refs = {
-        let reader = rust_htslib::bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM for header: {}", bam_path))?;
-        let header = reader.header();
-        (0..header.target_count())
-            .map(|tid| {
-                let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
-                let len = header.target_len(tid).unwrap_or(0);
-                (name, len)
-            })
-            .collect::<Vec<(String, u64)>>()
-    };
-    // Finalize Phase 4 chrom_metrics now that `bam_header_refs` is in scope
-    // (chrom_metrics resolves tid → contig name from this slice).
+    let bam_header_refs = genome::read_bam_refs(bam_path)?;
+    // chrom_metrics resolves tid → contig name from this slice; finalize
+    // here so the slice is in scope for the RSeQC writer below.
     let chrom_metrics_result = chrom_metrics_accum.map(|cm| cm.into_result(&bam_header_refs));
 
     let rseqc_outputs = write_rseqc_outputs(

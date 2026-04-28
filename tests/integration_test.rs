@@ -54,6 +54,10 @@ fn run_liquidqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::pr
         // liquidqc v1: required, never silently defaulted (Phase 0 contract)
         "--library-prep",
         "unknown",
+        // Pin strandedness so the auto-detect pre-pass doesn't shift
+        // counts on the synthetic test BAM.
+        "--stranded",
+        "unstranded",
     ];
     if skip_dup_check {
         args.push("--skip-dup-check");
@@ -85,6 +89,8 @@ fn run_liquidqc_custom(
         threads.to_string(),
         "--library-prep".to_string(),
         "unknown".to_string(),
+        "--stranded".to_string(),
+        "unstranded".to_string(),
     ];
     if skip_dup_check {
         args.push("--skip-dup-check".to_string());
@@ -214,6 +220,8 @@ fn run_liquidqc_flat(outdir: &str) -> std::process::Output {
             "unknown",
             "--skip-dup-check",
             "--flat-output",
+            "--stranded",
+            "unstranded",
         ])
         .output()
         .expect("Failed to execute liquidqc")
@@ -287,6 +295,8 @@ fn run_liquidqc_multi(outdir: &str) -> std::process::Output {
             "--library-prep",
             "unknown",
             "--skip-dup-check",
+            "--stranded",
+            "unstranded",
         ])
         .output()
         .expect("Failed to execute liquidqc")
