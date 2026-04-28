@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **liquidqc** is a hard fork of [seqeralabs/RustQC](https://github.com/seqeralabs/RustQC) extended into a single-pass cfRNA QC + fragmentomics tool. Binary crate (`liquidqc`), Rust edition 2021, GPL-3.0-or-later, MSRV 1.87.
 
-Tier-1 (sample-level fragmentomics), Tier-2 (per-gene sparse Parquet), and Tier-3 (cohort QC + sample-identity add-ons) are all wired and emit into the v1 envelope. The inherited `rna` subcommand runs the full classical RNA-seq QC pipeline (dupRadar, featureCounts, 8 RSeQC tools, preseq, samtools-compatible flagstat/idxstats/stats, Qualimap gene body coverage) plus all fragmentomics features in one BAM pass and writes `<sample_id>.liquidqc.json` per sample. Schema is currently `0.5.0-stub`; v1 release bumps to `1.0.0`.
+Tier-1 (sample-level fragmentomics), Tier-2 (per-gene sparse Parquet), and Tier-3 (cohort QC + sample-identity add-ons) are all wired and emit into the v1 envelope. The inherited `rna` subcommand runs the full classical RNA-seq QC pipeline (dupRadar, featureCounts, 8 RSeQC tools, preseq, samtools-compatible flagstat/idxstats/stats, Qualimap gene body coverage) plus all fragmentomics features in one BAM pass and writes `<sample_id>.liquidqc.json` per sample. Schema is `1.0.0` (v1 stable).
 
 The directory on disk is `cfqc/` but the crate, binary, and remote are all `liquidqc`. Don't "fix" this.
 
@@ -59,7 +59,7 @@ src/
   runtime_stats.rs   — `peak_rss_mb` via getrusage (Linux/macOS unit handling)
   ui.rs              — terminal UI (verbosity, formatters)
   rna/               — inherited single-pass pipeline + fragmentomics; see AGENTS.md for the submodule map
-schema/v1/liquidqc.schema.json   — v1 envelope schema (currently 0.5.0-stub; bumps to 1.0.0 at v1 release)
+schema/v1/liquidqc.schema.json   — v1 envelope schema (1.0.0)
 cpp/rng_shim.cpp                 — std::mt19937 + binomial shim for preseq bootstrap reproducibility
 ```
 

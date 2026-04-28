@@ -48,7 +48,7 @@ use crate::rna::splice_dinuc::SpliceSiteDinucleotidesResult;
 ///
 /// Must equal the `schema_version` example string in
 /// `schema/v1/liquidqc.schema.json`. Bump together when the wire format changes.
-pub const SCHEMA_VERSION: &str = "0.5.0-stub";
+pub const SCHEMA_VERSION: &str = "1.0.0";
 
 /// QC flag identifiers (must match the `qc_flags` enum in
 /// `schema/v1/liquidqc.schema.json`). Phase 2 sets the four below; later

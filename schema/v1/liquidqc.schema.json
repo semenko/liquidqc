@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/semenko/liquidqc/schema/v1/liquidqc.schema.json",
-  "title": "liquidqc fragmentomics output (v1, Phase 4)",
+  "title": "liquidqc fragmentomics output (v1.0.0)",
   "description": "Per-sample JSON envelope emitted by `liquidqc rna`. Always-present envelope fields are required; the four Phase 2 fragmentomics blocks (fragment_length, end_motifs, soft_clips, periodicity), the Phase 3 `per_gene` reference block, and the Phase 4 Tier-3 add-ons (`adapter_readthrough_rate`, `splice_site_dinucleotides`, `per_chromosome`, `gene_class_fractions`, `panels`, `sex_inference`, `snp_fingerprint`, `saturation`, `cycle_quality`) are optional and follow the schemas defined here. Companion sparse Parquet (`<sample_id>.per_gene.parquet`) holds Tier-2 per-gene rows; the `per_gene` block in this envelope locates and validates it.",
   "type": "object",
   "required": [
@@ -32,13 +32,13 @@
     "extractor_version": {
       "type": "string",
       "description": "liquidqc package version (Cargo.toml).",
-      "examples": ["0.1.0"]
+      "examples": ["1.0.0"]
     },
     "schema_version": {
       "type": "string",
-      "description": "Semver for this schema. The v1 release will bump to `1.0.0`. See CHANGELOG.md for per-version notes.",
+      "description": "Semver for this schema. v1.0.0 is the first stable release. See CHANGELOG.md for per-version notes.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
-      "examples": ["0.2.0-stub", "0.3.0-stub", "0.4.0-stub", "0.5.0-stub", "1.0.0"]
+      "examples": ["1.0.0"]
     },
     "git_commit": {
       "type": "string",

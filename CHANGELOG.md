@@ -1,6 +1,15 @@
 # liquidqc Changelog
 
-## [Unreleased] — bug-fix pass — 2026-04-27
+## [Version 1.0.0] - 2026-04-28
+
+First stable release. Schema bumped to `1.0.0`. cfRNA-only (the `dna`
+subcommand is still reserved and exits 1).
+
+### Schema 1.0.0
+
+- Schema is now `1.0.0` (previously `0.5.0-stub`). The wire format is
+  unchanged from the final stub; the bump marks the v1 stability
+  contract.
 
 ### Schema 0.5.0-stub (breaking rename)
 
@@ -40,9 +49,7 @@
   appropriate. Inherited internal doc-comments and source-file headers
   left intact.
 
-## [Unreleased] — Phase 1 (per-sample envelope) — 2026-04-26
-
-### v1 envelope wiring
+### Phase 1 — v1 envelope wiring
 
 - The canonical per-sample output is now `<sample_id>.liquidqc.json`,
   written into `--outdir` for every BAM processed. The envelope follows
@@ -77,7 +84,7 @@
   can read them. No external behavior change for inherited TSV/text/PNG
   outputs.
 
-### Removed (Phase 0 → Phase 1, breaking)
+### Phase 1 — removed (Phase 0 → Phase 1, breaking)
 
 - The legacy per-run `liquidqc_summary.json` writer and the
   `--json-summary` / `RUSTQC_JSON_SUMMARY` flag. Per-sample envelopes
@@ -87,7 +94,7 @@
 - `src/summary.rs` (RunSummary / InputSummary / CountingSummary /
   DupradarSummary / OutputFile structs) — superseded by `src/envelope.rs`.
 
-### Tests
+### Phase 1 — tests
 
 - Added `tests/phase1_envelope.rs` with smoke tests for envelope shape,
   QC-flag wiring, and metric-block presence on the inherited test BAM.
@@ -96,13 +103,13 @@
 - All inherited R-parity tests (`tests/integration_test.rs`) continue
   to pass byte-for-byte.
 
-### Build
+### Phase 1 — build
 
 - Added direct `md-5 = "0.10"` and `libc = "0.2"` dependencies. Enabled
   the `serde` feature on `indexmap` so biotype-keyed maps serialize
   cleanly.
 
-## [0.1.0-bootstrap (Phase 0)] — 2026-04-26
+## [Version 0.1.0-bootstrap] - 2026-04-26
 
 ### Project
 

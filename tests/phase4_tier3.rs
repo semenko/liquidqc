@@ -78,12 +78,12 @@ fn qc_flags(env: &serde_json::Value) -> Vec<&str> {
 }
 
 #[test]
-fn schema_version_is_phase4_stub() {
+fn schema_version_is_v1() {
     let (env, _) = run_with(
         &["--library-prep", "unknown", "--min-gene-reads", "1"],
         "schema-version",
     );
-    assert_eq!(env["schema_version"].as_str(), Some("0.5.0-stub"));
+    assert_eq!(env["schema_version"].as_str(), Some("1.0.0"));
 }
 
 #[test]

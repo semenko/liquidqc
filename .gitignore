@@ -46,3 +46,9 @@ __pycache__/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 tests/qualimap_ref/
+
+# Local sample BAMs / indexes — must never be committed or packaged.
+*.bam
+*.bai
+*.cram
+*.crai

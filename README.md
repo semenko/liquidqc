@@ -34,8 +34,7 @@ to the upstream tools.
   sample, with provenance hashes (`bam_md5`, `gtf_md5`, `reference_fasta_md5`),
   filter parameters, and a `qc_flags` rule engine. Companion
   `<sample_id>.per_gene.parquet` holds Tier-2 per-gene rows. Schema published
-  as JSON Schema 2020-12 at `schema/v1/liquidqc.schema.json` (currently
-  `0.5.0-stub`).
+  as JSON Schema 2020-12 at `schema/v1/liquidqc.schema.json` (`1.0.0`).
 - **MultiQC-compatible legacy outputs.** Inherited per-tool TSV/text/PNG files
   remain identical to the upstream tools and parse cleanly in
   [MultiQC](https://multiqc.info/).
