@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/public/liquidqc-logo.svg" alt="liquidqc logo" width="180" />
+</p>
+
 # liquidqc
 
 **Single-pass cfRNA QC + fragmentomics in Rust.**
